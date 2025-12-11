@@ -1,0 +1,143 @@
+{
+  "name": "loco-agent",
+  "displayName": "LOCO Agent",
+  "publisher": "veeresh",
+  "version": "0.1.0",
+  "description": "LOCO Agent — hybrid local + cloud AI assistant for VS Code",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./out/extension.js",
+  "icon": "media/loco-agent-colored-128x128.png",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "build:webview": "esbuild src/ui/webview/index.tsx --bundle --outfile=dist/webview.js --platform=browser --minify --sourcemap",
+    "prepack": "npm run compile && npm run build:webview",
+    "test": "jest --config jest.config.js --runInBand",
+    "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx'",
+    "package": "npx vsce package"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.19.25",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "esbuild": "^0.27.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "axios": "^1.5.0",
+    "express": "^4.18.2",
+    "node-diff3": "^1.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "loco.start",
+        "title": "LOCO: Run Agent"
+      },
+      {
+        "command": "loco.openWebview",
+        "title": "LOCO: Open Assistant"
+      },
+      {
+        "command": "loco.openSettings",
+        "title": "LOCO: Open Settings"
+      },
+      {
+        "command": "loco.openChat",
+        "title": "LOCO: Open Chat Panel"
+      },
+      {
+        "command": "loco.setLocalEndpoint",
+        "title": "LOCO: Set Local Endpoint"
+      },
+      {
+        "command": "loco.clearLocalEndpoint",
+        "title": "LOCO: Clear Local Endpoint"
+      },
+      {
+        "command": "loco.viewHistory",
+        "title": "LOCO: View History"
+      },
+      {
+        "command": "loco.exportHistory",
+        "title": "LOCO: Export History"
+      },
+      {
+        "command": "loco.clearHistory",
+        "title": "LOCO: Clear History"
+      },
+      {
+        "command": "loco.acceptInlineSuggestion",
+        "title": "LOCO: Accept Inline Suggestion"
+      },
+      {
+        "command": "loco.nextInlineSuggestion",
+        "title": "LOCO: Next Inline Suggestion"
+      }
+    ],
+    "configuration": {
+      "title": "LOCO Agent",
+      "properties": {
+        "locoAgent.provider": {
+          "type": "string",
+          "default": "local",
+          "description": "Default provider for completions and chat (local, openai, azure, ollama, gpt4all)"
+        },
+        "locoAgent.model": {
+          "type": "string",
+          "default": "llama2",
+          "description": "Model name for local agent (e.g., llama2, mistral, gpt4all)"
+        },
+        "locoAgent.prompt": {
+          "type": "string",
+          "default": "You are a helpful coding assistant.",
+          "description": "System prompt for agent behavior"
+        },
+        "locoAgent.endpoint": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Endpoint for local/remote provider"
+        },
+        "locoAgent.localPorts": {
+          "type": "array",
+          "items": { "type": "number" },
+          "default": [9000, 9001, 8080, 7860, 5005],
+          "description": "List of local ports to probe when auto-detecting a local provider"
+        },
+        "locoAgent.storeHistory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Store recent LOCO chat/history locally in extension state"
+        },
+        "locoAgent.pruneOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prune stored history older than configured days on extension activation"
+        },
+        "locoAgent.pruneDays": {
+          "type": "number",
+          "default": 30,
+          "description": "Number of days of history to retain when pruning"
+        },
+        "locoAgent.maxHistoryEntries": {
+          "type": "number",
+          "default": 1000,
+          "description": "Maximum number of history entries to retain when pruning"
+        },
+        "locoAgent.autoApplyPatches": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically apply code patches if safe"
+        }
+      }
+    }
+  }
+}
