@@ -2,7 +2,7 @@ name: Quality Gates
 
 on:
   pull_request:
-    branches: [main, ci/automated-quality-gates, feat/safe-patch-preview-rollback]
+    branches: [main, ci/automated-quality-gates, feat/safe-patch-preview-rollback, feat/real-streaming-provider-tests]
     types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
