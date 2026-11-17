@@ -31,13 +31,14 @@ export class SidebarChatProvider implements vscode.WebviewViewProvider {
       webviewView.webview.postMessage({ type: 'typing', value: true });
       try {
         const editor = vscode.window.activeTextEditor;
-        const reply = await this.agent.runTask({
+        webviewView.webview.postMessage({ type: 'stream-start' });
+        await this.agent.askStream({
           prompt,
           context: 'chat',
           filePath: editor?.document.uri.fsPath,
           code: editor?.document.getText(editor.selection) || editor?.document.getText()
-        });
-        webviewView.webview.postMessage({ type: 'reply', value: reply });
+        }, chunk => webviewView.webview.postMessage({ type: 'stream-chunk', value: chunk }));
+        webviewView.webview.postMessage({ type: 'stream-end' });
       } catch (error) {
         webviewView.webview.postMessage({
           type: 'reply',
@@ -205,6 +206,7 @@ export class SidebarChatProvider implements vscode.WebviewViewProvider {
           const input = document.getElementById('input');
           const send = document.getElementById('send');
           const typing = document.getElementById('typing');
+          let streamingNode = null;
 
           function appendMessage(role, text) {
             const node = document.createElement('div');
@@ -244,6 +246,35 @@ export class SidebarChatProvider implements vscode.WebviewViewProvider {
 
             if (message.type === 'reply') {
               appendMessage('agent', String(message.value ?? ''));
+              return;
+            }
+
+            if (message.type === 'stream-start') {
+              streamingNode = document.createElement('div');
+              streamingNode.className = 'message agent';
+              streamingNode.textContent = '';
+              messages.appendChild(streamingNode);
+              messages.scrollTop = messages.scrollHeight;
+              return;
+            }
+
+            if (message.type === 'stream-chunk' && streamingNode) {
+              streamingNode.textContent += String(message.value ?? '');
+              messages.scrollTop = messages.scrollHeight;
+              return;
+            }
+
+            if (message.type === 'stream-end') {
+              if (streamingNode && !streamingNode.textContent) streamingNode.textContent = 'No response received.';
+              streamingNode = null;
+              return;
+            }
+
+            if (message.type === 'stream-error') {
+              const errorText = String(message.value ?? 'LOCO could not complete the request.');
+              if (streamingNode) streamingNode.textContent += (streamingNode.textContent ? '\\n\\n' : '') + errorText;
+              else appendMessage('agent', errorText);
+              streamingNode = null;
             }
           });
         </script>
