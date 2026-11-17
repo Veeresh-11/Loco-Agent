@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { TextDecoder } from 'util';
 import { LOCOAgent } from './core/locoAgent';
 import { clearHistory, getAllHistory, pruneHistory } from './utils/historyStore';
 import { SidebarChatProvider } from './ui/webview';
@@ -133,6 +134,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!editor) {
         vscode.window.showWarningMessage('Open the target file in the editor before previewing a patch.');
         return;
+      }
+      if (editor.document.isDirty) {
+        const saveChoice = await vscode.window.showWarningMessage(
+          'Save the active file before generating a patch preview?',
+          { modal: true },
+          'Save and Continue'
+        );
+        if (saveChoice !== 'Save and Continue') return;
+        const saved = await editor.document.save();
+        if (!saved) return;
       }
       const selected = await vscode.window.showOpenDialog({
         canSelectMany: false,
