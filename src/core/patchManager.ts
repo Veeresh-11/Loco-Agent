@@ -84,7 +84,7 @@ export class PatchManager {
       const target = await this.resolveTarget(record.targetPath);
       const backupRoot = await fs.promises.realpath(this.context.globalStorageUri.fsPath);
       const backupPath = await fs.promises.realpath(record.backupPath);
-      if (!this.isWithin(backupRoot, backupPath)) {
+      if (!isPathWithinWorkspace(backupRoot, backupPath)) {
         return 'Restore rejected: backup is outside LOCO extension storage.';
       }
 
