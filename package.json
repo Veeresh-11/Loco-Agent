@@ -28,7 +28,8 @@
     "onCommand:loco.openAssistant",
     "onCommand:loco.openSettings",
     "onView:locoAgent.chatView",
-    "onCommand:loco.restorePatchBackup"
+    "onCommand:loco.restorePatchBackup",
+    "onCommand:loco.previewPatchFromFile"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -94,6 +95,10 @@
       {
         "command": "loco.restorePatchBackup",
         "title": "LOCO: Restore Patch Backup"
+      },
+      {
+        "command": "loco.previewPatchFromFile",
+        "title": "LOCO: Preview Patch from File"
       }
     ],
     "configuration": {
