@@ -23,12 +23,14 @@ export interface AgentTask {
 export class LOCOAgent {
   private readonly providerManager: ProviderManager;
   private readonly ragEngine: RAGEngine;
-  private readonly jobQueue: JobQueue<AgentTask>;\n  private readonly patchManager: PatchManager;
+  private readonly jobQueue: JobQueue<AgentTask>;
+  private readonly patchManager: PatchManager;
   private readonly execFile = util.promisify(cp.execFile);
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
     this.providerManager = new ProviderManager(context);
-    this.ragEngine = new RAGEngine();\n    this.patchManager = new PatchManager(context);
+    this.ragEngine = new RAGEngine();
+    this.patchManager = new PatchManager(context);
     const configuredConcurrency = vscode.workspace.getConfiguration('locoAgent').get<number>('maxConcurrency', 2);
     this.jobQueue = new JobQueue<AgentTask>(Math.min(16, Math.max(1, Math.floor(configuredConcurrency))));
   }
