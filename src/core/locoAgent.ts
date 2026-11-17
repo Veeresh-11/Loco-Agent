@@ -30,7 +30,7 @@ export class LOCOAgent {
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
     this.providerManager = new ProviderManager(context);
     this.ragEngine = new RAGEngine();
-    this.patchManager = new PatchManager(context);
+    this.patchManager = new PatchManager(context, output);
     const configuredConcurrency = vscode.workspace.getConfiguration('locoAgent').get<number>('maxConcurrency', 2);
     this.jobQueue = new JobQueue<AgentTask>(Math.min(16, Math.max(1, Math.floor(configuredConcurrency))));
   }
