@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { getRecentHistory } from '../utils/historyStore';
 import { getLocalChatRoutes, getLocalProbePaths, normalizeLocalEndpoint } from './localEndpoint';
-import { consumeModelStream } from './streaming';
+import { fetchModelStream } from './streaming';
 
 const DEFAULT_LOCAL_PORTS = [9000, 9001, 8080, 7860, 5005, 11434, 8000, 4891];
 const PROBE_TIMEOUT_MS = 700;
@@ -60,13 +60,19 @@ export class LocalProvider {
         const body = route.format === 'ollama-generate'
           ? { model, prompt, stream: true }
           : { model, messages: [{ role: 'user', content: prompt }], stream: true };
-        const response = await this.request(endpoint, route.path, body);
-        if (!response.ok) {
-          failures.push(`${route.path}: HTTP ${response.status}`);
-          continue;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60_000);
+        try {
+          await fetchModelStream(`${normalizeLocalEndpoint(endpoint)}${route.path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/x-ndjson' },
+            body: JSON.stringify(body),
+            signal: controller.signal
+          }, route.format === 'openai' ? 'openai-sse' : 'ollama-ndjson', onChunk);
+          return;
+        } finally {
+          clearTimeout(timeout);
         }
-        await consumeModelStream(response, route.format === 'openai' ? 'openai-sse' : 'ollama-ndjson', onChunk);
-        return;
       } catch (error) {
         failures.push(`${route.path}: ${error instanceof Error ? error.message : String(error)}`);
       }
