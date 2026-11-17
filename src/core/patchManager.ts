@@ -152,6 +152,7 @@ export class PatchManager {
     if (bytes.includes(0)) throw new Error('Binary files are not supported by patch preview.');
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(realTarget));
+    if (document.isDirty) throw new Error('Save the target file before previewing a patch so the diff matches the on-disk content.');
 
     return {
       path: realTarget,
