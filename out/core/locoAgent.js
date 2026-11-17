@@ -54,7 +54,8 @@ class LOCOAgent {
         this.output = output;
         this.providerManager = new providerManager_1.ProviderManager(context);
         this.ragEngine = new ragEngine_1.RAGEngine();
-        this.jobQueue = new jobQueue_1.JobQueue(2);
+        const configuredConcurrency = vscode.workspace.getConfiguration('locoAgent').get('maxConcurrency', 2);
+        this.jobQueue = new jobQueue_1.JobQueue(Math.min(16, Math.max(1, Math.floor(configuredConcurrency))));
     }
     async runTask(task) {
         const normalizedTask = {

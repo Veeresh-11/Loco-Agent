@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CloudProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const secrets_1 = require("../utils/secrets");
+const responseParser_1 = require("./responseParser");
 class CloudProvider {
     context;
     constructor(context) {
@@ -69,9 +70,8 @@ class CloudProvider {
                 const details = (await response.text()).slice(0, 500);
                 throw new Error(`OpenAI-compatible request failed (${response.status}): ${details}`);
             }
-            const json = await response.json();
-            const content = json?.choices?.[0]?.message?.content ?? json?.output_text;
-            if (typeof content !== 'string' || !content.trim())
+            const content = (0, responseParser_1.parseOpenAICompatibleResponse)(await response.json());
+            if (!content)
                 throw new Error('Cloud provider returned an empty response.');
             return content;
         }

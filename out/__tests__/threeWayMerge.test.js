@@ -9,6 +9,15 @@ describe('Three-Way Merge', () => {
             remote: 'a\nb\ny',
         });
         expect(result.conflicts).toBe(0);
+        expect(result.merged).toBe('a\nx\ny');
+    });
+    test('applies local-only changes', () => {
+        const result = (0, threeWayMerge_apply_1.applyThreeWayMerge)({ base: 'a\nb', local: 'a\nlocal', remote: 'a\nb' });
+        expect(result).toEqual({ merged: 'a\nlocal', conflicts: 0 });
+    });
+    test('applies remote-only changes', () => {
+        const result = (0, threeWayMerge_apply_1.applyThreeWayMerge)({ base: 'a\nb', local: 'a\nb', remote: 'a\nremote' });
+        expect(result).toEqual({ merged: 'a\nremote', conflicts: 0 });
     });
     test('detects conflicts', () => {
         const result = (0, threeWayMerge_apply_1.applyThreeWayMerge)({
@@ -56,6 +65,22 @@ describe('Three-Way Merge', () => {
         });
         expect(result.conflicts).toBe(0);
         expect(result.merged).toBe('before\ninserted\nupdated\nafter');
+    });
+    test('merges additions and removals on both sides', () => {
+        const result = (0, threeWayMerge_apply_1.applyThreeWayMerge)({
+            base: 'keep\nremove-local\nremove-remote\nend',
+            local: 'keep\nlocal-add\nremove-remote\nend',
+            remote: 'keep\nremove-local\nremote-add\nend'
+        });
+        expect(result.conflicts).toBe(0);
+        expect(result.merged).toBe('keep\nlocal-add\nremote-add\nend');
+    });
+    test('merges independent additions from an empty base', () => {
+        const result = (0, threeWayMerge_apply_1.applyThreeWayMerge)({ base: '', local: 'local line', remote: 'remote line' });
+        expect(result.conflicts).toBe(1);
+        expect(result.merged).toContain('<<<<<<< LOCAL');
+        expect(result.merged).toContain('local line');
+        expect(result.merged).toContain('remote line');
     });
 });
 //# sourceMappingURL=threeWayMerge.test.js.map

@@ -1,5 +1,25 @@
 import { RoutingPolicy } from '../core/routingPolicy';
 import { JobQueue } from '../core/jobQueue';
+import { parseOpenAICompatibleResponse } from '../providers/responseParser';
+
+describe('OpenAI-compatible response parsing', () => {
+  test('parses chat completion string content', () => {
+    expect(parseOpenAICompatibleResponse({
+      choices: [{ message: { content: '  Parsed answer  ' } }]
+    })).toBe('Parsed answer');
+  });
+
+  test('parses multipart text content and ignores non-text parts', () => {
+    expect(parseOpenAICompatibleResponse({
+      choices: [{ message: { content: [{ type: 'text', text: 'First ' }, { type: 'image' }, { type: 'text', text: 'second' }] } }]
+    })).toBe('First second');
+  });
+
+  test('returns an empty result for malformed payloads', () => {
+    expect(parseOpenAICompatibleResponse({ choices: [] })).toBe('');
+    expect(parseOpenAICompatibleResponse(null)).toBe('');
+  });
+});
 
 describe('Provider routing', () => {
   const routing = new RoutingPolicy();

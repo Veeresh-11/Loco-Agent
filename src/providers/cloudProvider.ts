@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Secrets } from '../utils/secrets';
+import { parseOpenAICompatibleResponse } from './responseParser';
 
 export interface CloudRequestOptions {
   model?: string;
@@ -42,9 +43,8 @@ export class CloudProvider {
         throw new Error(`OpenAI-compatible request failed (${response.status}): ${details}`);
       }
 
-      const json = await response.json() as any;
-      const content = json?.choices?.[0]?.message?.content ?? json?.output_text;
-      if (typeof content !== 'string' || !content.trim()) throw new Error('Cloud provider returned an empty response.');
+      const content = parseOpenAICompatibleResponse(await response.json());
+      if (!content) throw new Error('Cloud provider returned an empty response.');
       return content;
     } catch (error) {
       throw error instanceof Error ? error : new Error(`Cloud provider error: ${String(error)}`);

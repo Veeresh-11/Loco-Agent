@@ -2,6 +2,23 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const routingPolicy_1 = require("../core/routingPolicy");
 const jobQueue_1 = require("../core/jobQueue");
+const responseParser_1 = require("../providers/responseParser");
+describe('OpenAI-compatible response parsing', () => {
+    test('parses chat completion string content', () => {
+        expect((0, responseParser_1.parseOpenAICompatibleResponse)({
+            choices: [{ message: { content: '  Parsed answer  ' } }]
+        })).toBe('Parsed answer');
+    });
+    test('parses multipart text content and ignores non-text parts', () => {
+        expect((0, responseParser_1.parseOpenAICompatibleResponse)({
+            choices: [{ message: { content: [{ type: 'text', text: 'First ' }, { type: 'image' }, { type: 'text', text: 'second' }] } }]
+        })).toBe('First second');
+    });
+    test('returns an empty result for malformed payloads', () => {
+        expect((0, responseParser_1.parseOpenAICompatibleResponse)({ choices: [] })).toBe('');
+        expect((0, responseParser_1.parseOpenAICompatibleResponse)(null)).toBe('');
+    });
+});
 describe('Provider routing', () => {
     const routing = new routingPolicy_1.RoutingPolicy();
     test('keeps short code tasks on a preferred local provider', () => {
