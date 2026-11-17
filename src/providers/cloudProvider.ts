@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Secrets } from '../utils/secrets';
 import { parseOpenAICompatibleResponse } from './responseParser';
-import { consumeModelStream } from './streaming';
+import { fetchModelStream } from './streaming';
 
 export interface CloudRequestOptions {
   model?: string;
@@ -52,7 +52,7 @@ export class CloudProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
-      const response = await fetch(`${endpoint.replace(/\/$/, '')}/chat/completions`, {
+      await fetchModelStream(`${endpoint.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, Accept: 'text/event-stream' },
         body: JSON.stringify({
@@ -63,8 +63,7 @@ export class CloudProvider {
           messages: [{ role: 'user', content: prompt }]
         }),
         signal: controller.signal
-      });
-      await consumeModelStream(response, 'openai-sse', onChunk);
+      }, 'openai-sse', onChunk);
     } finally {
       clearTimeout(timeout);
     }
