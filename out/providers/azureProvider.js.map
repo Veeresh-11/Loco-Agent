@@ -1,0 +1,1 @@
+{"version":3,"file":"azureProvider.js","sourceRoot":"","sources":["../../src/providers/azureProvider.ts"],"names":[],"mappings":";;;AAEA,MAAa,aAAa;IACJ;IAApB,YAAoB,OAAgC;QAAhC,YAAO,GAAP,OAAO,CAAyB;IAAG,CAAC;IAExD,KAAK,CAAC,GAAG,CAAC,MAAc;QACtB,OAAO,oCAAoC,CAAC;IAC9C,CAAC;CACF;AAND,sCAMC"}

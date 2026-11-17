@@ -9,4 +9,6 @@
 - Tests and performance tuning.
 
 
+## 0.1.0
+- Initial release of LOCO Agent
 
