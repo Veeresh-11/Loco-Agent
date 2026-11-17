@@ -1,6 +1,43 @@
 import { RoutingPolicy } from '../core/routingPolicy';
 import { JobQueue } from '../core/jobQueue';
 import { parseOpenAICompatibleResponse } from '../providers/responseParser';
+import { runWithProviderFallback } from '../providers/providerFallback';
+import { getLocalChatRoutes, getLocalProbePaths, normalizeLocalEndpoint } from '../providers/localEndpoint';
+
+describe('Local OpenAI-compatible endpoints', () => {
+  test('normalizes and routes endpoints already ending in /v1', () => {
+    expect(normalizeLocalEndpoint(' http://localhost:1234/v1/ ')).toBe('http://localhost:1234/v1');
+    expect(getLocalChatRoutes('http://localhost:1234/v1')[0].path).toBe('/chat/completions');
+    expect(getLocalProbePaths('http://localhost:1234/v1')).toContain('/models');
+  });
+
+  test('routes a host-root endpoint through the OpenAI-compatible v1 path', () => {
+    expect(getLocalChatRoutes('http://localhost:9000')[0].path).toBe('/v1/chat/completions');
+  });
+});
+
+describe('Provider fallback', () => {
+  test('uses the next provider after the preferred provider fails', async () => {
+    const attempted: string[] = [];
+    const result = await runWithProviderFallback(['local', 'openai'] as const, async provider => {
+      attempted.push(provider);
+      if (provider === 'local') throw new Error('offline');
+      return ' cloud answer ';
+    });
+
+    expect(attempted).toEqual(['local', 'openai']);
+    expect(result.value).toBe('cloud answer');
+    expect(result.provider).toBe('openai');
+    expect(result.failures).toEqual([{ provider: 'local', error: 'offline' }]);
+  });
+
+  test('does not call fallback when the preferred provider succeeds', async () => {
+    const attempt = jest.fn(async () => 'local answer');
+    const result = await runWithProviderFallback(['local', 'openai'] as const, attempt);
+    expect(result.value).toBe('local answer');
+    expect(attempt).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('OpenAI-compatible response parsing', () => {
   test('parses chat completion string content', () => {

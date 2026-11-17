@@ -3,6 +3,39 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const routingPolicy_1 = require("../core/routingPolicy");
 const jobQueue_1 = require("../core/jobQueue");
 const responseParser_1 = require("../providers/responseParser");
+const providerFallback_1 = require("../providers/providerFallback");
+const localEndpoint_1 = require("../providers/localEndpoint");
+describe('Local OpenAI-compatible endpoints', () => {
+    test('normalizes and routes endpoints already ending in /v1', () => {
+        expect((0, localEndpoint_1.normalizeLocalEndpoint)(' http://localhost:1234/v1/ ')).toBe('http://localhost:1234/v1');
+        expect((0, localEndpoint_1.getLocalChatRoutes)('http://localhost:1234/v1')[0].path).toBe('/chat/completions');
+        expect((0, localEndpoint_1.getLocalProbePaths)('http://localhost:1234/v1')).toContain('/models');
+    });
+    test('routes a host-root endpoint through the OpenAI-compatible v1 path', () => {
+        expect((0, localEndpoint_1.getLocalChatRoutes)('http://localhost:9000')[0].path).toBe('/v1/chat/completions');
+    });
+});
+describe('Provider fallback', () => {
+    test('uses the next provider after the preferred provider fails', async () => {
+        const attempted = [];
+        const result = await (0, providerFallback_1.runWithProviderFallback)(['local', 'openai'], async (provider) => {
+            attempted.push(provider);
+            if (provider === 'local')
+                throw new Error('offline');
+            return ' cloud answer ';
+        });
+        expect(attempted).toEqual(['local', 'openai']);
+        expect(result.value).toBe('cloud answer');
+        expect(result.provider).toBe('openai');
+        expect(result.failures).toEqual([{ provider: 'local', error: 'offline' }]);
+    });
+    test('does not call fallback when the preferred provider succeeds', async () => {
+        const attempt = jest.fn(async () => 'local answer');
+        const result = await (0, providerFallback_1.runWithProviderFallback)(['local', 'openai'], attempt);
+        expect(result.value).toBe('local answer');
+        expect(attempt).toHaveBeenCalledTimes(1);
+    });
+});
 describe('OpenAI-compatible response parsing', () => {
     test('parses chat completion string content', () => {
         expect((0, responseParser_1.parseOpenAICompatibleResponse)({

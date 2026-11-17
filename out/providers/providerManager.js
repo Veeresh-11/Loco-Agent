@@ -41,6 +41,7 @@ const openaiProvider_1 = require("./openaiProvider");
 const azureProvider_1 = require("./azureProvider");
 const ollamaProvider_1 = require("./ollamaProvider");
 const gpt4allProvider_1 = require("./gpt4allProvider");
+const providerFallback_1 = require("./providerFallback");
 const routingPolicy_1 = require("../core/routingPolicy");
 class ProviderManager {
     context;
@@ -97,45 +98,32 @@ class ProviderManager {
         const route = preference === 'local' || preference === 'cloud'
             ? this.routingPolicy.selectProvider(routingContext)
             : preference;
-        const model = vscode.workspace.getConfiguration('locoAgent').get('model', 'gpt-4o-mini');
-        const errors = [];
-        const tryProvider = async (provider) => {
-            try {
-                let result;
-                switch (provider) {
-                    case 'azure':
-                        result = await this.azureProvider.ask(prompt);
-                        break;
-                    case 'openai':
-                    case 'cloud':
-                        result = await this.openAIProvider.ask(prompt);
-                        break;
-                    case 'ollama':
-                        result = await this.ollamaProvider.ask(prompt);
-                        break;
-                    case 'gpt4all':
-                        result = await this.gpt4allProvider.ask(prompt);
-                        break;
-                    default: {
-                        const localReply = await this.localProvider.ask({ prompt, task: normalizedTask.context, model });
-                        result = typeof localReply === 'string' ? localReply : localReply?.text;
-                    }
+        const config = vscode.workspace.getConfiguration('locoAgent');
+        const cloudModel = config.get('model', 'gpt-4o-mini');
+        const localModel = config.get('localModel', 'llama3.1');
+        const attempt = async (provider) => {
+            switch (provider) {
+                case 'azure':
+                    return this.azureProvider.ask(prompt);
+                case 'openai':
+                case 'cloud':
+                    return this.openAIProvider.ask(prompt);
+                case 'ollama':
+                    return this.ollamaProvider.ask(prompt);
+                case 'gpt4all':
+                    return this.gpt4allProvider.ask(prompt);
+                default: {
+                    const localReply = await this.localProvider.ask({ prompt, task: normalizedTask.context, model: localModel });
+                    return typeof localReply === 'string' ? localReply : localReply?.text;
                 }
-                return result?.trim() || undefined;
-            }
-            catch (error) {
-                errors.push(`${provider}: ${error instanceof Error ? error.message : String(error)}`);
-                return undefined;
             }
         };
-        const first = await tryProvider(route);
-        if (first)
-            return first;
         const fallback = ['local', 'ollama', 'gpt4all'].includes(route) ? 'openai' : 'local';
-        const second = await tryProvider(fallback);
-        if (second)
-            return second;
-        throw new Error(errors.length ? `All configured providers failed. ${errors.join(' | ')}` : 'No configured provider returned a response.');
+        const results = await (0, providerFallback_1.runWithProviderFallback)([route, fallback], attempt);
+        if (results.value)
+            return results.value;
+        const errors = results.failures.map(failure => `${failure.provider}: ${failure.error}`).join(' | ');
+        throw new Error(errors ? `All configured providers failed. ${errors}` : 'No configured provider returned a response.');
     }
 }
 exports.ProviderManager = ProviderManager;

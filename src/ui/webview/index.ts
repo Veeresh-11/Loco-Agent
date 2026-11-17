@@ -17,34 +17,35 @@ export class SidebarChatProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ): void | Thenable<void> {
     this.view = webviewView;
-
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri]
     };
-
     webviewView.webview.html = this.getHtml();
 
     webviewView.webview.onDidReceiveMessage(async message => {
-      if (!message || !message.prompt) {
-        return;
-      }
-
-      const prompt = String(message.prompt).trim();
-      if (!prompt) {
-        return;
-      }
+      if (!message || typeof message.prompt !== 'string') return;
+      const prompt = message.prompt.trim();
+      if (!prompt) return;
 
       webviewView.webview.postMessage({ type: 'typing', value: true });
-      const reply = await this.agent.runTask({
-        prompt,
-        context: 'chat',
-        filePath: vscode.window.activeTextEditor?.document.uri.fsPath,
-        code: vscode.window.activeTextEditor?.document.getText()
-      });
-
-      webviewView.webview.postMessage({ type: 'reply', value: reply });
-      webviewView.webview.postMessage({ type: 'typing', value: false });
+      try {
+        const editor = vscode.window.activeTextEditor;
+        const reply = await this.agent.runTask({
+          prompt,
+          context: 'chat',
+          filePath: editor?.document.uri.fsPath,
+          code: editor?.document.getText(editor.selection) || editor?.document.getText()
+        });
+        webviewView.webview.postMessage({ type: 'reply', value: reply });
+      } catch (error) {
+        webviewView.webview.postMessage({
+          type: 'reply',
+          value: `LOCO could not complete the request: ${error instanceof Error ? error.message : String(error)}`
+        });
+      } finally {
+        webviewView.webview.postMessage({ type: 'typing', value: false });
+      }
     });
   }
 

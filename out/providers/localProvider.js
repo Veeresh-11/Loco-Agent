@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LocalProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const historyStore_1 = require("../utils/historyStore");
+const localEndpoint_1 = require("./localEndpoint");
 const DEFAULT_LOCAL_PORTS = [9000, 9001, 8080, 7860, 5005, 11434, 8000, 4891];
 const PROBE_TIMEOUT_MS = 700;
 class LocalProvider {
@@ -68,45 +69,30 @@ class LocalProvider {
         if (!endpoint)
             return null;
         const prompt = job?.prompt || this.buildPrompt(job);
-        const model = job.model || vscode.workspace.getConfiguration('locoAgent').get('model', 'llama3.1');
-        try {
-            const compatible = await this.request(endpoint, '/v1/chat/completions', {
-                model,
-                messages: [{ role: 'user', content: prompt }],
-                stream: false
-            });
-            if (compatible.ok) {
-                const json = await compatible.json();
-                const text = json?.choices?.[0]?.message?.content;
-                if (typeof text === 'string' && text.trim())
-                    return { text };
-            }
-        }
-        catch { /* try the native local APIs */ }
-        try {
-            const response = await this.request(endpoint, '/api/chat', {
-                model,
-                stream: false,
-                messages: [{ role: 'user', content: prompt }]
-            });
-            if (response.ok) {
+        const model = job.model || vscode.workspace.getConfiguration('locoAgent').get('localModel', 'llama3.1');
+        for (const route of (0, localEndpoint_1.getLocalChatRoutes)(endpoint)) {
+            try {
+                const body = route.format === 'openai'
+                    ? { model, messages: [{ role: 'user', content: prompt }], stream: false }
+                    : route.format === 'ollama-chat'
+                        ? { model, messages: [{ role: 'user', content: prompt }], stream: false }
+                        : { model, prompt, stream: false };
+                const response = await this.request(endpoint, route.path, body);
+                if (!response.ok)
+                    continue;
                 const json = await response.json();
-                const text = json?.message?.content ?? json?.response ?? json?.content;
+                const text = route.format === 'openai'
+                    ? json?.choices?.[0]?.message?.content
+                    : route.format === 'ollama-chat'
+                        ? json?.message?.content ?? json?.response ?? json?.content
+                        : json?.response ?? json?.text;
                 if (typeof text === 'string' && text.trim())
-                    return { text };
+                    return { text: text.trim() };
+            }
+            catch {
+                // Continue through OpenAI-compatible and native local API routes.
             }
         }
-        catch { /* try generation endpoint */ }
-        try {
-            const response = await this.request(endpoint, '/api/generate', { model, prompt, stream: false });
-            if (response.ok) {
-                const json = await response.json();
-                const text = json?.response ?? json?.text;
-                if (typeof text === 'string' && text.trim())
-                    return { text };
-            }
-        }
-        catch { /* caller can fall back to a cloud provider */ }
         return null;
     }
     async stream(job, onChunk) {
@@ -122,7 +108,7 @@ class LocalProvider {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 30_000);
         try {
-            return await fetch(`${endpoint.replace(/\/$/, '')}${path}`, {
+            return await fetch(`${(0, localEndpoint_1.normalizeLocalEndpoint)(endpoint)}${path}`, {
                 method: body === undefined ? 'GET' : 'POST',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 body: body === undefined ? undefined : JSON.stringify(body),
@@ -134,8 +120,8 @@ class LocalProvider {
         }
     }
     async checkEndpoint(endpoint) {
-        const candidate = endpoint.replace(/\/$/, '');
-        for (const path of ['/api/tags', '/v1/models', '/health']) {
+        const candidate = (0, localEndpoint_1.normalizeLocalEndpoint)(endpoint);
+        for (const path of (0, localEndpoint_1.getLocalProbePaths)(candidate)) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
             try {

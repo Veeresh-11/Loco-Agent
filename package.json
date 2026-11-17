@@ -181,6 +181,11 @@
           "type": "string",
           "default": "gpt-4o-mini",
           "description": "Model name used by compatible local and cloud providers."
+        },
+        "locoAgent.localModel": {
+          "type": "string",
+          "default": "llama3.1",
+          "description": "Model name sent to Ollama, LM Studio, GPT4All, and other local compatible servers."
         }
       }
     }

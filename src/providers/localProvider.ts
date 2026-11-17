@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getRecentHistory } from '../utils/historyStore';
+import { getLocalChatRoutes, getLocalProbePaths, normalizeLocalEndpoint } from './localEndpoint';
 
 const DEFAULT_LOCAL_PORTS = [9000, 9001, 8080, 7860, 5005, 11434, 8000, 4891];
 const PROBE_TIMEOUT_MS = 700;
@@ -35,42 +36,29 @@ export class LocalProvider {
     const endpoint = await this.getEndpoint();
     if (!endpoint) return null;
     const prompt = job?.prompt || this.buildPrompt(job);
-    const model = job.model || vscode.workspace.getConfiguration('locoAgent').get<string>('model', 'llama3.1');
+    const model = job.model || vscode.workspace.getConfiguration('locoAgent').get<string>('localModel', 'llama3.1');
 
-    try {
-      const compatible = await this.request(endpoint, '/v1/chat/completions', {
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        stream: false
-      });
-      if (compatible.ok) {
-        const json = await compatible.json() as any;
-        const text = json?.choices?.[0]?.message?.content;
-        if (typeof text === 'string' && text.trim()) return { text };
-      }
-    } catch { /* try the native local APIs */ }
+    for (const route of getLocalChatRoutes(endpoint)) {
+      try {
+        const body = route.format === 'openai'
+          ? { model, messages: [{ role: 'user', content: prompt }], stream: false }
+          : route.format === 'ollama-chat'
+            ? { model, messages: [{ role: 'user', content: prompt }], stream: false }
+            : { model, prompt, stream: false };
+        const response = await this.request(endpoint, route.path, body);
+        if (!response.ok) continue;
 
-    try {
-      const response = await this.request(endpoint, '/api/chat', {
-        model,
-        stream: false,
-        messages: [{ role: 'user', content: prompt }]
-      });
-      if (response.ok) {
         const json = await response.json() as any;
-        const text = json?.message?.content ?? json?.response ?? json?.content;
-        if (typeof text === 'string' && text.trim()) return { text };
+        const text = route.format === 'openai'
+          ? json?.choices?.[0]?.message?.content
+          : route.format === 'ollama-chat'
+            ? json?.message?.content ?? json?.response ?? json?.content
+            : json?.response ?? json?.text;
+        if (typeof text === 'string' && text.trim()) return { text: text.trim() };
+      } catch {
+        // Continue through OpenAI-compatible and native local API routes.
       }
-    } catch { /* try generation endpoint */ }
-
-    try {
-      const response = await this.request(endpoint, '/api/generate', { model, prompt, stream: false });
-      if (response.ok) {
-        const json = await response.json() as any;
-        const text = json?.response ?? json?.text;
-        if (typeof text === 'string' && text.trim()) return { text };
-      }
-    } catch { /* caller can fall back to a cloud provider */ }
+    }
     return null;
   }
 
@@ -88,7 +76,7 @@ export class LocalProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      return await fetch(`${endpoint.replace(/\/$/, '')}${path}`, {
+      return await fetch(`${normalizeLocalEndpoint(endpoint)}${path}`, {
         method: body === undefined ? 'GET' : 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -100,8 +88,8 @@ export class LocalProvider {
   }
 
   private async checkEndpoint(endpoint: string): Promise<boolean> {
-    const candidate = endpoint.replace(/\/$/, '');
-    for (const path of ['/api/tags', '/v1/models', '/health']) {
+    const candidate = normalizeLocalEndpoint(endpoint);
+    for (const path of getLocalProbePaths(candidate)) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
       try {
