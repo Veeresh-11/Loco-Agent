@@ -91,8 +91,51 @@ export class LOCOAgent {
   }
 
   async askStream(job: AgentTask, onChunk: (chunk: string) => void): Promise<void> {
-    const text = await this.runTask(job);
-    onChunk(text);
+    const normalizedTask: AgentTask = {
+      ...job,
+      prompt: (job.prompt ?? job.task ?? '').trim(),
+      complexity: job.complexity ?? this.inferComplexity(job.prompt ?? ''),
+      estimatedTokens: job.estimatedTokens ?? Math.max(256, Math.ceil((job.prompt ?? '').length / 4))
+    };
+
+    await this.jobQueue.enqueue(normalizedTask, async (queuedJob) => {
+      const prompt = queuedJob.prompt ?? '';
+      let response = '';
+      try {
+        await addHistoryEntry(this.context, {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          role: 'user',
+          text: prompt,
+          timestamp: Date.now()
+        });
+      } catch { /* History storage is optional. */ }
+
+      const plan = this.buildPlan(queuedJob);
+      const workspaceContext = await this.ragEngine.retrieve(prompt, 5);
+      const fileText = queuedJob.filePath ? await this.readFile(queuedJob.filePath) : '';
+      const shellStatus = await this.executeShell('git rev-parse --show-toplevel');
+      const fullPrompt = this.composePrompt(queuedJob, plan, workspaceContext, fileText, shellStatus);
+
+      await this.providerManager.generateStream(fullPrompt, chunk => {
+        response += chunk;
+        onChunk(chunk);
+      }, {
+        complexity: queuedJob.complexity,
+        estimatedTokens: queuedJob.estimatedTokens,
+        context: queuedJob.context ?? 'general'
+      });
+
+      if (!response.trim()) throw new Error('The selected provider completed without returning response text.');
+      try {
+        await addHistoryEntry(this.context, {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          role: 'agent',
+          text: response,
+          timestamp: Date.now()
+        });
+      } catch { /* History storage is optional. */ }
+      this.output.appendLine(`LOCO streaming task completed: ${prompt || 'general request'}`);
+    });
   }
 
   async readFile(filePath: string): Promise<string> {
