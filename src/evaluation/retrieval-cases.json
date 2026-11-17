@@ -1,0 +1,27 @@
+[
+  {
+    "id": "provider-routing",
+    "query": "provider routing policy",
+    "relevantPaths": ["src/core/routingPolicy.ts"]
+  },
+  {
+    "id": "patch-rollback",
+    "query": "restore patch backup",
+    "relevantPaths": ["src/core/patchManager.ts", "src/core/patchPath.ts"]
+  },
+  {
+    "id": "stream-parser",
+    "query": "parse OpenAI SSE stream",
+    "relevantPaths": ["src/providers/streaming.ts"]
+  },
+  {
+    "id": "workspace-index",
+    "query": "index workspace chunks and file size",
+    "relevantPaths": ["src/core/ragEngine.ts"]
+  },
+  {
+    "id": "job-concurrency",
+    "query": "job queue maximum concurrency",
+    "relevantPaths": ["src/core/jobQueue.ts"]
+  }
+]
