@@ -1,239 +1,181 @@
 # LOCO Agent
 
-A hybrid local + cloud AI assistant for Visual Studio Code that intelligently routes tasks between local LLMs and cloud providers for optimal performance and cost efficiency.
+LOCO Agent is a local-first AI coding assistant for Visual Studio Code. It combines workspace-aware context retrieval, task-aware local/cloud provider selection, provider fallback, queued task execution and conflict-aware code patching.
 
-## Features
+The current implementation is an early-stage VS Code extension (version 0.1.0). Its retrieval and routing mechanisms are intentionally lightweight; see [Implementation scope and limitations](#implementation-scope-and-limitations) before interpreting the feature list as an advanced or production-scale AI platform.
 
-- 🚀 **Intelligent Routing**: Automatically chooses between local and cloud AI providers based on latency and cost
-- 🔄 **Fallback Support**: Falls back to cloud provider if local response is unsatisfactory
-- 🧠 **Multiple AI Providers**:
-  - OpenAI GPT-4
-  - Azure OpenAI
-  - Local LLMs (Ollama, GPT4All)
-- 📝 **Code Analysis**: Line-by-line code explanation
-- 💡 **Smart Suggestions**: PowerShell and shell command suggestions
-- 🔀 **Intelligent Patching**: Three-way merge with conflict detection and auto-apply patches
-- ⚙️ **Configurable**: Flexible settings for provider selection and behavior
-- 📊 **Job Queue**: Processes tasks concurrently with intelligent queuing
+## Implemented capabilities
 
-## Installation
+- **Local and cloud model adapters:** local OpenAI-compatible/Ollama-style endpoints, Ollama, GPT4All, OpenAI-compatible cloud inference and Azure OpenAI.
+- **Task-aware provider selection:** routes according to estimated token count, simple task-complexity classification and code-task context.
+- **Provider fallback:** retries a second configured provider when the preferred provider errors or returns an empty result.
+- **Workspace context retrieval:** discovers supported workspace files, chunks their contents, scores chunks by lexical query-term matches and supplies the top results to the model prompt.
+- **Queued task processing:** asynchronous job queue with configurable concurrency (default 2, maximum 16).
+- **VS Code chat interface:** sidebar webview chat, typing indicator, task submission and completed-response display.
+- **Code patch support:** three-way merge logic with conflict markers and a patch-application method.
+- **Local history and secrets:** optional interaction history in VS Code extension global state, history retention controls, and cloud API-key storage using VS Code SecretStorage.
 
-1. Install the extension from VS Code Marketplace
-2. Configure your AI provider in settings:
+## Provider support
 
-```json
-{
-  "loco.provider": "openai|azure|local|ollama|gpt4all",
-  "loco.localEndpoint": "http://localhost:9000",
-  "loco.autoApplyPatches": false
-}
-```
+| Provider | Implementation path | Notes |
+| --- | --- | --- |
+| Local compatible server | `src/providers/localProvider.ts` | Probes configured local ports and tries supported OpenAI-compatible and Ollama-style routes. |
+| Ollama | `src/providers/ollamaProvider.ts` | Provider adapter using the local provider implementation. |
+| GPT4All | `src/providers/gpt4allProvider.ts` | Provider adapter using the local provider implementation. |
+| OpenAI | `src/providers/openaiProvider.ts` and `src/providers/cloudProvider.ts` | Uses the configured OpenAI-compatible chat-completions endpoint. |
+| Azure OpenAI | `src/providers/azureProvider.ts` | Uses configured Azure resource endpoint, deployment and API version. |
 
-## Usage
-
-### Commands
-
-- **LOCO: Run Agent** - Execute an AI task on selected code
-  - Explain code line-by-line
-  - Suggest PowerShell to run
-  - Auto-apply patch
-
-- **LOCO: Open Assistant** - Open the LOCO webview for interactive assistance
-
-- **LOCO: Open Settings** - Configure LOCO Agent preferences
-
-### Quick Start
-
-1. Open a file in VS Code
-2. Select code or leave empty to use entire file
-3. Run Command: `LOCO: Run Agent`
-4. Choose task from the prompt
-5. View results in the LOCO Output panel
+The Claude provider file is a stub and is not included as a supported live provider.
 
 ## Architecture
 
-### Core Components
-
-- **LOCOAgent**: Main orchestrator managing job queue and provider routing
-- **Job Queue**: Concurrent task processing with configurable concurrency
-- **Routing Policy**: Intelligent selection between local/cloud based on latency and cost
-- **Three-Way Merge**: Handles code patching with conflict detection
-
-### Providers
-
-- **CloudProvider**: Manages API calls to cloud AI services
-- **LocalProvider**: Communicates with local LLM servers
-- **ProviderManager**: Handles provider selection and configuration
-
-### UI
-
-- **Output View**: Real-time logging of agent operations
-- **Settings Panel**: Configuration management
-- **Webview Host**: Interactive assistant interface
-
-## Project Structure
-
 ```text
-src/
-├── extension.ts              # Main extension entry point
-├── core/
-│   ├── locoAgent.ts         # Core agent orchestrator
-│   ├── jobQueue.ts          # Concurrent job processing
-│   ├── routingPolicy.ts     # Provider selection logic
-│   └── threeWayMerge.apply.ts # Patch application
-├── providers/
-│   ├── cloudProvider.ts     # Cloud provider manager
-│   ├── localProvider.ts     # Local LLM provider
-│   ├── openaiProvider.ts    # OpenAI implementation
-│   ├── azureProvider.ts     # Azure OpenAI implementation
-│   ├── ollamaProvider.ts    # Ollama provider
-│   ├── gpt4allProvider.ts   # GPT4All provider
-│   └── providerManager.ts   # Provider selection
-├── runners/
-│   └── powershellRunner.ts  # PowerShell script execution
-├── ui/
-│   ├── outputView.ts        # Output logging
-│   ├── settings.ts          # Settings panel
-│   └── webview/             # Interactive UI
-├── utils/
-│   └── secrets.ts           # Secret management
-└── __tests__/               # Test suites
+VS Code commands / sidebar webview
+              |
+              v
+         LOCOAgent
+      /      |       \
+ JobQueue  RAGEngine  workspace/file context
+      \      |       /
+       ProviderManager
+              |
+        RoutingPolicy
+              |
+   preferred provider -> fallback provider
+              |
+       completed response
+              |
+      sidebar / output view
 ```
 
-## Configuration
+### Main modules
 
-### Settings
+| Module | Responsibility |
+| --- | --- |
+| `src/extension.ts` | Extension activation, command registration, settings and sidebar provider wiring. |
+| `src/core/locoAgent.ts` | Task normalization, rule-based planning, context assembly, provider invocation and history. |
+| `src/core/ragEngine.ts` | Workspace file indexing, overlapping character chunks, lexical scoring and top-K retrieval. |
+| `src/core/routingPolicy.ts` | Rule-based local/cloud selection using complexity and estimated token count. |
+| `src/core/jobQueue.ts` | Promise-based task queue with bounded concurrency. |
+| `src/providers/providerManager.ts` | Provider construction, selection and fallback orchestration. |
+| `src/providers/providerFallback.ts` | Sequential retry of configured providers. |
+| `src/core/threeWayMerge.apply.ts` | Three-way text merge and conflict reporting. |
+| `src/ui/webview/index.ts` | VS Code sidebar chat webview. |
+| `src/utils/secrets.ts` | API key operations backed by VS Code SecretStorage. |
+| `src/utils/historyStore.ts` | Local interaction-history management. |
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `loco.provider` | string | `local` | Default AI provider (local, openai, azure, ollama, gpt4all) |
-| `loco.localEndpoint` | string | `http://localhost:9000` | Local server endpoint for local LLMs |
-| `loco.autoApplyPatches` | boolean | `false` | Automatically apply non-conflicting code patches |
+## Requirements
 
-## Development
+- Visual Studio Code `^1.85.0`
+- Node.js and npm compatible with the development toolchain
+- A configured local model server, or API credentials for a supported cloud provider
 
-### Prerequisites
+## Installation and development
 
-- Node.js 16+
-- npm or yarn
-- TypeScript 5.0+
-
-### Setup
+Clone the repository and install dependencies:
 
 ```bash
+git clone https://github.com/Veeresh-11/Loco-Agent.git
+cd Loco-Agent
 npm install
-npm run compile
-npm test
 ```
 
-### Scripts
+Compile the extension:
 
-- `npm run compile` - Compile TypeScript
-- `npm run build:webview` - Build React webview
-- `npm test` - Run test suite
-- `npm run lint` - Run ESLint
-- `npm run package` - Package as VS Code extension
+```bash
+npm run compile
+```
 
-## Testing
+Run the automated tests:
 
-The project includes comprehensive test coverage:
-
-- **Three-Way Merge Tests**: 8 test cases covering merge scenarios
-  - Clean merge
-  - Conflict detection
-  - Local-only changes
-  - Remote-only changes
-  - Both sides adding/removing
-  - Empty base handling
-  - Same changes from both sides
-
-- **Provider Tests**: 2 test cases
-  - OpenAI provider JSON parsing
-  - LocalProvider timeout handling
-
-Run tests with:
 ```bash
 npm test
 ```
 
-## Build Status
+Run linting:
 
-- ✅ TypeScript: No compilation errors
-- ✅ Tests: 10/10 passing
-- ✅ Ready for production deployment
+```bash
+npm run lint
+```
 
-## License
+Package the VS Code extension:
 
-MIT
-
-## Contributing
-
-Contributions are welcome! Please ensure all tests pass and code is properly typed.
-
-## Support
-
-For issues, feature requests, or questions, please open an issue in the repository.
-
----
-
-## History & Privacy
-
-- **Local history:** The extension stores recent LOCO interactions in VS Code's `globalState` (by default, retained for 30 days). This history is used to provide conversational context to local LLMs.
-- **Settings:** You can control history retention and behavior in Settings (see below). To view, export, or clear stored history use the commands: `LOCO: View History`, `LOCO: Export History`, `LOCO: Clear History`.
-- **Privacy:** If you prefer not to store history, disable `locoAgent.storeHistory` in settings. History is stored locally in the editor state and is not transmitted anywhere by default other than the configured model endpoints.
-
-## Settings (important)
-
-The extension exposes several `locoAgent.*` settings. Key options:
-
-- `locoAgent.provider` (string, default `local`): Default provider (local, openai, azure, ollama, gpt4all).
-- `locoAgent.endpoint` (string): Explicit local endpoint URL if you prefer not to use auto-detection.
-- `locoAgent.localPorts` (number[]): Ports to probe when auto-detecting a local provider (defaults: 9000, 9001, 8080, 7860, 5005).
-- `locoAgent.storeHistory` (boolean, default `true`): Toggle local storage of recent LOCO interactions.
-- `locoAgent.pruneOnStartup` (boolean, default `true`): Whether to prune history older than `locoAgent.pruneDays` when the extension activates.
-- `locoAgent.pruneDays` (number, default `30`): Retention window (days) for history pruning.
-- `locoAgent.maxHistoryEntries` (number, default `1000`): Maximum number of entries kept after pruning.
-
-## Commands (quick reference)
-
-- `LOCO: Run Agent` — Run a task on selected code or whole file.
-- `LOCO: Open Assistant` — Open the webview chat assistant.
-- `LOCO: Open Settings` — Open LOCO settings and choose provider.
-- `LOCO: Set Local Endpoint` — Manually set a local LLM endpoint.
-- `LOCO: Clear Local Endpoint` — Clear stored endpoint (auto-detect next time).
-- `LOCO: View History` — View recent stored LOCO interactions.
-- `LOCO: Export History` — Export stored history to a JSON file.
-- `LOCO: Clear History` — Clear stored LOCO history.
-
-## Packaging & Publishing
-
-To build and package the extension locally:
-
-```powershell
-npm install
-npm run compile
-npm run build:webview
+```bash
 npm run package
 ```
 
-This produces a `.vsix` package in the workspace root. To publish to the Visual Studio Marketplace:
+The repository's package scripts currently define compile, test, lint and package tasks. A separate React build task is not defined in the current `package.json`.
 
-1. Create a publisher at https://marketplace.visualstudio.com/manage.
-2. Install `vsce` and follow the authentication steps:
+## Configuration
 
-```powershell
-npm i -g vsce
-vsce login <publisher-name>
-```
+The extension contributes the following principal settings:
 
-3. Publish (after logging in):
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `loco.provider` | `local` | Preferred provider: local, OpenAI, Azure, Ollama or GPT4All. |
+| `locoAgent.endpoint` | `https://api.openai.com/v1` | OpenAI-compatible cloud endpoint. |
+| `loco.localEndpoint` | empty | Optional local model endpoint; otherwise local ports are probed. |
+| `locoAgent.localPorts` | `[9000, 9001, 8080, 7860, 5005]` | Additional local server ports to probe. |
+| `locoAgent.model` | `gpt-4o-mini` | Cloud model name. |
+| `locoAgent.localModel` | `llama3.1` | Local model name. |
+| `locoAgent.maxConcurrency` | `2` | Maximum queued task concurrency (1–16). |
+| `locoAgent.storeHistory` | `true` | Enable local interaction history. |
+| `locoAgent.pruneOnStartup` | `true` | Prune expired history at startup. |
+| `locoAgent.pruneDays` | `30` | History retention window. |
+| `locoAgent.maxHistoryEntries` | `1000` | Maximum number of retained entries. |
+| `locoAgent.azureEndpoint` | empty | Azure OpenAI resource endpoint. |
+| `locoAgent.azureDeployment` | empty | Azure OpenAI deployment name. |
+| `locoAgent.azureApiVersion` | `2024-10-21` | Azure OpenAI API version. |
 
-```powershell
-vsce publish
-```
+Cloud API keys can be configured through the extension commands and are stored using VS Code SecretStorage. Environment variables `OPENAI_API_KEY` and `AZURE_OPENAI_API_KEY` are also read by the respective provider implementations.
 
-(You can also use `npx vsce package` to create a local package without publishing.)
+## Commands
 
----
+- **LOCO: Run Agent** — submit a coding task using the active editor context.
+- **LOCO: Open Assistant** — open the LOCO sidebar.
+- **LOCO: Open Settings** — open extension settings.
+- **LOCO: Set Local Endpoint** — configure a local model endpoint.
+- **LOCO: Clear Local Endpoint** — clear the explicit local endpoint.
+- **LOCO: Set Cloud API Key** — store an OpenAI or Azure API key.
+- **LOCO: Clear Cloud API Key** — remove a stored cloud API key.
+- **LOCO: View History** — view locally stored interactions.
+- **LOCO: Export History** — export history to JSON.
+- **LOCO: Clear History** — clear stored interactions.
 
-**LOCO Agent** - Making AI smarter, faster, and cheaper for developers.
+## Tests
+
+The repository includes Jest tests for:
+
+- Local endpoint normalization and route selection.
+- OpenAI-compatible response parsing.
+- Provider fallback behavior.
+- Rule-based provider routing.
+- Job queue result handling and concurrency.
+- Three-way merge behavior, including conflict cases.
+
+Run `npm test` to execute the test suite. Test presence is not a substitute for a verified current CI run; check the Actions tab for the status associated with the commit you intend to ship.
+
+## Implementation scope and limitations
+
+The following distinctions are important for users, contributors and reviewers:
+
+- **RAG is lexical, not embedding-based.** The current engine indexes up to 300 workspace files, creates overlapping character-based chunks and scores them by normalized query-term frequency and path matches. The inspected implementation does not contain embedding generation, vector database integration, hybrid sparse/dense search or a reranker.
+- **Planning is rule-based.** The agent constructs a simple plan from task keywords and then makes a model request with workspace context. It does not currently implement a closed-loop autonomous planner that repeatedly observes tool results and replans.
+- **Streaming is not incremental yet.** The current `askStream()` obtains a completed response and invokes the callback once; the local provider's `stream()` behaves similarly. The sidebar shows a typing indicator while awaiting the completed response.
+- **Routing is heuristic.** Provider selection uses estimated token count and task classification. The inspected routing code does not measure provider latency, calculate actual API cost, or benchmark model quality.
+- **Provider fallback is sequential.** The manager tries a preferred provider and then a fallback; this is not a distributed inference scheduler.
+- **Model evaluation and MLOps are outside the current implementation.** No model training pipeline, experiment tracking, model registry, automated model evaluation suite or inference-monitoring pipeline was found in the inspected source.
+- **Code patch application requires review.** The merge helper reports conflicts, but callers should inspect the resulting file and conflict markers before accepting changes. Do not enable unattended patch application for untrusted output.
+- **The current project should be treated as an early-stage developer tool.** Validate security, reliability, model-provider behavior and release packaging in the target VS Code environment before production deployment.
+
+## Security and privacy notes
+
+- Cloud API keys are accessed through VS Code SecretStorage.
+- Interaction history is stored in VS Code extension global state when enabled and can be pruned, exported or cleared.
+- Prompts, selected/current file content and retrieved workspace snippets are included in requests sent to the configured model provider. Review the provider's data handling terms and avoid sending sensitive source code to an unapproved endpoint.
+- Local inference requires a local model server to be running and reachable.
+- Review AI-generated code and shell-related suggestions before executing or applying them.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
