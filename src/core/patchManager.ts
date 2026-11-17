@@ -66,7 +66,7 @@ export class PatchManager {
 
       const backup = await this.createBackup(target);
       try {
-        await this.writeAtomically(target.path, Buffer.from(merge.merged, 'utf8'), target.mode);
+        await this.writeAtomically(target.path, Buffer.from(merge.merged, 'utf8'), target.mode, target.bytes);
       } catch (error) {
         return `Patch write failed. Original content is preserved in backup ${backup.id}. ${this.errorMessage(error)}`;
       }
@@ -117,7 +117,7 @@ export class PatchManager {
 
       const safetyBackup = await this.createBackup(target);
       try {
-        await this.writeAtomically(target.path, backupBytes, target.mode);
+        await this.writeAtomically(target.path, backupBytes, target.mode, target.bytes);
       } catch (error) {
         return `Restore failed. The pre-restore content is preserved in backup ${safetyBackup.id}. ${this.errorMessage(error)}`;
       }
@@ -204,10 +204,14 @@ export class PatchManager {
     return record;
   }
 
-  private async writeAtomically(targetPath: string, content: Buffer, mode: number): Promise<void> {
+  private async writeAtomically(targetPath: string, content: Buffer, mode: number, expectedCurrent: Buffer): Promise<void> {
     const temporaryPath = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${randomUUID()}.loco-tmp`);
     try {
       await fs.promises.writeFile(temporaryPath, content, { flag: 'wx', mode });
+      const latest = await fs.promises.readFile(targetPath);
+      if (!latest.equals(expectedCurrent)) {
+        throw new Error('Target changed during patch preparation; no replacement was made.');
+      }
       await fs.promises.rename(temporaryPath, targetPath);
     } catch (error) {
       try {
