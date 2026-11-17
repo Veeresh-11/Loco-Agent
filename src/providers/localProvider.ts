@@ -62,14 +62,21 @@ export class LocalProvider {
           : { model, messages: [{ role: 'user', content: prompt }], stream: true };
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 60_000);
+        let routeEmitted = false;
         try {
           await fetchModelStream(`${normalizeLocalEndpoint(endpoint)}${route.path}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/x-ndjson' },
             body: JSON.stringify(body),
             signal: controller.signal
-          }, route.format === 'openai' ? 'openai-sse' : 'ollama-ndjson', onChunk);
+          }, route.format === 'openai' ? 'openai-sse' : 'ollama-ndjson', chunk => {
+            routeEmitted = true;
+            onChunk(chunk);
+          });
           return;
+        } catch (error) {
+          if (routeEmitted) throw error;
+          failures.push(`${route.path}: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
           clearTimeout(timeout);
         }
