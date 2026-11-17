@@ -226,7 +226,7 @@ These commands are the local validation baseline, not a claim that the current P
 
 - OpenAI and Azure API keys are stored through VS Code SecretStorage when configured with the extension command. Environment variables are also supported by the provider implementations.
 - Interaction history is stored in VS Code extension global state when enabled. It can be pruned, viewed, exported or cleared.
-- The task prompt sent to a provider can include retrieved workspace snippets, active-file content and Git workspace status. Treat this as source-code disclosure to the configured inference endpoint.
+- The task prompt sent to a provider can include retrieved workspace snippets, active-file content and Git repository root path. Treat this as source-code disclosure to the configured inference endpoint.
 - Use only model endpoints approved for the code and data you are working with. Do not submit secrets, credentials, regulated data or proprietary source to an unapproved provider.
 - The current shell helper only permits two read-only Git commands: `git rev-parse --show-toplevel` and `git status --short --branch`. It is not a general-purpose command execution tool.
 - The three-way patch application method writes merged content to the target file. It does not provide a transactional backup or an approval dialog in that method. Review the diff, preserve version control state and resolve conflict markers before relying on the resulting file. Never apply untrusted model output to important files without review.
