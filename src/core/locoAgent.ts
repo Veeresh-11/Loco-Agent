@@ -5,7 +5,7 @@ import { ProviderManager } from '../providers/providerManager';
 import { addHistoryEntry } from '../utils/historyStore';
 import { RAGEngine, type RAGChunk } from './ragEngine';
 import { JobQueue } from './jobQueue';
-import { applyThreeWayMerge } from './threeWayMerge.apply';
+import { PatchManager, type PatchBackupRecord } from './patchManager';
 
 export interface AgentTask {
   id?: string;
@@ -23,12 +23,12 @@ export interface AgentTask {
 export class LOCOAgent {
   private readonly providerManager: ProviderManager;
   private readonly ragEngine: RAGEngine;
-  private readonly jobQueue: JobQueue<AgentTask>;
+  private readonly jobQueue: JobQueue<AgentTask>;\n  private readonly patchManager: PatchManager;
   private readonly execFile = util.promisify(cp.execFile);
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
     this.providerManager = new ProviderManager(context);
-    this.ragEngine = new RAGEngine();
+    this.ragEngine = new RAGEngine();\n    this.patchManager = new PatchManager(context);
     const configuredConcurrency = vscode.workspace.getConfiguration('locoAgent').get<number>('maxConcurrency', 2);
     this.jobQueue = new JobQueue<AgentTask>(Math.min(16, Math.max(1, Math.floor(configuredConcurrency))));
   }
@@ -124,26 +124,15 @@ export class LOCOAgent {
   }
 
   async applyPatch(filePath: string, patch: string, baseSnapshot?: string): Promise<string> {
-    if (!filePath || !patch.trim()) {
-      return 'No patch to apply.';
-    }
+    return this.patchManager.previewAndApply(filePath, patch, baseSnapshot);
+  }
 
-    try {
-      const uri = vscode.Uri.file(filePath);
-      const current = await vscode.workspace.fs.readFile(uri);
-      const original = Buffer.from(current).toString('utf8');
-      const merge = applyThreeWayMerge({
-        base: baseSnapshot ?? original,
-        local: original,
-        remote: patch
-      });
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(merge.merged, 'utf8'));
-      return merge.conflicts
-        ? `Applied patch to ${filePath} with ${merge.conflicts} conflict(s). Review the LOCAL/REMOTE markers.`
-        : `Applied patch to ${filePath}`;
-    } catch {
-      return `Patch could not be written to ${filePath}.`;
-    }
+  getPatchBackups(): PatchBackupRecord[] {
+    return this.patchManager.getBackups();
+  }
+
+  async restorePatchBackup(backupId: string): Promise<string> {
+    return this.patchManager.restoreBackup(backupId);
   }
 
   private buildPlan(job: AgentTask): string[] {
