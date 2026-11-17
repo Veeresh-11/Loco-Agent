@@ -57,8 +57,11 @@ export async function consumeModelStream(
   };
 
   try {
-    while (true) {
-      const { value, done } = await reader.read();
+    let done = false;
+    while (!done) {
+      const result = await reader.read();
+      const value = result.value;
+      done = result.done;
       buffer += decoder.decode(value, { stream: !done });
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
