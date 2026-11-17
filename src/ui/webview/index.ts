@@ -41,7 +41,7 @@ export class SidebarChatProvider implements vscode.WebviewViewProvider {
         webviewView.webview.postMessage({ type: 'stream-end' });
       } catch (error) {
         webviewView.webview.postMessage({
-          type: 'reply',
+          type: 'stream-error',
           value: `LOCO could not complete the request: ${error instanceof Error ? error.message : String(error)}`
         });
       } finally {
