@@ -71,3 +71,14 @@ export async function consumeModelStream(
     reader.releaseLock();
   }
 }
+
+/** Perform the HTTP request and consume its response body without buffering it. */
+export async function fetchModelStream(
+  url: string,
+  init: RequestInit,
+  format: StreamFormat,
+  onChunk: (chunk: string) => void
+): Promise<void> {
+  const response = await fetch(url, init);
+  await consumeModelStream(response, format, onChunk);
+}
