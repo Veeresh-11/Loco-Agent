@@ -126,6 +126,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await clearHistory(context);
         vscode.window.showInformationMessage('LOCO history cleared.');
       }
+    }),
+    vscode.commands.registerCommand('loco.restorePatchBackup', async () => {
+      const backups = agent.getPatchBackups();
+      if (!backups.length) {
+        vscode.window.showInformationMessage('No LOCO patch backups are available.');
+        return;
+      }
+      const selected = await vscode.window.showQuickPick(
+        backups.slice().reverse().map(backup => ({
+          label: backup.targetPath.split(/[\\\\/]/).pop() ?? backup.targetPath,
+          description: new Date(backup.createdAt).toLocaleString(),
+          detail: backup.targetPath,
+          id: backup.id
+        })),
+        { placeHolder: 'Select a patch backup to preview and restore' }
+      );
+      if (!selected) return;
+      const result = await agent.restorePatchBackup(selected.id);
+      if (result.startsWith('Backup restored')) {
+        vscode.window.showInformationMessage(result);
+      } else {
+        vscode.window.showWarningMessage(result);
+      }
     })
   ];
 
