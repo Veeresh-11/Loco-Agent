@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Secrets } from '../utils/secrets';
-import { consumeModelStream } from './streaming';
+import { fetchModelStream } from './streaming';
 
 export class AzureProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -47,9 +47,9 @@ export class AzureProvider {
     const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
       const url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
-      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'api-key': apiKey, Accept: 'text/event-stream' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], temperature: 0.2, max_tokens: 1200, stream: true }), signal: controller.signal });
-      await consumeModelStream(response, 'openai-sse', onChunk);
+      await fetchModelStream(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'api-key': apiKey, Accept: 'text/event-stream' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], temperature: 0.2, max_tokens: 1200, stream: true }), signal: controller.signal },
+      'openai-sse', onChunk);
     } finally { clearTimeout(timeout); }
   }
 }
