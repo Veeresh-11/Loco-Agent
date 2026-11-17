@@ -3,6 +3,7 @@ name: Quality Gates
 on:
   pull_request:
     branches: [main, ci/automated-quality-gates]
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
   workflow_dispatch:
