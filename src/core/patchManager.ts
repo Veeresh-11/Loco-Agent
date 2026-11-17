@@ -31,6 +31,12 @@ export class PatchManager {
 
   async previewAndApply(filePath: string, patch: string, baseSnapshot?: string): Promise<string> {
     if (!filePath?.trim() || !patch?.trim()) return 'No patch to apply.';
+    if (Buffer.byteLength(patch, 'utf8') > MAX_PATCH_FILE_BYTES) {
+      return 'Patch rejected: proposed content exceeds the 2 MiB safety limit.';
+    }
+    if (baseSnapshot && Buffer.byteLength(baseSnapshot, 'utf8') > MAX_PATCH_FILE_BYTES) {
+      return 'Patch rejected: base snapshot exceeds the 2 MiB safety limit.';
+    }
 
     try {
       const target = await this.resolveTarget(filePath);
