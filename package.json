@@ -63,30 +63,38 @@
         "title": "LOCO: Open Settings"
       },
       {
-        "command": "locoAgent.setEndpoint",
-        "title": "LOCO: Set Endpoint"
+        "command": "loco.setLocalEndpoint",
+        "title": "LOCO: Set Local Endpoint"
       },
       {
-        "command": "locoAgent.clearEndpoint",
-        "title": "LOCO: Clear Endpoint"
+        "command": "loco.clearLocalEndpoint",
+        "title": "LOCO: Clear Local Endpoint"
       },
       {
-        "command": "locoAgent.viewHistory",
+        "command": "loco.setApiKey",
+        "title": "LOCO: Set Cloud API Key"
+      },
+      {
+        "command": "loco.clearApiKey",
+        "title": "LOCO: Clear Cloud API Key"
+      },
+      {
+        "command": "loco.viewHistory",
         "title": "LOCO: View History"
       },
       {
-        "command": "locoAgent.exportHistory",
+        "command": "loco.exportHistory",
         "title": "LOCO: Export History"
       },
       {
-        "command": "locoAgent.clearHistory",
+        "command": "loco.clearHistory",
         "title": "LOCO: Clear History"
       }
     ],
     "configuration": {
       "title": "LOCO Agent",
       "properties": {
-        "locoAgent.provider": {
+        "loco.provider": {
           "type": "string",
           "default": "local",
           "enum": [
@@ -98,20 +106,74 @@
           ],
           "description": "Preferred provider for prompt routing."
         },
+        "locoAgent.provider": {
+          "type": "string",
+          "default": "local",
+          "enum": ["local", "openai", "azure", "ollama", "gpt4all"],
+          "description": "Deprecated alias for loco.provider."
+        },
         "locoAgent.endpoint": {
           "type": "string",
           "default": "https://api.openai.com/v1",
           "description": "Cloud AI provider endpoint."
         },
+        "loco.localEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Optional explicit local LLM endpoint; otherwise configured ports are probed."
+        },
         "locoAgent.localEndpoint": {
           "type": "string",
-          "default": "http://localhost:11434",
-          "description": "Local LLM endpoint for Ollama or other OpenAI-compatible servers."
+          "default": "",
+          "description": "Deprecated alias for loco.localEndpoint."
+        },
+        "locoAgent.localPorts": {
+          "type": "array",
+          "default": [9000, 9001, 8080, 7860, 5005],
+          "items": { "type": "number", "minimum": 1, "maximum": 65535 },
+          "description": "Local HTTP ports probed for compatible language-model servers."
         },
         "locoAgent.storeHistory": {
           "type": "boolean",
           "default": true,
           "description": "Store chat history in the extension state."
+        },
+        "locoAgent.pruneOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prune expired history when the extension activates."
+        },
+        "locoAgent.pruneDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Number of days to retain interaction history."
+        },
+        "locoAgent.maxHistoryEntries": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1,
+          "description": "Maximum number of history entries retained."
+        },
+        "locoAgent.azureEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI resource endpoint."
+        },
+        "locoAgent.azureDeployment": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI deployment name."
+        },
+        "locoAgent.azureApiVersion": {
+          "type": "string",
+          "default": "2024-10-21",
+          "description": "Azure OpenAI REST API version."
+        },
+        "locoAgent.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model name used by compatible local and cloud providers."
         }
       }
     }

@@ -36,14 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LocalProvider = void 0;
 const vscode = __importStar(require("vscode"));
 const historyStore_1 = require("../utils/historyStore");
-const DEFAULT_LOCAL_ENDPOINTS = [
-    'http://localhost:11434',
-    'http://127.0.0.1:11434',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://localhost:9000',
-    'http://127.0.0.1:9000'
-];
+const DEFAULT_LOCAL_PORTS = [9000, 9001, 8080, 7860, 5005, 11434, 8000, 4891];
+const PROBE_TIMEOUT_MS = 700;
 class LocalProvider {
     context;
     endpointKey = 'loco.localEndpoint';
@@ -51,103 +45,112 @@ class LocalProvider {
         this.context = context;
     }
     async getEndpoint() {
-        const config = vscode.workspace.getConfiguration('locoAgent');
-        const stored = this.context.globalState.get(this.endpointKey) ?? config.get('localEndpoint', 'http://localhost:11434');
-        const candidates = Array.from(new Set([stored, ...DEFAULT_LOCAL_ENDPOINTS]));
-        for (const endpoint of candidates) {
-            if (!endpoint) {
-                continue;
-            }
-            try {
-                const ok = await this.checkEndpoint(endpoint);
-                if (ok) {
-                    await this.context.globalState.update(this.endpointKey, endpoint);
-                    return endpoint;
-                }
-            }
-            catch {
-                // continue to the next endpoint
-            }
+        const config = vscode.workspace.getConfiguration();
+        const explicit = config.get('loco.localEndpoint')
+            || config.get('locoAgent.localEndpoint')
+            || this.context.globalState.get(this.endpointKey)
+            || this.context.globalState.get('loco.localEndpoint');
+        const configuredPorts = config.get('locoAgent.localPorts', DEFAULT_LOCAL_PORTS);
+        const ports = Array.from(new Set([...configuredPorts, ...DEFAULT_LOCAL_PORTS]))
+            .filter(port => Number.isInteger(port) && port > 0 && port <= 65535);
+        const discovered = ports.flatMap(port => [`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
+        const candidates = Array.from(new Set([explicit, ...discovered].filter((value) => Boolean(value))));
+        const health = await Promise.all(candidates.map(endpoint => this.checkEndpoint(endpoint)));
+        const index = health.findIndex(Boolean);
+        if (index >= 0) {
+            await this.context.globalState.update(this.endpointKey, candidates[index]);
+            return candidates[index];
         }
-        return 'http://localhost:11434';
+        return '';
     }
     async ask(job) {
         const endpoint = await this.getEndpoint();
+        if (!endpoint)
+            return null;
         const prompt = job?.prompt || this.buildPrompt(job);
+        const model = job.model || vscode.workspace.getConfiguration('locoAgent').get('model', 'llama3.1');
         try {
-            const response = await fetch(`${endpoint.replace(/\/$/, '')}/api/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: 'llama3.1',
-                    stream: false,
-                    messages: [{ role: 'user', content: prompt }]
-                })
+            const compatible = await this.request(endpoint, '/v1/chat/completions', {
+                model,
+                messages: [{ role: 'user', content: prompt }],
+                stream: false
             });
-            if (!response.ok) {
-                const fallback = await this.tryGenerateFallback(endpoint, prompt);
-                return fallback;
-            }
-            const json = await response.json();
-            const text = json?.message?.content ?? json?.response ?? json?.content ?? '';
-            return typeof text === 'string' ? { text } : { text: JSON.stringify(text) };
-        }
-        catch {
-            try {
-                const fallback = await this.tryGenerateFallback(endpoint, prompt);
-                return fallback;
-            }
-            catch {
-                return null;
+            if (compatible.ok) {
+                const json = await compatible.json();
+                const text = json?.choices?.[0]?.message?.content;
+                if (typeof text === 'string' && text.trim())
+                    return { text };
             }
         }
+        catch { /* try the native local APIs */ }
+        try {
+            const response = await this.request(endpoint, '/api/chat', {
+                model,
+                stream: false,
+                messages: [{ role: 'user', content: prompt }]
+            });
+            if (response.ok) {
+                const json = await response.json();
+                const text = json?.message?.content ?? json?.response ?? json?.content;
+                if (typeof text === 'string' && text.trim())
+                    return { text };
+            }
+        }
+        catch { /* try generation endpoint */ }
+        try {
+            const response = await this.request(endpoint, '/api/generate', { model, prompt, stream: false });
+            if (response.ok) {
+                const json = await response.json();
+                const text = json?.response ?? json?.text;
+                if (typeof text === 'string' && text.trim())
+                    return { text };
+            }
+        }
+        catch { /* caller can fall back to a cloud provider */ }
+        return null;
     }
     async stream(job, onChunk) {
         const result = await this.ask(job);
-        if (result && typeof result === 'object' && 'text' in result && result.text) {
-            onChunk(result.text);
-            return;
-        }
-        if (typeof result === 'string' && result) {
-            onChunk(result);
-        }
+        const text = typeof result === 'string' ? result : result?.text;
+        if (text)
+            onChunk(text);
     }
     async estimateLatency() {
         return 150;
     }
-    async checkEndpoint(endpoint) {
-        const candidate = endpoint.replace(/\/$/, '');
+    async request(endpoint, path, body) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30_000);
         try {
-            const response = await fetch(`${candidate}/api/tags`, { method: 'GET', headers: { Accept: 'application/json' } });
-            return response.ok;
+            return await fetch(`${endpoint.replace(/\/$/, '')}${path}`, {
+                method: body === undefined ? 'GET' : 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: body === undefined ? undefined : JSON.stringify(body),
+                signal: controller.signal
+            });
         }
-        catch {
-            try {
-                const response = await fetch(`${candidate}/health`, { method: 'GET' });
-                return response.ok;
-            }
-            catch {
-                return false;
-            }
+        finally {
+            clearTimeout(timeout);
         }
     }
-    async tryGenerateFallback(endpoint, prompt) {
+    async checkEndpoint(endpoint) {
         const candidate = endpoint.replace(/\/$/, '');
-        const response = await fetch(`${candidate}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'llama3.1',
-                prompt,
-                stream: false
-            })
-        });
-        if (!response.ok) {
-            return { text: 'Local provider is unavailable.' };
+        for (const path of ['/api/tags', '/v1/models', '/health']) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+            try {
+                const response = await fetch(`${candidate}${path}`, { signal: controller.signal });
+                if (response.ok)
+                    return true;
+            }
+            catch {
+                // Continue probing the remaining health endpoints.
+            }
+            finally {
+                clearTimeout(timeout);
+            }
         }
-        const json = await response.json();
-        const generatedText = json?.response ?? json?.text ?? '';
-        return { text: String(generatedText || 'Local generate endpoint responded without text.') };
+        return false;
     }
     buildPrompt(job) {
         const task = job?.task ?? job?.prompt ?? 'General assistance';

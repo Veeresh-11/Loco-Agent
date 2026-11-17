@@ -8,26 +8,34 @@ export interface RAGChunk {
 }
 
 export class RAGEngine {
+  private cachedChunks: RAGChunk[] = [];
+  private indexedAt = 0;
+  private readonly cacheTtlMs = 30_000;
+  private readonly maxFileBytes = 1_000_000;
   private readonly defaultExtensions = [
     'ts', 'tsx', 'js', 'jsx', 'json', 'md', 'py', 'java', 'cs', 'go', 'rs', 'yaml', 'yml', 'txt', 'sql'
   ];
 
-  async indexWorkspace(): Promise<RAGChunk[]> {
+  async indexWorkspace(force = false): Promise<RAGChunk[]> {
+    if (!force && this.cachedChunks.length && Date.now() - this.indexedAt < this.cacheTtlMs) {
+      return this.cachedChunks;
+    }
+
     const files = await vscode.workspace.findFiles(
       '**/*.{ts,tsx,js,jsx,json,md,py,java,cs,go,rs,yaml,yml,txt,sql}',
-      '**/node_modules/**',
-      250
+      '**/{node_modules,.git,out,dist,coverage}/**',
+      300
     );
 
     const chunks: RAGChunk[] = [];
 
     for (const file of files) {
       try {
+        const stat = await vscode.workspace.fs.stat(file);
+        if (stat.size > this.maxFileBytes) continue;
         const raw = await vscode.workspace.fs.readFile(file);
         const text = Buffer.from(raw).toString('utf8');
-        if (!text.trim()) {
-          continue;
-        }
+        if (!text.trim() || text.includes('\u0000')) continue;
 
         const blocks = this.chunkText(text, 900, 180);
         for (const [index, block] of blocks.entries()) {
@@ -43,7 +51,9 @@ export class RAGEngine {
       }
     }
 
-    return chunks;
+    this.cachedChunks = chunks;
+    this.indexedAt = Date.now();
+    return this.cachedChunks;
   }
 
   async retrieve(query: string, topK: number = 5): Promise<RAGChunk[]> {
@@ -52,7 +62,7 @@ export class RAGEngine {
       return [];
     }
 
-    const queryTerms = this.normalize(query).split(/\s+/).filter(Boolean);
+    const queryTerms = this.normalize(query).split(/\s+/).filter(term => term.length > 1);
     if (!queryTerms.length) {
       return [];
     }
@@ -62,7 +72,7 @@ export class RAGEngine {
       const score = queryTerms.reduce((total, term) => {
         const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         return total + (haystack.match(pattern)?.length ?? 0);
-      }, 0);
+      }, 0) + queryTerms.reduce((total, term) => total + (this.normalize(chunk.path).includes(term) ? 2 : 0), 0);
       return { ...chunk, score };
     });
 

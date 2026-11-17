@@ -1,137 +1,128 @@
 import * as vscode from 'vscode';
 import { LOCOAgent } from './core/locoAgent';
-import { pruneHistory, getAllHistory, clearHistory } from './utils/historyStore';
+import { clearHistory, getAllHistory, pruneHistory } from './utils/historyStore';
 import { SidebarChatProvider } from './ui/webview';
+import { OutputView } from './ui/outputView';
+import { Settings } from './ui/settings';
+import { Secrets } from './utils/secrets';
 
-export async function activate(context: vscode.ExtensionContext) {
-  const output = vscode.window.createOutputChannel('LOCO Agent');
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const outputView = new OutputView('LOCO Agent');
+  const output = outputView.outputChannel;
   const agent = new LOCOAgent(context, output);
   const sidebarProvider = new SidebarChatProvider(context, agent);
 
-  try {
-    const cfg = vscode.workspace.getConfiguration('locoAgent');
-    if (cfg.get<boolean>('pruneOnStartup', true)) {
-      await pruneHistory(context, cfg.get<number>('pruneDays', 30));
-    }
-  } catch {
-    // no-op for config fallback
+  const config = vscode.workspace.getConfiguration('locoAgent');
+  if (config.get<boolean>('pruneOnStartup', true)) {
+    await pruneHistory(context, config.get<number>('pruneDays', 30));
   }
 
-  const inlineProvider = vscode.languages.registerInlineCompletionItemProvider(
-    { pattern: '**' },
-    {
-      async provideInlineCompletionItems(document, position) {
-        try {
-          const prompt = document.getText();
-          const reply = await agent.runTask({
-            prompt,
-            context: document.languageId,
-            filePath: document.uri.fsPath,
-            code: document.getText()
-          });
-
-          if (reply && reply.trim()) {
-            return [{
-              insertText: reply,
-              range: new vscode.Range(position, position)
-            } as vscode.InlineCompletionItem];
-          }
-        } catch (error) {
-          output.appendLine(`Inline completion failed: ${String(error)}`);
-        }
-        return [];
-      }
-    }
-  );
-
   const runAgentCommand = vscode.commands.registerCommand('loco.runAgent', async (promptText?: string) => {
+    const editor = vscode.window.activeTextEditor;
     const prompt = promptText ?? await vscode.window.showInputBox({
-      prompt: 'Describe the change or task for LOCO Agent',
-      placeHolder: 'Refactor the current module, fix the bug, or explain the code.'
+      prompt: 'Describe the task for LOCO Agent',
+      placeHolder: 'Explain, fix, or refactor the selected code.'
     });
+    if (!prompt?.trim()) return;
 
-    if (!prompt || !prompt.trim()) {
-      return;
+    try {
+      const reply = await agent.runTask({
+        prompt: prompt.trim(),
+        context: editor?.document.languageId ?? 'chat',
+        filePath: editor?.document.uri.fsPath,
+        code: editor?.document.getText(editor.selection) || editor?.document.getText()
+      });
+      outputView.log(`User: ${prompt.trim()}`);
+      outputView.log(`LOCO: ${reply}`);
+      output.show(true);
+      return reply;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      outputView.log(`Task failed: ${message}`);
+      vscode.window.showErrorMessage(`LOCO Agent failed: ${message}`);
+      return undefined;
     }
-
-    const reply = await agent.runTask({
-      prompt,
-      context: 'chat',
-      filePath: vscode.window.activeTextEditor?.document.uri.fsPath,
-      code: vscode.window.activeTextEditor?.document.getText()
-    });
-
-    output.appendLine(`User: ${prompt}`);
-    output.appendLine(`LOCO: ${reply}`);
-    output.show(true);
-    vscode.window.showInformationMessage('LOCO Agent finished the task.');
-    return reply;
   });
 
   const openAssistantCommand = vscode.commands.registerCommand('loco.openAssistant', async () => {
-    vscode.commands.executeCommand('workbench.view.extension.loco-sidebar');
-    const provider = sidebarProvider; 
-    provider.show();
+    await vscode.commands.executeCommand('workbench.view.extension.loco-sidebar');
+    sidebarProvider.show();
   });
 
-  const openSettingsCommand = vscode.commands.registerCommand('loco.openSettings', async () => {
-    await vscode.commands.executeCommand('workbench.action.openSettings', 'locoAgent');
-  });
+  const openSettingsCommand = vscode.commands.registerCommand('loco.openSettings', () => Settings.openSettings());
 
-  const historyCommands = [
-    vscode.commands.registerCommand('locoAgent.setEndpoint', async () => {
+  const commands = [
+    vscode.commands.registerCommand('loco.setLocalEndpoint', async () => {
       const endpoint = await vscode.window.showInputBox({
-        prompt: 'Set endpoint',
-        placeHolder: 'http://localhost:11434'
+        prompt: 'Set the local language-model server endpoint',
+        placeHolder: 'http://localhost:9000',
+        validateInput: value => {
+          if (!value) return undefined;
+          try {
+            const parsed = new URL(value);
+            return ['http:', 'https:'].includes(parsed.protocol) ? undefined : 'Use an http or https URL.';
+          } catch {
+            return 'Enter a valid http or https URL.';
+          }
+        }
       });
-      if (endpoint) {
-        await context.globalState.update('loco.localEndpoint', endpoint);
-        vscode.window.showInformationMessage(`Endpoint set to ${endpoint}`);
+      if (endpoint?.trim()) {
+        await vscode.workspace.getConfiguration().update('loco.localEndpoint', endpoint.trim(), vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage('Local endpoint saved.');
       }
     }),
-    vscode.commands.registerCommand('locoAgent.clearEndpoint', async () => {
+    vscode.commands.registerCommand('loco.clearLocalEndpoint', async () => {
+      await vscode.workspace.getConfiguration().update('loco.localEndpoint', undefined, vscode.ConfigurationTarget.Global);
       await context.globalState.update('loco.localEndpoint', undefined);
-      vscode.window.showInformationMessage('Endpoint cleared.');
+      vscode.window.showInformationMessage('Local endpoint cleared; automatic port detection is enabled.');
     }),
-    vscode.commands.registerCommand('locoAgent.viewHistory', async () => {
+    vscode.commands.registerCommand('loco.setApiKey', async () => {
+      const service = await vscode.window.showQuickPick(['openai', 'azure'], { placeHolder: 'Select the cloud provider' });
+      if (!service) return;
+      const apiKey = await vscode.window.showInputBox({
+        prompt: `Enter the ${service === 'azure' ? 'Azure OpenAI' : 'OpenAI'} API key (stored securely by VS Code)`,
+        password: true,
+        ignoreFocusOut: true
+      });
+      if (!apiKey?.trim()) return;
+      await Secrets.setApiKey(context, service, apiKey);
+      vscode.window.showInformationMessage(`${service === 'azure' ? 'Azure OpenAI' : 'OpenAI'} API key stored securely.`);
+    }),
+    vscode.commands.registerCommand('loco.clearApiKey', async () => {
+      const service = await vscode.window.showQuickPick(['openai', 'azure'], { placeHolder: 'Select the key to remove' });
+      if (!service) return;
+      await Secrets.clearApiKey(context, service);
+      vscode.window.showInformationMessage('Cloud API key removed.');
+    }),
+    vscode.commands.registerCommand('loco.viewHistory', () => {
       const history = getAllHistory(context);
       if (!history.length) {
         vscode.window.showInformationMessage('No history available.');
         return;
       }
-
-      const rendered = history
+      outputView.clear();
+      outputView.log(history
         .map(entry => `[${new Date(entry.timestamp).toISOString()}] ${entry.role.toUpperCase()}: ${entry.text}`)
-        .join('\n');
-
-      output.clear();
+        .join('\n'));
       output.show(true);
-      output.appendLine(rendered);
     }),
-    vscode.commands.registerCommand('locoAgent.exportHistory', async () => {
+    vscode.commands.registerCommand('loco.exportHistory', async () => {
       const history = getAllHistory(context);
       if (!history.length) {
         vscode.window.showInformationMessage('No history to export.');
         return;
       }
-
       const file = await vscode.window.showSaveDialog({
         defaultUri: vscode.Uri.file(`loco-history-${Date.now()}.json`),
         filters: { JSON: ['json'] }
       });
-
-      if (!file) {
-        return;
-      }
-
+      if (!file) return;
       await vscode.workspace.fs.writeFile(file, Buffer.from(JSON.stringify(history, null, 2), 'utf8'));
-      vscode.window.showInformationMessage(`History exported to ${file.fsPath}`);
+      vscode.window.showInformationMessage('LOCO history exported.');
     }),
-    vscode.commands.registerCommand('locoAgent.clearHistory', async () => {
-      const choice = await vscode.window.showQuickPick(['Yes', 'No'], {
-        placeHolder: 'Clear all stored LOCO history?'
-      });
-      if (choice === 'Yes') {
+    vscode.commands.registerCommand('loco.clearHistory', async () => {
+      const choice = await vscode.window.showWarningMessage('Clear all stored LOCO history?', { modal: true }, 'Clear History');
+      if (choice === 'Clear History') {
         await clearHistory(context);
         vscode.window.showInformationMessage('LOCO history cleared.');
       }
@@ -139,18 +130,16 @@ export async function activate(context: vscode.ExtensionContext) {
   ];
 
   context.subscriptions.push(
-    output,
-    inlineProvider,
-    vscode.window.registerWebviewViewProvider('locoAgent.chatView', sidebarProvider),
+    outputView,
+    vscode.window.registerWebviewViewProvider(SidebarChatProvider.viewType, sidebarProvider),
     runAgentCommand,
     openAssistantCommand,
     openSettingsCommand,
-    ...historyCommands
+    ...commands
   );
-
-  output.appendLine('LOCO Agent activated');
+  outputView.log('LOCO Agent activated');
 }
 
-export function deactivate() {
-  // cleanup is handled by extension subscriptions
+export function deactivate(): void {
+  // VS Code disposes registered resources through ExtensionContext.subscriptions.
 }

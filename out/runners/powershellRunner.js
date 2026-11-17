@@ -35,16 +35,26 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PowerShellRunner = void 0;
 const vscode = __importStar(require("vscode"));
+const cp = __importStar(require("child_process"));
+const util = __importStar(require("util"));
 class PowerShellRunner {
+    static execFile = util.promisify(cp.execFile);
     static async run(script) {
+        const trimmed = script.trim();
+        if (!trimmed)
+            return 'No PowerShell script was provided.';
+        if (trimmed.length > 20_000)
+            return 'Script rejected: it exceeds the 20,000 character safety limit.';
+        const confirm = await vscode.window.showWarningMessage('Run this PowerShell script on your machine? Review the script before continuing.', { modal: true }, 'Run Script');
+        if (confirm !== 'Run Script')
+            return 'Script execution cancelled.';
         try {
-            const terminal = vscode.window.createTerminal({ name: 'LOCO PowerShell' });
-            terminal.sendText(script);
-            terminal.show();
-            return 'Script executed';
+            const { stdout, stderr } = await this.execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', trimmed], { windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 });
+            return (stdout || stderr || 'Script completed without output.').trim().slice(0, 20_000);
         }
-        catch (e) {
-            return `Error: ${e}`;
+        catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            return `PowerShell execution failed: ${detail.slice(0, 1000)}`;
         }
     }
 }

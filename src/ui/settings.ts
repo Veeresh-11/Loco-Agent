@@ -2,20 +2,23 @@ import * as vscode from 'vscode';
 
 export class Settings {
   static async openSettings() {
-    vscode.commands.executeCommand('workbench.action.openSettings', 'locoAgent');
+    await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:veeresh.loco-agent');
   }
 
   static async getProvider(): Promise<string> {
     try {
-      return vscode.workspace.getConfiguration('locoAgent').get('provider', 'local') as string;
+      const config = vscode.workspace.getConfiguration();
+      return config.get<string>('loco.provider') ?? config.get<string>('locoAgent.provider', 'local');
     } catch {
       return 'local';
     }
   }
 
   static async setProvider(provider: string) {
-    try {
-      await vscode.workspace.getConfiguration('locoAgent').update('provider', provider, vscode.ConfigurationTarget.Workspace);
-    } catch {}
+    const allowed = ['local', 'openai', 'azure', 'ollama', 'gpt4all'];
+    if (!allowed.includes(provider)) {
+      throw new Error(`Unsupported LOCO provider: ${provider}`);
+    }
+    await vscode.workspace.getConfiguration().update('loco.provider', provider, vscode.ConfigurationTarget.Global);
   }
 }

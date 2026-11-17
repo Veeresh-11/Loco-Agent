@@ -43,11 +43,17 @@ class OutputView {
     log(message) {
         this.channel.appendLine(message);
     }
+    get outputChannel() {
+        return this.channel;
+    }
     show() {
         this.channel.show();
     }
     clear() {
         this.channel.clear();
+    }
+    dispose() {
+        this.channel.dispose();
     }
 }
 exports.OutputView = OutputView;

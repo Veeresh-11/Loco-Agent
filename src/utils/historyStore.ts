@@ -9,9 +9,14 @@ export interface HistoryEntry {
 
 export async function addHistoryEntry(context: vscode.ExtensionContext, entry: HistoryEntry): Promise<void> {
   try {
+    const config = vscode.workspace.getConfiguration('locoAgent');
+    if (!config.get<boolean>('storeHistory', true)) {
+      return;
+    }
     const hist = context.globalState.get<HistoryEntry[]>('loco.history', []);
-    hist.push(entry);
-    await context.globalState.update('loco.history', hist);
+    const maxEntries = Math.max(1, config.get<number>('maxHistoryEntries', 1000));
+    const entries = [...hist, entry].slice(-maxEntries);
+    await context.globalState.update('loco.history', entries);
   } catch {}
 }
 
@@ -42,8 +47,13 @@ export async function clearHistory(context: vscode.ExtensionContext): Promise<vo
 export async function pruneHistory(context: vscode.ExtensionContext, days: number): Promise<void> {
   try {
     const hist = getAllHistory(context);
-    const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
-    const pruned = hist.filter(e => e.timestamp >= cutoffTime);
+    const retentionDays = Number.isFinite(days) ? Math.max(1, days) : 30;
+    const cutoffTime = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    const maxEntries = Math.max(1, vscode.workspace.getConfiguration('locoAgent').get<number>('maxHistoryEntries', 1000));
+    const pruned = hist
+      .filter(e => Number.isFinite(e.timestamp) && e.timestamp >= cutoffTime)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .slice(-maxEntries);
     await context.globalState.update('loco.history', pruned);
   } catch {}
 }

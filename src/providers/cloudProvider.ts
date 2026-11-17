@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Secrets } from '../utils/secrets';
 
 export interface CloudRequestOptions {
   model?: string;
@@ -10,14 +11,16 @@ export class CloudProvider {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async ask(prompt: string, options: CloudRequestOptions = {}): Promise<string> {
-    const config = vscode.workspace.getConfiguration('locoAgent');
-    const endpoint = config.get<string>('endpoint', 'https://api.openai.com/v1');
-    const apiKey = process.env.OPENAI_API_KEY || config.get<string>('apiKey', '');
+    const config = vscode.workspace.getConfiguration();
+    const endpoint = config.get<string>('locoAgent.endpoint', 'https://api.openai.com/v1').trim();
+    const apiKey = await Secrets.getApiKey(this.context, 'openai') || process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
-      return 'Cloud provider is not configured. Add an API key or set the endpoint in VS Code settings.';
+      throw new Error('OpenAI API key is not configured. Set it with the LOCO secret command or OPENAI_API_KEY.');
     }
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
       const response = await fetch(`${endpoint.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
@@ -30,17 +33,23 @@ export class CloudProvider {
           temperature: options.temperature ?? 0.2,
           max_tokens: options.maxTokens ?? 1200,
           messages: [{ role: 'user', content: prompt }]
-        })
+        }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
-        return `Cloud request failed with status ${response.status}.`;
+        const details = (await response.text()).slice(0, 500);
+        throw new Error(`OpenAI-compatible request failed (${response.status}): ${details}`);
       }
 
       const json = await response.json() as any;
-      return String(json?.choices?.[0]?.message?.content ?? json?.output_text ?? '');
+      const content = json?.choices?.[0]?.message?.content ?? json?.output_text;
+      if (typeof content !== 'string' || !content.trim()) throw new Error('Cloud provider returned an empty response.');
+      return content;
     } catch (error) {
-      return `Cloud provider error: ${String(error)}`;
+      throw error instanceof Error ? error : new Error(`Cloud provider error: ${String(error)}`);
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

@@ -41,13 +41,14 @@ const providerManager_1 = require("../providers/providerManager");
 const historyStore_1 = require("../utils/historyStore");
 const ragEngine_1 = require("./ragEngine");
 const jobQueue_1 = require("./jobQueue");
+const threeWayMerge_apply_1 = require("./threeWayMerge.apply");
 class LOCOAgent {
     context;
     output;
     providerManager;
     ragEngine;
     jobQueue;
-    execFile = util.promisify(cp.exec);
+    execFile = util.promisify(cp.execFile);
     constructor(context, output) {
         this.context = context;
         this.output = output;
@@ -77,7 +78,7 @@ class LOCOAgent {
             const plan = this.buildPlan(job);
             const workspaceContext = await this.ragEngine.retrieve(job.prompt ?? '', 5);
             const fileText = job.filePath ? await this.readFile(job.filePath) : '';
-            const shellStatus = await this.executeShell('git rev-parse --show-toplevel 2>/dev/null || pwd');
+            const shellStatus = await this.executeShell('git rev-parse --show-toplevel');
             let response = await this.providerManager.generate(this.composePrompt(job, plan, workspaceContext, fileText, shellStatus), {
                 complexity: job.complexity,
                 estimatedTokens: job.estimatedTokens,
@@ -119,15 +120,26 @@ class LOCOAgent {
         }
     }
     async executeShell(command) {
+        const allowedCommands = {
+            'git rev-parse --show-toplevel': ['rev-parse', '--show-toplevel'],
+            'git status --short --branch': ['status', '--short', '--branch']
+        };
+        const args = allowedCommands[command.trim()];
+        if (!args) {
+            throw new Error('Shell execution is restricted to approved, read-only Git status commands.');
+        }
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!cwd)
+            return 'No workspace folder is open.';
         try {
-            const { stdout } = await this.execFile(command);
+            const { stdout } = await this.execFile('git', args, { cwd, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 });
             return stdout.trim();
         }
         catch (error) {
-            return String(error instanceof Error ? error.message : error);
+            return `Git status unavailable: ${String(error instanceof Error ? error.message : error)}`;
         }
     }
-    async applyPatch(filePath, patch) {
+    async applyPatch(filePath, patch, baseSnapshot) {
         if (!filePath || !patch.trim()) {
             return 'No patch to apply.';
         }
@@ -135,9 +147,15 @@ class LOCOAgent {
             const uri = vscode.Uri.file(filePath);
             const current = await vscode.workspace.fs.readFile(uri);
             const original = Buffer.from(current).toString('utf8');
-            const updated = original + (original.endsWith('\n') ? '' : '\n') + patch;
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(updated, 'utf8'));
-            return `Applied patch to ${filePath}`;
+            const merge = (0, threeWayMerge_apply_1.applyThreeWayMerge)({
+                base: baseSnapshot ?? original,
+                local: original,
+                remote: patch
+            });
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(merge.merged, 'utf8'));
+            return merge.conflicts
+                ? `Applied patch to ${filePath} with ${merge.conflicts} conflict(s). Review the LOCAL/REMOTE markers.`
+                : `Applied patch to ${filePath}`;
         }
         catch {
             return `Patch could not be written to ${filePath}.`;

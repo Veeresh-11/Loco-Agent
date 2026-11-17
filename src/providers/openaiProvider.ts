@@ -7,6 +7,7 @@ export class OpenAIProvider extends CloudProvider {
   }
 
   async ask(prompt: string): Promise<string> {
-    return super.ask(prompt, { model: 'gpt-4o-mini', temperature: 0.2, maxTokens: 1200 });
+    const model = vscode.workspace.getConfiguration('locoAgent').get<string>('model', 'gpt-4o-mini');
+    return super.ask(prompt, { model, temperature: 0.2, maxTokens: 1200 });
   }
 }

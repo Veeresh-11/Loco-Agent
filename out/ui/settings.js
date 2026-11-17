@@ -37,21 +37,23 @@ exports.Settings = void 0;
 const vscode = __importStar(require("vscode"));
 class Settings {
     static async openSettings() {
-        vscode.commands.executeCommand('workbench.action.openSettings', 'locoAgent');
+        await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:veeresh.loco-agent');
     }
     static async getProvider() {
         try {
-            return vscode.workspace.getConfiguration('locoAgent').get('provider', 'local');
+            const config = vscode.workspace.getConfiguration();
+            return config.get('loco.provider') ?? config.get('locoAgent.provider', 'local');
         }
         catch {
             return 'local';
         }
     }
     static async setProvider(provider) {
-        try {
-            await vscode.workspace.getConfiguration('locoAgent').update('provider', provider, vscode.ConfigurationTarget.Workspace);
+        const allowed = ['local', 'openai', 'azure', 'ollama', 'gpt4all'];
+        if (!allowed.includes(provider)) {
+            throw new Error(`Unsupported LOCO provider: ${provider}`);
         }
-        catch { }
+        await vscode.workspace.getConfiguration().update('loco.provider', provider, vscode.ConfigurationTarget.Global);
     }
 }
 exports.Settings = Settings;
