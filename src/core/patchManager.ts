@@ -27,7 +27,7 @@ interface PatchTarget {
 }
 
 export class PatchManager {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {}
 
   async previewAndApply(filePath: string, patch: string, baseSnapshot?: string): Promise<string> {
     if (!filePath?.trim() || !patch?.trim()) return 'No patch to apply.';
@@ -218,7 +218,6 @@ export class PatchManager {
   }
 
   private log(message: string): void {
-    // The extension host's output channel is intentionally not required for recovery.
-    console.info(`[LOCO PatchManager] ${message}`);
+    this.output.appendLine(`[PatchManager] ${message}`);
   }
 }
