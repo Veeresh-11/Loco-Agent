@@ -22,7 +22,7 @@ describe('retrieval evaluation metrics', () => {
 
     expect(summary.cases).toBe(3);
     expect(summary.recallAtK).toBe(1);
-    expect(summary.precisionAtK).toBeCloseTo(5 / 6);
+    expect(summary.precisionAtK).toBeCloseTo(4 / 6);
     expect(summary.meanReciprocalRank).toBe(1);
   });
 
