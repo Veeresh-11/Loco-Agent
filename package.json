@@ -27,7 +27,8 @@
     "onCommand:loco.runAgent",
     "onCommand:loco.openAssistant",
     "onCommand:loco.openSettings",
-    "onView:locoAgent.chatView"
+    "onView:locoAgent.chatView",
+    "onCommand:loco.restorePatchBackup"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -89,6 +90,10 @@
       {
         "command": "loco.clearHistory",
         "title": "LOCO: Clear History"
+      },
+      {
+        "command": "loco.restorePatchBackup",
+        "title": "LOCO: Restore Patch Backup"
       }
     ],
     "configuration": {
@@ -109,7 +114,13 @@
         "locoAgent.provider": {
           "type": "string",
           "default": "local",
-          "enum": ["local", "openai", "azure", "ollama", "gpt4all"],
+          "enum": [
+            "local",
+            "openai",
+            "azure",
+            "ollama",
+            "gpt4all"
+          ],
           "description": "Deprecated alias for loco.provider."
         },
         "locoAgent.endpoint": {
@@ -129,8 +140,18 @@
         },
         "locoAgent.localPorts": {
           "type": "array",
-          "default": [9000, 9001, 8080, 7860, 5005],
-          "items": { "type": "number", "minimum": 1, "maximum": 65535 },
+          "default": [
+            9000,
+            9001,
+            8080,
+            7860,
+            5005
+          ],
+          "items": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 65535
+          },
           "description": "Local HTTP ports probed for compatible language-model servers."
         },
         "locoAgent.storeHistory": {
