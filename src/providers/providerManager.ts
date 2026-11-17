@@ -85,14 +85,14 @@ export class ProviderManager {
 
   async generateStream(prompt: string, onChunk: (chunk: string) => void, task?: { complexity?: string; estimatedTokens?: number; context?: string }): Promise<void> {
     const { route, fallback, localModel } = this.selectRoute(prompt, task);
-    const attempt = async (provider: ProviderName): Promise<void> => {
+    const attempt = async (provider: ProviderName, emit: (chunk: string) => void): Promise<void> => {
       switch (provider) {
-        case 'azure': return this.azureProvider.stream(prompt, onChunk);
+        case 'azure': return this.azureProvider.stream(prompt, emit);
         case 'openai':
-        case 'cloud': return this.openAIProvider.stream(prompt, onChunk);
-        case 'ollama': return this.localProvider.stream({ prompt, provider: 'ollama', model: localModel }, onChunk);
-        case 'gpt4all': return this.localProvider.stream({ prompt, provider: 'gpt4all', model: 'gpt4all' }, onChunk);
-        default: return this.localProvider.stream({ prompt, model: localModel }, onChunk);
+        case 'cloud': return this.openAIProvider.stream(prompt, emit);
+        case 'ollama': return this.localProvider.stream({ prompt, provider: 'ollama', model: localModel }, emit);
+        case 'gpt4all': return this.localProvider.stream({ prompt, provider: 'gpt4all', model: 'gpt4all' }, emit);
+        default: return this.localProvider.stream({ prompt, model: localModel }, emit);
       }
     };
 
@@ -101,7 +101,7 @@ export class ProviderManager {
     for (const provider of [route, fallback]) {
       let providerEmitted = false;
       try {
-        await attempt(provider);
+        await attempt(provider, chunk => { providerEmitted = true; emitted = true; onChunk(chunk); });
         if (providerEmitted || emitted) return;
         throw new Error('Provider completed without emitting any response text.');
       } catch (error) {
