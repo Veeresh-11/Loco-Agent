@@ -8,7 +8,7 @@ This document describes behavior verified in the current source tree. Update it 
 2. The task is submitted to `JobQueue`. The configured concurrency is read from `locoAgent.maxConcurrency` and clamped to 1–16. The queue limits active handlers; it does not currently impose a maximum pending-queue length.
 3. `RAGEngine` searches up to 300 supported workspace files, skips files larger than 1 MB and common generated/dependency folders, and creates 900-character chunks with 180-character overlap.
 4. Retrieval normalizes the query and chunk text, scores query-term occurrences and path matches, and returns the top five matching chunks. The index cache lifetime is 30 seconds.
-5. `LOCOAgent` composes a prompt with the task, simple keyword-derived plan, retrieved snippets, active file content when available, and Git workspace root/status.
+5. `LOCOAgent` composes a prompt with the task, simple keyword-derived plan, retrieved snippets, active file content when available, and the Git repository root path.
 6. `ProviderManager` chooses a route using `RoutingPolicy` for the `local` and `cloud` preferences; explicit provider selections such as `openai`, `azure`, `ollama` and `gpt4all` select their corresponding adapters.
 7. `runWithProviderFallback()` tries the preferred provider and then a fallback sequentially. Empty responses and thrown errors are recorded as failures.
 8. The completed response is stored in local history when history storage is enabled and returned to the command or sidebar UI.
