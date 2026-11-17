@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { TextDecoder } from 'util';
-import { applyThreeWayMerge } from './threeWayMerge.apply';
+import { applyThreeWayMerge } from './threeWayMerge.apply';\nimport { isPathWithinWorkspace } from './patchPath';
 
 const MAX_PATCH_FILE_BYTES = 2 * 1024 * 1024;
 const BACKUP_STATE_KEY = 'loco.patchBackups';
@@ -137,7 +137,7 @@ export class PatchManager {
     for (const folder of workspaceFolders) {
       try {
         const realRoot = await fs.promises.realpath(folder.uri.fsPath);
-        if (this.isWithin(realRoot, realTarget)) {
+        if (isPathWithinWorkspace(realRoot, realTarget)) {
           inWorkspace = true;
           break;
         }
@@ -209,11 +209,6 @@ export class PatchManager {
       }
       throw error;
     }
-  }
-
-  private isWithin(root: string, candidate: string): boolean {
-    const relative = path.relative(root, candidate);
-    return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   }
 
   private errorMessage(error: unknown): string {
