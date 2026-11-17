@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { TextDecoder } from 'util';
-import { applyThreeWayMerge } from './threeWayMerge.apply';\nimport { isPathWithinWorkspace } from './patchPath';
+import { applyThreeWayMerge } from './threeWayMerge.apply';
+import { isPathWithinWorkspace } from './patchPath';
 
 const MAX_PATCH_FILE_BYTES = 2 * 1024 * 1024;
 const BACKUP_STATE_KEY = 'loco.patchBackups';
