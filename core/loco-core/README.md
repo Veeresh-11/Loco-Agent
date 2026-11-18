@@ -50,3 +50,8 @@ Important limitations:
 - This is not yet connected to action execution.
 
 This provides a binding-validation prototype, not a complete approval system.
+
+
+## Audit event DTO
+
+`audit_event` provides typed v1.0 audit metadata and bounded scalar `details` validation (32 keys, 128-byte keys, 2,000-byte string values). Call `AuditEvent::validate()` before serialization/storage. It is not a redaction engine and scalar fields can still contain secrets; sensitive-value filtering is a separate required layer.
