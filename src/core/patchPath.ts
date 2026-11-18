@@ -5,6 +5,8 @@ import * as path from 'path';
  * normalization. Callers must resolve symlinks before using this check.
  */
 export function isPathWithinWorkspace(root: string, candidate: string): boolean {
+  if (!root?.trim() || !candidate?.trim()) return false;
+
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative !== '' &&
     relative !== '..' &&
