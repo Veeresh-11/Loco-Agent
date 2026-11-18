@@ -123,6 +123,47 @@ mod tests {
     }
 
     #[test]
+    fn captures_consistent_payload_during_atomic_path_replacement_stress() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.txt");
+        let first = vec![b'A'; 4096];
+        let second = vec![b'B'; 8192];
+        std::fs::write(&target, &first).unwrap();
+
+        let adapter = Arc::new(LinuxWorkspaceSnapshotAdapter::new(dir.path(), "workspace").unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_target = target.clone();
+        let writer_barrier = barrier.clone();
+        let first_writer = first.clone();
+        let second_writer = second.clone();
+        let writer = thread::spawn(move || {
+            writer_barrier.wait();
+            for i in 0..100 {
+                let replacement = writer_target.with_file_name(format!("replacement-{i}.tmp"));
+                let bytes = if i % 2 == 0 { &first_writer } else { &second_writer };
+                std::fs::write(&replacement, bytes).unwrap();
+                std::fs::rename(&replacement, &writer_target).unwrap();
+            }
+        });
+
+        barrier.wait();
+        let request = SnapshotCaptureRequest::new("target.txt", 8192).unwrap();
+        for _ in 0..100 {
+            if let Ok(captured) = adapter.capture(&request) {
+                let bytes = captured.bytes();
+                assert!(bytes == first.as_slice() || bytes == second.as_slice(),
+                    "capture returned unexpected partial or mixed payload");
+                assert_eq!(captured.snapshot().byte_length, bytes.len() as u64);
+                assert_eq!(crate::snapshot_payload::validate_snapshot_payload(captured.snapshot(), bytes), Ok(()));
+            }
+        }
+        writer.join().unwrap();
+    }
+
+    #[test]
     fn captures_regular_file_and_empty_file() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("sample.txt"), b"hello").unwrap();
