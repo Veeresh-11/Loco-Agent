@@ -99,6 +99,45 @@ mod tests {
     }
 
     #[test]
+    fn accepts_exact_request_limit_and_rejects_one_byte_over() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("exact"), b"1234").unwrap();
+        std::fs::write(dir.path().join("over"), b"12345").unwrap();
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(dir.path(), "workspace").unwrap();
+        let exact = adapter.capture(&SnapshotCaptureRequest::new("exact", 4).unwrap()).unwrap();
+        assert_eq!(exact.bytes(), b"1234");
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("over", 4).unwrap()),
+            Err(SnapshotPayloadError::LimitExceeded)
+        ));
+    }
+
+    #[test]
+    fn rejects_directory_and_intermediate_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("nested")).unwrap();
+        std::fs::write(outside.path().join("target.txt"), b"outside").unwrap();
+        symlink(outside.path(), dir.path().join("linked-dir")).unwrap();
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(dir.path(), "workspace").unwrap();
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("nested", 100).unwrap()),
+            Err(SnapshotPayloadError::InvalidFileType)
+        ));
+        assert!(adapter.capture(&SnapshotCaptureRequest::new("linked-dir/target.txt", 100).unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_target_without_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(dir.path(), "workspace").unwrap();
+        assert_eq!(
+            adapter.capture(&SnapshotCaptureRequest::new("missing.txt", 100).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        );
+    }
+
+    #[test]
     fn enforces_request_limit() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("data"), b"12345").unwrap();
