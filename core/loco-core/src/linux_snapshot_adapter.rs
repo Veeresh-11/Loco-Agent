@@ -46,7 +46,7 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
         let fd: OwnedFd = openat2(
             &self.root,
             request.relative_path(),
-            OFlags::RDONLY | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
             Mode::empty(),
             ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
         ).map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
