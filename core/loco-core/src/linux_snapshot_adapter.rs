@@ -154,6 +154,22 @@ mod tests {
     }
 
     #[test]
+    fn fifo_target_is_rejected_without_blocking() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        let c_path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: c_path is a valid NUL-terminated path; mkfifo only creates a
+        // named FIFO at that path and does not dereference Rust memory.
+        let result = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) };
+        assert_eq!(result, 0, "mkfifo failed");
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(dir.path(), "workspace").unwrap();
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("pipe", 64).unwrap()),
+            Err(SnapshotPayloadError::InvalidFileType)
+        ));
+    }
+
+    #[test]
     fn enforces_request_limit() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("data"), b"12345").unwrap();

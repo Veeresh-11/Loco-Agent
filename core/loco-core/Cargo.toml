@@ -15,3 +15,4 @@ rustix = { version = "1.1.6", features = ["fs"] }
 
 [dev-dependencies]
 tempfile = "3"
+libc = "0.2"
