@@ -39,7 +39,9 @@ export async function evaluateRetrieval(
     const relevant = new Set(item.relevantPaths.map(normalizePath));
     if (!item.query.trim() || !relevant.size) throw new Error(`Evaluation case ${item.id} requires a query and relevant paths.`);
     const retrieved = await retrieve(item.query, topK);
-    const paths = retrieved.slice(0, topK).map(entry => normalizePath(entry.path));
+    // Count unique files only. Duplicate retrieval entries must not inflate recall,
+    // precision, or reciprocal-rank scores.
+    const paths = Array.from(new Set(retrieved.map(entry => normalizePath(entry.path)))).slice(0, topK);
     const relevantIndices = paths.map((path, index) => relevant.has(path) ? index + 1 : 0).filter(Boolean);
     const count = relevantIndices.length;
     results.push({
