@@ -14,6 +14,8 @@ pub enum SnapshotPayloadError {
     LimitExceeded,
     LengthMismatch,
     DigestMismatch,
+    AcquisitionFailed,
+    InvalidFileType,
 }
 
 
