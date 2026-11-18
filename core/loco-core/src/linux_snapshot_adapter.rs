@@ -62,7 +62,7 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
         if metadata.len() > limit as u64 { return Err(SnapshotPayloadError::LimitExceeded); }
 
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(limit as u64 + 1).read_to_end(&mut bytes)
+        (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes)
             .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
         if bytes.len() > limit { return Err(SnapshotPayloadError::LimitExceeded); }
 
