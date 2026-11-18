@@ -73,6 +73,40 @@ pub fn validate_patch_proposal(
     if !old_matches || !new_matches || (old_name == "/dev/null" && new_name == "/dev/null") {
         return Err(PatchValidationError::InvalidTargetHeader);
     }
+    if !old_matches || !new_matches || (old_name == "/dev/null" && new_name == "/dev/null") {
+        return Err(PatchValidationError::InvalidTargetHeader);
+    }
+    // This prototype intentionally supports exactly one file and one hunk.
+    if lines.iter().filter(|l| l.starts_with("diff --git ")).count() != 1
+        || lines.iter().filter(|l| l.starts_with("--- ")).count() != 1
+        || lines.iter().filter(|l| l.starts_with("+++ ")).count() != 1 {
+        return Err(PatchValidationError::MultiFilePatchUnsupported);
+    }
+    let hunk = lines.iter().position(|l| l.starts_with("@@"))
+        .ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let ranges = lines[hunk].split("@@").nth(1).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let mut parts = ranges.trim().split_whitespace();
+    let old_range = parts.next().ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let new_range = parts.next().ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    fn count(range: &str) -> Option<usize> {
+        let raw = range.strip_prefix(['-', '+'])?;
+        Some(raw.split_once(',').map(|(_, c)| c.parse().ok()).unwrap_or(Some(1)?))
+    }
+    let expected_old = count(old_range).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let expected_new = count(new_range).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let (mut actual_old, mut actual_new) = (0usize, 0usize);
+    for line in lines.iter().skip(hunk + 1) {
+        if line.starts_with("@@") { return Err(PatchValidationError::MultiFilePatchUnsupported); }
+        if line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ") { continue; }
+        if line.starts_with(' ') { actual_old += 1; actual_new += 1; }
+        else if line.starts_with('-') { actual_old += 1; }
+        else if line.starts_with('+') { actual_new += 1; }
+        else if line.starts_with("\\") { continue; }
+        else { return Err(PatchValidationError::InvalidHunkCounts); }
+    }
+    if actual_old != expected_old || actual_new != expected_new {
+        return Err(PatchValidationError::InvalidHunkCounts);
+    }
     Ok(())
 }
 
