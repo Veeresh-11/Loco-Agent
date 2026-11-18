@@ -63,7 +63,7 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
         if bytes.len() > limit { return Err(SnapshotPayloadError::LimitExceeded); }
 
         use std::os::unix::fs::MetadataExt;
-        let identity = format!("dev:{}:ino:{}:len:{}", metadata.dev(), metadata.ino(), metadata.len());
+        let identity = format!("dev:{}:ino:{}:captured_len:{}", metadata.dev(), metadata.ino(), bytes.len());
         let contract = build_snapshot_contract(&self.workspace_id, request.relative_path(), &identity, &bytes)?;
         CapturedWorkspaceSnapshot::new(contract, bytes)
     }
