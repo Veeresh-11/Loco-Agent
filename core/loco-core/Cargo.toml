@@ -6,9 +6,8 @@ description = "LOCO Agent security policy prototype"
 license = "MIT"
 
 [dependencies]
+tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-
-tempfile = "3"
