@@ -62,6 +62,22 @@ pub enum SnapshotCaptureRequestError {
     InvalidLimit,
 }
 
+fn is_portable_component(component: &str) -> bool {
+    if component.is_empty() || component.ends_with('.') || component.ends_with(' ') {
+        return false;
+    }
+    if component.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    // Windows device names are reserved even when followed by an extension.
+    let stem = component.split('.').next().unwrap_or(component).to_ascii_uppercase();
+    matches!(stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" |
+        "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" |
+        "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    ) == false
+}
+
 impl SnapshotCaptureRequest {
     pub fn new(relative_path: &str, max_bytes: usize) -> Result<Self, SnapshotCaptureRequestError> {
         if relative_path.is_empty()
@@ -69,7 +85,7 @@ impl SnapshotCaptureRequest {
             || relative_path.contains('\\')
             || relative_path.contains(':')
             || relative_path.contains('\0')
-            || relative_path.split('/').any(|p| p.is_empty() || p == "." || p == "..")
+            || relative_path.split('/').any(|p| !is_portable_component(p))
         {
             return Err(SnapshotCaptureRequestError::InvalidPath);
         }
