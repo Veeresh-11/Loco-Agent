@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loco-agent.dev/contracts/action-proposal.schema.json",
+  "title": "LOCO Agent Action Proposal",
+  "description": "Untrusted AI-generated action proposal. This schema does not grant authorization.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "proposalId", "taskId", "action", "createdAt"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "proposalId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "taskId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "action": {
+      "oneOf": [
+        { "$ref": "#/$defs/readFile" },
+        { "$ref": "#/$defs/proposePatch" },
+        { "$ref": "#/$defs/runCommand" }
+      ]
+    },
+    "reason": { "type": "string", "maxLength": 4000 }
+  },
+  "$defs": {
+    "workspaceRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+$"
+    },
+    "readFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "path"],
+      "properties": {
+        "type": { "const": "read_file" },
+        "path": { "$ref": "#/$defs/workspaceRelativePath" },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 10485760, "default": 1048576 }
+      }
+    },
+    "proposePatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "path", "patch"],
+      "properties": {
+        "type": { "const": "propose_patch" },
+        "path": { "$ref": "#/$defs/workspaceRelativePath" },
+        "patch": { "type": "string", "maxLength": 1000000 },
+        "expectedTargetSha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+      }
+    },
+    "runCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "executable", "args"],
+      "properties": {
+        "type": { "const": "run_command" },
+        "executable": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "args": { "type": "array", "maxItems": 128, "items": { "type": "string", "maxLength": 8192 } },
+        "workingDirectory": { "$ref": "#/$defs/workspaceRelativePath" },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 120000, "default": 30000 }
+      }
+    }
+  }
+}

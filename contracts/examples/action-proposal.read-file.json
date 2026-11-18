@@ -1,0 +1,12 @@
+{
+  "contractVersion": "1.0",
+  "proposalId": "proposal-example-read-001",
+  "taskId": "task-example-001",
+  "createdAt": "2026-11-18T00:00:00Z",
+  "action": {
+    "type": "read_file",
+    "path": "src/extension.ts",
+    "maxBytes": 524288
+  },
+  "reason": "Inspect the extension entry point before proposing a change."
+}

@@ -1,0 +1,13 @@
+{
+  "contractVersion": "1.0",
+  "proposalId": "proposal-example-patch-001",
+  "taskId": "task-example-002",
+  "createdAt": "2026-11-18T00:00:00Z",
+  "action": {
+    "type": "propose_patch",
+    "path": "src/core/example.ts",
+    "patch": "--- a/src/core/example.ts\n+++ b/src/core/example.ts\n@@\n-export const enabled = false;\n+export const enabled = true;\n",
+    "expectedTargetSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "reason": "Propose a narrow, reviewable edit to a workspace file."
+}
