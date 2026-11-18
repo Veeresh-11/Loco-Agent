@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::path_validation::{validate_workspace_path, PathValidationError};
 
+pub const MAX_WORKSPACE_READ_BYTES: usize = 10 * 1024 * 1024;
+
 #[derive(Debug)]
 pub enum WorkspaceReadError {
     Path(PathValidationError),
@@ -32,7 +34,7 @@ pub fn read_workspace_file(
     relative_path: &Path,
     max_bytes: usize,
 ) -> Result<Vec<u8>, WorkspaceReadError> {
-    if max_bytes == 0 { return Err(WorkspaceReadError::InvalidLimit); }
+    if max_bytes == 0 || max_bytes > MAX_WORKSPACE_READ_BYTES { return Err(WorkspaceReadError::InvalidLimit); }
 
     let resolved = validate_workspace_path(workspace_root, relative_path)
         .map_err(WorkspaceReadError::Path)?;
