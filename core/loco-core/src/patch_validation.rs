@@ -1,6 +1,5 @@
-//! Conservative validation for proposed unified-diff patches (not an apply/write API).
-//! Requires an expected SHA-256 for the current target to prevent silent stale-target proposals.
-//! This validator does not apply patches or close filesystem TOCTOU races.
+//! Strict, bounded unified-diff envelope validation only. Not an apply/write API.
+//! No authorization, approval, or race-resistant filesystem behavior is provided.
 
 use sha2::{Digest, Sha256};
 
@@ -16,6 +15,8 @@ pub enum PatchValidationError {
     InvalidUnifiedDiff,
     BinaryPatchUnsupported,
     InvalidTargetHeader,
+    MultiFilePatchUnsupported,
+    InvalidHunkCounts,
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -23,8 +24,15 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Validate patch envelope and target-state binding only.
-/// No patch application, filesystem mutation, or authorization is performed.
+fn range_count(range: &str) -> Option<usize> {
+    let raw = range.strip_prefix(['-', '+'])?;
+    if let Some((_, count)) = raw.split_once(',') {
+        count.parse().ok()
+    } else {
+        Some(1)
+    }
+}
+
 pub fn validate_patch_proposal(
     patch: &str,
     target_bytes: &[u8],
@@ -43,21 +51,19 @@ pub fn validate_patch_proposal(
     if patch.contains("GIT binary patch") || patch.contains("Binary files ") {
         return Err(PatchValidationError::BinaryPatchUnsupported);
     }
-    if relative_target.is_empty() || relative_target.starts_with('/') || relative_target.contains('\\')
-        || relative_target.split('/').any(|s| s.is_empty() || s == "." || s == "..")
-        || relative_target.contains(':')
-    {
+    if relative_target.is_empty() || relative_target.starts_with('/')
+        || relative_target.contains('\\') || relative_target.contains(':')
+        || relative_target.split('/').any(|s| s.is_empty() || s == "." || s == "..") {
         return Err(PatchValidationError::InvalidTargetHeader);
     }
+
     let lines: Vec<&str> = patch.lines().collect();
-    if !lines.iter().any(|l| l.starts_with("--- "))
-        || !lines.iter().any(|l| l.starts_with("+++ "))
-        || !lines.iter().any(|l| l.starts_with("@@"))
-        || !lines.iter().any(|l| l.starts_with("diff --git "))
-    {
-        return Err(PatchValidationError::InvalidUnifiedDiff);
+    if lines.iter().filter(|l| l.starts_with("diff --git ")).count() != 1
+        || lines.iter().filter(|l| l.starts_with("--- ")).count() != 1
+        || lines.iter().filter(|l| l.starts_with("+++ ")).count() != 1
+        || lines.iter().filter(|l| l.starts_with("@@")).count() != 1 {
+        return Err(PatchValidationError::MultiFilePatchUnsupported);
     }
-    // Require the git header and the two unified-diff file headers to bind to this target.
     let expected_git_header = format!("diff --git a/{relative_target} b/{relative_target}");
     if lines.first().copied() != Some(expected_git_header.as_str()) {
         return Err(PatchValidationError::InvalidTargetHeader);
@@ -68,36 +74,25 @@ pub fn validate_patch_proposal(
         .ok_or(PatchValidationError::InvalidUnifiedDiff)?;
     let old_name = old_header[4..].split_whitespace().next().unwrap_or("");
     let new_name = new_header[4..].split_whitespace().next().unwrap_or("");
-    let old_matches = old_name == "/dev/null" || old_name == format!("a/{relative_target}");
-    let new_matches = new_name == "/dev/null" || new_name == format!("b/{relative_target}");
-    if !old_matches || !new_matches || (old_name == "/dev/null" && new_name == "/dev/null") {
+    if old_name != format!("a/{relative_target}") || new_name != format!("b/{relative_target}") {
         return Err(PatchValidationError::InvalidTargetHeader);
     }
-    if !old_matches || !new_matches || (old_name == "/dev/null" && new_name == "/dev/null") {
-        return Err(PatchValidationError::InvalidTargetHeader);
-    }
-    // This prototype intentionally supports exactly one file and one hunk.
-    if lines.iter().filter(|l| l.starts_with("diff --git ")).count() != 1
-        || lines.iter().filter(|l| l.starts_with("--- ")).count() != 1
-        || lines.iter().filter(|l| l.starts_with("+++ ")).count() != 1 {
-        return Err(PatchValidationError::MultiFilePatchUnsupported);
-    }
-    let hunk = lines.iter().position(|l| l.starts_with("@@"))
+
+    let hunk_idx = lines.iter().position(|l| l.starts_with("@@"))
         .ok_or(PatchValidationError::InvalidUnifiedDiff)?;
-    let ranges = lines[hunk].split("@@").nth(1).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let ranges = lines[hunk_idx].split("@@").nth(1)
+        .ok_or(PatchValidationError::InvalidUnifiedDiff)?;
     let mut parts = ranges.trim().split_whitespace();
     let old_range = parts.next().ok_or(PatchValidationError::InvalidUnifiedDiff)?;
     let new_range = parts.next().ok_or(PatchValidationError::InvalidUnifiedDiff)?;
-    fn count(range: &str) -> Option<usize> {
-        let raw = range.strip_prefix(['-', '+'])?;
-        Some(raw.split_once(',').map(|(_, c)| c.parse().ok()).unwrap_or(Some(1)?))
-    }
-    let expected_old = count(old_range).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
-    let expected_new = count(new_range).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let expected_old = range_count(old_range).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let expected_new = range_count(new_range).ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+
     let (mut actual_old, mut actual_new) = (0usize, 0usize);
-    for line in lines.iter().skip(hunk + 1) {
-        if line.starts_with("@@") { return Err(PatchValidationError::MultiFilePatchUnsupported); }
-        if line.starts_with("diff --git ") || line.starts_with("--- ") || line.starts_with("+++ ") { continue; }
+    for line in lines.iter().skip(hunk_idx + 1) {
+        if line.starts_with("@@") || line.starts_with("diff --git ") {
+            return Err(PatchValidationError::MultiFilePatchUnsupported);
+        }
         if line.starts_with(' ') { actual_old += 1; actual_new += 1; }
         else if line.starts_with('-') { actual_old += 1; }
         else if line.starts_with('+') { actual_new += 1; }
@@ -115,11 +110,10 @@ mod tests {
     use super::*;
 
     const PATCH: &str = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
-
     fn digest() -> String { sha256_hex(b"old\n") }
 
     #[test]
-    fn accepts_valid_bound_patch_envelope() {
+    fn accepts_valid_patch() {
         assert_eq!(validate_patch_proposal(PATCH, b"old\n", Some(&digest()), "src/lib.rs"), Ok(()));
     }
     #[test]
@@ -131,22 +125,22 @@ mod tests {
         assert_eq!(validate_patch_proposal(PATCH, b"changed", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::TargetDigestMismatch));
     }
     #[test]
-    fn rejects_invalid_digest_format() {
+    fn rejects_invalid_digest() {
         assert_eq!(validate_patch_proposal(PATCH, b"old\n", Some("bad"), "src/lib.rs"), Err(PatchValidationError::InvalidExpectedDigest));
     }
     #[test]
     fn rejects_binary_patch() {
-        let patch = PATCH.to_owned() + "GIT binary patch\n";
-        assert_eq!(validate_patch_proposal(&patch, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::BinaryPatchUnsupported));
+        let p = PATCH.to_owned() + "GIT binary patch\n";
+        assert_eq!(validate_patch_proposal(&p, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::BinaryPatchUnsupported));
     }
     #[test]
-    fn rejects_patch_with_wrong_target_header() {
-        let patch = PATCH.replace("src/lib.rs", "other.rs");
-        assert_eq!(validate_patch_proposal(&patch, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::InvalidTargetHeader));
+    fn rejects_wrong_target() {
+        let p = PATCH.replace("src/lib.rs", "wrong.rs");
+        assert_eq!(validate_patch_proposal(&p, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::InvalidTargetHeader));
     }
     #[test]
-    fn rejects_path_traversal_in_target() {
-        assert_eq!(validate_patch_proposal(PATCH, b"old\n", Some(&digest()), "../outside"), Err(PatchValidationError::InvalidTargetHeader));
+    fn rejects_traversal_target() {
+        assert_eq!(validate_patch_proposal(PATCH, b"old\n", Some(&digest()), "../bad"), Err(PatchValidationError::InvalidTargetHeader));
     }
     #[test]
     fn rejects_empty_patch() {
@@ -154,7 +148,22 @@ mod tests {
     }
     #[test]
     fn rejects_oversized_patch() {
-        let patch = "x".repeat(MAX_PATCH_BYTES + 1);
-        assert_eq!(validate_patch_proposal(&patch, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::PatchTooLarge));
+        let p = "x".repeat(MAX_PATCH_BYTES + 1);
+        assert_eq!(validate_patch_proposal(&p, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::PatchTooLarge));
+    }
+    #[test]
+    fn rejects_hunk_count_mismatch() {
+        let p = PATCH.replace("@@ -1 +1 @@", "@@ -1,2 +1 @@");
+        assert_eq!(validate_patch_proposal(&p, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::InvalidHunkCounts));
+    }
+    #[test]
+    fn rejects_multi_file_patch() {
+        let p = PATCH.to_owned() + "diff --git a/other.rs b/other.rs\n--- a/other.rs\n+++ b/other.rs\n@@ -1 +1 @@\n-x\n+y\n";
+        assert_eq!(validate_patch_proposal(&p, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::MultiFilePatchUnsupported));
+    }
+    #[test]
+    fn rejects_invalid_hunk_line() {
+        let p = PATCH.replace("-old\n+new", "?old\n?new");
+        assert_eq!(validate_patch_proposal(&p, b"old\n", Some(&digest()), "src/lib.rs"), Err(PatchValidationError::InvalidHunkCounts));
     }
 }
