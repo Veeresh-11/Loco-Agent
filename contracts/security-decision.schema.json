@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loco-agent.dev/contracts/security-decision.schema.json",
+  "title": "LOCO Agent Security Decision",
+  "description": "Rust security-core decision. The consumer must validate this response and bind it to the request.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "requestId", "proposalId", "decision", "reasonCode", "issuedAt"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "proposalId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "decision": { "enum": ["deny", "approval_required", "allow"] },
+    "reasonCode": { "type": "string", "pattern": "^[A-Z0-9_]{1,64}$" },
+    "message": { "type": "string", "maxLength": 2000 },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "approvalChallenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["challengeId", "actionDigest", "expiresAt"],
+      "properties": {
+        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actionDigest": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}
