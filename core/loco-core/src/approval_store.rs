@@ -37,7 +37,7 @@ impl ApprovalStore {
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS approval_challenges (
-                challenge_id TEXT PRIMARY PRIMARY KEY,
+                challenge_id TEXT PRIMARY KEY,
                 action_digest TEXT NOT NULL,
                 expires_at INTEGER NOT NULL,
                 consumed_at INTEGER NULL
