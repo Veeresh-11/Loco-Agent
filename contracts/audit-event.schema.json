@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loco-agent.dev/contracts/audit-event.schema.json",
+  "title": "LOCO Agent Security Audit Event",
+  "description": "Minimized metadata for security-relevant decisions and outcomes. Avoid secrets and full prompt/source content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "eventId", "occurredAt", "taskId", "eventType", "outcome"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "taskId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "proposalId": { "type": "string", "maxLength": 128 },
+    "actionType": { "enum": ["read_file", "propose_patch", "run_command", "unknown"] },
+    "eventType": { "enum": ["proposal_received", "policy_decision", "approval_requested", "approval_granted", "approval_rejected", "execution_started", "execution_finished", "execution_failed"] },
+    "outcome": { "enum": ["allowed", "denied", "approval_required", "success", "failure"] },
+    "reasonCode": { "type": "string", "pattern": "^[A-Z0-9_]{1,64}$" },
+    "actionDigest": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "details": {
+      "type": "object",
+      "description": "Non-sensitive, bounded metadata only.",
+      "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+    }
+  }
+}
