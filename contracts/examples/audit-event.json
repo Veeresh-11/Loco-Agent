@@ -1,0 +1,17 @@
+{
+  "contractVersion": "1.0",
+  "eventId": "event-001",
+  "occurredAt": "2026-11-18T10:30:00Z",
+  "taskId": "task-42",
+  "proposalId": "proposal-42",
+  "actionType": "propose_patch",
+  "eventType": "policy_decision",
+  "outcome": "approval_required",
+  "reasonCode": "PATCH_REQUIRES_APPROVAL",
+  "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "details": {
+    "fileCount": 1,
+    "patchBytes": 512,
+    "policyVersion": "prototype-1"
+  }
+}
