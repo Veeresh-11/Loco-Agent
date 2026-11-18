@@ -63,6 +63,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn canonical_digest_vectors_match_v1_spec() {
+        let read = ProposedAction::ReadFile { path: "src/main.rs".into(), max_bytes: Some(1024) };
+        assert_eq!(canonical_action_digest(&read), "87cc9be51307092dd5c6d9203de172422cabdc506f78bcb224b07f39d15022a7");
+
+        let patch = ProposedAction::ProposePatch {
+            path: "src/lib.rs".into(),
+            patch: "diff --git a b".into(),
+            expected_target_sha256: Some("a".repeat(64)),
+        };
+        assert_eq!(canonical_action_digest(&patch), "d8ae37db445a5bf6b34239e8032fa0abb239e130c026ace019ecdaaf232de192");
+
+        let command = ProposedAction::RunCommand {
+            executable: "cargo".into(),
+            args: vec!["test".into(), "--lib".into()],
+            working_directory: Some("core".into()),
+            timeout_ms: Some(30_000),
+        };
+        assert_eq!(canonical_action_digest(&command), "eb0ff76a3f5dd4cc6f1e9966d03140ab49e08700fc0a179505f0ae46c1b74292");
+    }
+
+    #[test]
     fn read_file_encoding_has_prefix_and_variant_tag() {
         let action = ProposedAction::ReadFile { path: "a".into(), max_bytes: None };
         let bytes = canonical_action_bytes(&action);
