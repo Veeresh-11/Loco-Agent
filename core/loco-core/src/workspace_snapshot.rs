@@ -76,9 +76,8 @@ impl WorkspaceSnapshot {
         Ok(())
     }
 
-    /// Compares the contract-relevant snapshot binding. Adapter-specific
-    /// identity is compared only when both snapshots provide it; absence must
-    /// never be interpreted as strong identity assurance.
+    /// Compares bindings. Missing file identity always makes the comparison
+    /// fail, because identity-less snapshots are insufficient for security binding.
     pub fn same_binding(&self, other: &Self) -> bool {
         self.contract_version == other.contract_version
             && self.workspace_id == other.workspace_id
@@ -167,9 +166,8 @@ mod tests {
         let mut changed = original.clone();
         changed.file_identity = None;
         assert!(!original.same_binding(&changed));
-        changed = original.clone();
         let missing_identity = WorkspaceSnapshot { file_identity: None, ..original.clone() };
-        assert!(!missing_identity.same_binding(&missing_identity);
+        assert!(!missing_identity.same_binding(&missing_identity));
         changed = original.clone();
         changed.file_identity = Some("different-id".into());
         assert!(!original.same_binding(&changed));
