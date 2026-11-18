@@ -6,10 +6,10 @@
 //! protected replay store, and trusted clock.
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use crate::ProposedAction;
+use crate::canonical_action_digest::canonical_action_digest;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalChallenge {
@@ -26,13 +26,10 @@ pub enum ApprovalError {
     InvalidDigestFormat,
 }
 
-/// SHA-256 of the action's serde JSON serialization. Struct/enum serialization
-/// order is deterministic for this Rust model; cross-language callers must use
-/// canonical JSON encoding before computing equivalent digests.
+/// SHA-256 of canonical Action Digest v1 bytes. The encoding is language-neutral
+/// and defined in contracts/action-digest-v1.md.
 pub fn action_digest(action: &ProposedAction) -> Result<String, serde_json::Error> {
-    let serialized = serde_json::to_vec(action)?;
-    let digest = Sha256::digest(serialized);
-    Ok(digest.iter().map(|b| format!("{:02x}", b)).collect())
+    Ok(canonical_action_digest(action))
 }
 
 fn decode_hex_digest(hex: &str) -> Result<[u8; 32], ApprovalError> {
