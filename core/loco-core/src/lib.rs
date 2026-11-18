@@ -340,3 +340,6 @@ pub mod audit_event;
 pub mod patch_validation;
 
 pub mod workspace_snapshot;
+
+
+pub mod snapshot_payload;
