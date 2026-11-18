@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const CONTRACT_VERSION: &str = "1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum ProposedAction {
     ReadFile {
         path: String,
@@ -41,6 +41,10 @@ pub struct ActionProposal {
     #[serde(rename = "taskId")]
     pub task_id: String,
     pub action: ProposedAction,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,6 +212,8 @@ mod tests {
             proposal_id: "proposal-1".into(),
             task_id: "task-1".into(),
             action,
+            created_at: "2026-11-18T00:00:00Z".into(),
+            reason: None,
         }
     }
 
@@ -287,6 +293,32 @@ mod tests {
         });
         assert_eq!(evaluate(&p, PolicyConfig::default()).decision, DecisionKind::Deny);
     }
+    #[test]
+    fn action_serialization_uses_contract_camel_case_fields() {
+        let action = ProposedAction::RunCommand {
+            executable: "cargo".into(),
+            args: vec!["test".into()],
+            working_directory: Some("core".into()),
+            timeout_ms: Some(5000),
+        };
+        let json = serde_json::to_value(action).unwrap();
+        assert_eq!(json["type"], "run_command");
+        assert_eq!(json["workingDirectory"], "core");
+        assert_eq!(json["timeoutMs"], 5000);
+        assert!(json.get("working_directory").is_none());
+    }
+
+    #[test]
+    fn proposal_serialization_contains_schema_metadata() {
+        let p = proposal(ProposedAction::ReadFile { path: "README.md".into(), max_bytes: None });
+        let json = serde_json::to_value(p).unwrap();
+        assert_eq!(json["contractVersion"], "1.0");
+        assert_eq!(json["proposalId"], "proposal-1");
+        assert_eq!(json["taskId"], "task-1");
+        assert_eq!(json["createdAt"], "2026-11-18T00:00:00Z");
+        assert!(json.get("created_at").is_none());
+    }
+
 }
 
 

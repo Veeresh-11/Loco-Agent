@@ -33,7 +33,7 @@ pub fn action_digest(action: &ProposedAction) -> Result<String, serde_json::Erro
 }
 
 fn decode_hex_digest(hex: &str) -> Result<[u8; 32], ApprovalError> {
-    if hex.len() != 64 { return Err(ApprovalError::InvalidDigestFormat); }
+    if hex.len() != 64 || !hex.is_ascii() { return Err(ApprovalError::InvalidDigestFormat); }
     let mut out = [0u8; 32];
     for i in 0..32 {
         let pair = &hex[i*2..i*2+2];
@@ -134,4 +134,11 @@ mod tests {
         let challenge = ApprovalChallenge { challenge_id: "ch".into(), action_digest: "nope".into(), expires_at_unix: 500 };
         assert_eq!(verify_approval_binding(&challenge, &action, 499), Err(ApprovalError::InvalidDigestFormat));
     }
+    #[test]
+    fn non_ascii_digest_is_rejected_without_panicking() {
+        let action = sample();
+        let challenge = ApprovalChallenge { challenge_id: "ch".into(), action_digest: "🦀".repeat(16), expires_at_unix: 500 };
+        assert_eq!(verify_approval_binding(&challenge, &action, 499), Err(ApprovalError::InvalidDigestFormat));
+    }
+
 }
