@@ -134,4 +134,11 @@ mod tests {
         let challenge = ApprovalChallenge { challenge_id: "ch".into(), action_digest: "nope".into(), expires_at_unix: 500 };
         assert_eq!(verify_approval_binding(&challenge, &action, 499), Err(ApprovalError::InvalidDigestFormat));
     }
+    #[test]
+    fn non_ascii_digest_is_rejected_without_panicking() {
+        let action = sample();
+        let challenge = ApprovalChallenge { challenge_id: "ch".into(), action_digest: "🦀".repeat(16), expires_at_unix: 500 };
+        assert_eq!(verify_approval_binding(&challenge, &action, 499), Err(ApprovalError::InvalidDigestFormat));
+    }
+
 }
