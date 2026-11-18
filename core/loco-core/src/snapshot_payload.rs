@@ -69,7 +69,9 @@ fn is_portable_component(component: &str) -> bool {
     if component.is_empty() || component.ends_with('.') || component.ends_with(' ') {
         return false;
     }
-    if component.chars().any(|c| c.is_control()) {
+    // Reject Windows-invalid filename characters on every platform so contracts
+    // remain portable and cannot be reinterpreted differently by adapters.
+    if component.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | '"' | '|' | '?' | '*')) {
         return false;
     }
     // Windows device names are reserved even when followed by an extension.
@@ -220,6 +222,29 @@ mod tests {
                 SnapshotCaptureRequest::new(path, 100),
                 Err(SnapshotCaptureRequestError::InvalidPath),
                 "Windows namespace or ADS path should be rejected: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_request_rejects_windows_forbidden_filename_characters() {
+        for forbidden in ['<', '>', '"', '|', '?', '*'] {
+            let path = format!("src/bad{forbidden}name");
+            assert_eq!(
+                SnapshotCaptureRequest::new(&path, 100),
+                Err(SnapshotCaptureRequestError::InvalidPath),
+                "forbidden Windows character should be rejected: {forbidden:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_request_rejects_actual_control_characters() {
+        for path in ["src/tab\tname", "src/new\nline", "src/\u{7f}name"] {
+            assert_eq!(
+                SnapshotCaptureRequest::new(path, 100),
+                Err(SnapshotCaptureRequestError::InvalidPath),
+                "control character should be rejected: {path:?}"
             );
         }
     }
