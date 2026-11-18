@@ -1,0 +1,15 @@
+{
+  "contractVersion": "1.0",
+  "requestId": "request-42",
+  "proposalId": "proposal-42",
+  "decision": "approval_required",
+  "reasonCode": "PATCH_REQUIRES_APPROVAL",
+  "message": "Patch proposals require approval and additional target-state validation.",
+  "issuedAt": "2026-11-18T08:01:00Z",
+  "expiresAt": "2026-11-18T08:02:00Z",
+  "approvalChallenge": {
+    "challengeId": "challenge-42",
+    "actionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expiresAt": "2026-11-18T08:02:00Z"
+  }
+}
