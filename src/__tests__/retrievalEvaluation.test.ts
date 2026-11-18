@@ -35,13 +35,14 @@ describe('retrieval evaluation metrics', () => {
     expect(summary.meanReciprocalRank).toBe(0);
   });
 
-  it('deduplicates repeated paths so duplicates cannot inflate metrics', async () => {
+  it('deduplicates repeated path aliases but preserves case-sensitive paths', async () => {
     const summary = await evaluateRetrieval([dataset[0]], async () => [
       { path: 'src/core/routingPolicy.ts' },
       { path: './src/core/routingPolicy.ts' },
-      { path: 'SRC\\CORE\\ROUTINGPOLICY.TS' }
+      { path: 'src\\core\\routingPolicy.ts' },
+      { path: 'SRC/core/routingPolicy.ts' }
     ], 3);
-    expect(summary.results[0].retrievedPaths).toEqual(['src/core/routingpolicy.ts']);
+    expect(summary.results[0].retrievedPaths).toEqual(['src/core/routingPolicy.ts', 'SRC/core/routingPolicy.ts']);
     expect(summary.results[0].retrievedRelevantCount).toBe(1);
     expect(summary.recallAtK).toBe(1);
     expect(summary.precisionAtK).toBeCloseTo(1 / 3);
