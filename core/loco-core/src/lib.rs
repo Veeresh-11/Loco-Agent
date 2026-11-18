@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const CONTRACT_VERSION: &str = "1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum ProposedAction {
     ReadFile {
         path: String,
@@ -41,6 +41,10 @@ pub struct ActionProposal {
     #[serde(rename = "taskId")]
     pub task_id: String,
     pub action: ProposedAction,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
