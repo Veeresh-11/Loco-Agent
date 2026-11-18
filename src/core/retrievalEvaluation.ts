@@ -65,7 +65,13 @@ export async function evaluateRetrieval(
 }
 
 function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  const segments: string[] = [];
+  for (const segment of path.replace(/\\/g, '/').split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
+  }
+  return segments.join('/');
 }
 
 function average(values: number[]): number {
