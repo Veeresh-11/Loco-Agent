@@ -331,3 +331,5 @@ pub mod approval_binding;
 pub mod approval_store;
 
 pub mod canonical_action_digest;
+
+pub mod security_decision_contract;
