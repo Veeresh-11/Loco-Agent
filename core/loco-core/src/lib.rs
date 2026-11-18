@@ -291,3 +291,5 @@ mod tests {
 
 
 pub mod path_validation;
+
+pub mod workspace_fs;
