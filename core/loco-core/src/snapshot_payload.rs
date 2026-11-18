@@ -16,6 +16,35 @@ pub enum SnapshotPayloadError {
     DigestMismatch,
 }
 
+
+/// Constructs snapshot metadata from a byte buffer already acquired by the caller.
+///
+/// This helper does not prove that the bytes came from a safely opened file.
+/// The caller must supply a trusted workspace ID and adapter-derived identity.
+pub fn build_snapshot_contract(
+    workspace_id: &str,
+    relative_path: &str,
+    file_identity: &str,
+    bytes: &[u8],
+) -> Result<WorkspaceSnapshot, SnapshotPayloadError> {
+    if bytes.len() > MAX_SNAPSHOT_BYTES {
+        return Err(SnapshotPayloadError::LimitExceeded);
+    }
+    let digest = Sha256::digest(bytes);
+    let hex = digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let snapshot = WorkspaceSnapshot {
+        contract_version: crate::workspace_snapshot::SNAPSHOT_CONTRACT_VERSION.into(),
+        workspace_id: workspace_id.into(),
+        relative_path: relative_path.into(),
+        file_kind: crate::workspace_snapshot::SnapshotFileKind::RegularFile,
+        byte_length: bytes.len() as u64,
+        content_sha256: Some(hex),
+        file_identity: Some(file_identity.into()),
+    };
+    snapshot.validate_contract().map_err(SnapshotPayloadError::InvalidContract)?;
+    Ok(snapshot)
+}
+
 pub fn validate_snapshot_payload(
     snapshot: &WorkspaceSnapshot,
     bytes: &[u8],
@@ -52,6 +81,27 @@ mod tests {
             content_sha256: Some(hex),
             file_identity: Some("test-identity".into()),
         }
+    }
+
+
+    #[test]
+    fn builder_creates_consistent_contract_from_captured_bytes() {
+        let bytes = b"captured";
+        let snapshot = build_snapshot_contract("workspace", "src/file.rs", "adapter-id", bytes).unwrap();
+        assert_eq!(snapshot.byte_length, bytes.len() as u64);
+        assert_eq!(validate_snapshot_payload(&snapshot, bytes), Ok(()));
+    }
+
+    #[test]
+    fn builder_rejects_empty_identity_and_invalid_paths() {
+        assert!(matches!(
+            build_snapshot_contract("workspace", "src/file.rs", "", b"x"),
+            Err(SnapshotPayloadError::InvalidContract(SnapshotContractError::InvalidIdentity))
+        ));
+        assert!(matches!(
+            build_snapshot_contract("workspace", "../escape", "id", b"x"),
+            Err(SnapshotPayloadError::InvalidContract(SnapshotContractError::InvalidRelativePath))
+        ));
     }
 
     #[test]
