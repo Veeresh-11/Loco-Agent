@@ -46,3 +46,29 @@ Root/nested directories; empty and cap-boundary files; absolute/drive/UNC/ADS/tr
 - Creating and Opening Files: https://learn.microsoft.com/en-us/windows/desktop/FileIO/creating-and-opening-files
 
 This document is a design gate, not an implementation claim or proof of Windows security parity.
+
+## Additional native API review (2026-11-18)
+
+### Handle-relative component opens
+Microsoft documents that `NtCreateFile` can receive an `OBJECT_ATTRIBUTES.RootDirectory` handle and a relative `ObjectName`, so a traversal prototype should open one component at a time from a trusted parent handle. Use a single component per operation; do not pass user-supplied multi-component strings to the native call.
+
+### Reparse-point gate
+`FILE_OPEN_REPARSE_POINT` opens a reparse point itself rather than following normal reparse processing for the final target. The `OBJ_DONT_REPARSE` object attribute is documented to fail parsing when reparse points are encountered. These controls must be tested and combined with post-open handle inspection; a flag alone is not a security proof.
+
+### Critical root-handle acquisition caveat
+The relative-open API documents how a preexisting directory handle anchors subsequent opens. It does not, by itself, prove that the initial workspace root was reached without following an attacker-controlled reparse point. Root acquisition must therefore be separately specified and tested. If root acquisition cannot establish the intended boundary, the adapter must reject initialization rather than proceed.
+
+### Prototype acceptance criteria
+- Trusted root handle acquisition documented for supported Windows versions/filesystems.
+- Component-wise relative opens from each pinned parent handle.
+- Reparse-point rejection during parse and post-open inspection.
+- Intermediate handle must be verified as a directory.
+- Final handle must be verified as a regular file.
+- Byte cap enforced; metadata before/after read compared.
+- No fallback to ordinary path-based opening.
+- Adversarial tests for root and nested reparse paths, rename races, and unsupported filesystems.
+
+### Microsoft sources
+- `NtCreateFile`: https://learn.microsoft.com/windows/win32/api/winternl/nf-winternl-ntcreatefile
+- `OBJECT_ATTRIBUTES`: https://learn.microsoft.com/windows/win32/api/ntdef/ns-ntdef-_object_attributes
+- `OBJ_DONT_REPARSE` is documented as a reparse parsing guard in `OBJECT_ATTRIBUTES`; validate actual behavior on the supported user-mode target matrix before relying on it.
