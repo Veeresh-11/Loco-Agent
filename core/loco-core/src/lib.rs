@@ -212,6 +212,8 @@ mod tests {
             proposal_id: "proposal-1".into(),
             task_id: "task-1".into(),
             action,
+            created_at: "2026-11-18T00:00:00Z".into(),
+            reason: None,
         }
     }
 
