@@ -151,8 +151,10 @@ mod tests {
 
         barrier.wait();
         let request = SnapshotCaptureRequest::new("target.txt", 8192).unwrap();
+        let mut successful_captures = 0usize;
         for _ in 0..100 {
             if let Ok(captured) = adapter.capture(&request) {
+                successful_captures += 1;
                 let bytes = captured.bytes();
                 assert!(bytes == first.as_slice() || bytes == second.as_slice(),
                     "capture returned unexpected partial or mixed payload");
@@ -161,7 +163,9 @@ mod tests {
             }
         }
         writer.join().unwrap();
+        assert!(successful_captures > 0, "stress loop never produced a successful capture");
     }
+
 
     #[test]
     fn captures_regular_file_and_empty_file() {
