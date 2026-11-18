@@ -26,9 +26,8 @@ pub enum ApprovalError {
     InvalidDigestFormat,
 }
 
-/// SHA-256 of the action's serde JSON serialization. Struct/enum serialization
-/// order is deterministic for this Rust model; cross-language callers must use
-/// canonical JSON encoding before computing equivalent digests.
+/// SHA-256 of canonical Action Digest v1 bytes. The encoding is language-neutral
+/// and defined in contracts/action-digest-v1.md.
 pub fn action_digest(action: &ProposedAction) -> Result<String, serde_json::Error> {
     Ok(canonical_action_digest(action))
 }
