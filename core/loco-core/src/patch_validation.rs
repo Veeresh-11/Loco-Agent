@@ -57,14 +57,22 @@ pub fn validate_patch_proposal(
     {
         return Err(PatchValidationError::InvalidUnifiedDiff);
     }
-    // Require header names to reference the requested target (allow a/ and b/ prefixes).
-    let header_matches = lines.iter().filter(|l| l.starts_with("--- ") || l.starts_with("+++ "))
-        .all(|line| {
-            let raw = line[4..].split_whitespace().next().unwrap_or("");
-            let normalized = raw.strip_prefix("a/").or_else(|| raw.strip_prefix("b/")).unwrap_or(raw);
-            normalized == relative_target || raw == "/dev/null"
-        });
-    if !header_matches { return Err(PatchValidationError::InvalidTargetHeader); }
+    // Require the git header and the two unified-diff file headers to bind to this target.
+    let expected_git_header = format!("diff --git a/{relative_target} b/{relative_target}");
+    if lines.first().copied() != Some(expected_git_header.as_str()) {
+        return Err(PatchValidationError::InvalidTargetHeader);
+    }
+    let old_header = lines.iter().find(|l| l.starts_with("--- "))
+        .ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let new_header = lines.iter().find(|l| l.starts_with("+++ "))
+        .ok_or(PatchValidationError::InvalidUnifiedDiff)?;
+    let old_name = old_header[4..].split_whitespace().next().unwrap_or("");
+    let new_name = new_header[4..].split_whitespace().next().unwrap_or("");
+    let old_matches = old_name == "/dev/null" || old_name == format!("a/{relative_target}");
+    let new_matches = new_name == "/dev/null" || new_name == format!("b/{relative_target}");
+    if !old_matches || !new_matches || (old_name == "/dev/null" && new_name == "/dev/null") {
+        return Err(PatchValidationError::InvalidTargetHeader);
+    }
     Ok(())
 }
 
