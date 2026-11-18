@@ -54,6 +54,10 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
         let mut file = File::from(fd);
         let metadata = file.metadata().map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
         if !metadata.is_file() { return Err(SnapshotPayloadError::InvalidFileType); }
+        // Strict provenance policy: reject files with multiple hard links because
+        // another path outside this workspace may reference the same inode.
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() != 1 { return Err(SnapshotPayloadError::HardLinkNotAllowed); }
         let limit = MAX_SNAPSHOT_BYTES.min(request.max_bytes());
         if metadata.len() > limit as u64 { return Err(SnapshotPayloadError::LimitExceeded); }
 
@@ -62,7 +66,6 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
             .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
         if bytes.len() > limit { return Err(SnapshotPayloadError::LimitExceeded); }
 
-        use std::os::unix::fs::MetadataExt;
         let identity = format!("dev:{}:ino:{}:captured_len:{}", metadata.dev(), metadata.ino(), bytes.len());
         let contract = build_snapshot_contract(&self.workspace_id, request.relative_path(), &identity, &bytes)?;
         CapturedWorkspaceSnapshot::new(contract, bytes)
@@ -135,6 +138,19 @@ mod tests {
             adapter.capture(&SnapshotCaptureRequest::new("missing.txt", 100).unwrap()),
             Err(SnapshotPayloadError::AcquisitionFailed)
         );
+    }
+
+    #[test]
+    fn rejects_hard_linked_file_under_strict_provenance_policy() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("origin.txt"), b"shared data").unwrap();
+        std::fs::hard_link(outside.path().join("origin.txt"), workspace.path().join("inside.txt")).unwrap();
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(workspace.path(), "workspace").unwrap();
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("inside.txt", 100).unwrap()),
+            Err(SnapshotPayloadError::HardLinkNotAllowed)
+        ));
     }
 
     #[test]
