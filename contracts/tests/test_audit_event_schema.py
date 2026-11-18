@@ -34,4 +34,4 @@ def test_audit_event_details_are_bounded_to_32_fields():
 def test_audit_event_requires_core_metadata():
     event = load_example()
     del event["outcome"]
-    assert list(VALIDATOR.iter_errors(event)
+    assert list(VALIDATOR.iter_errors(event))
