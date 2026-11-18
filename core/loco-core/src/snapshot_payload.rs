@@ -46,6 +46,48 @@ pub fn build_snapshot_contract(
 }
 
 
+
+/// Validated input for a snapshot capture request.
+/// Construction applies lexical checks and clamps limits before an adapter
+/// receives the request. Workspace capability/root binding remains adapter-owned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotCaptureRequest {
+    relative_path: String,
+    max_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotCaptureRequestError {
+    InvalidPath,
+    InvalidLimit,
+}
+
+impl SnapshotCaptureRequest {
+    pub fn new(relative_path: &str, max_bytes: usize) -> Result<Self, SnapshotCaptureRequestError> {
+        if relative_path.is_empty()
+            || relative_path.starts_with('/')
+            || relative_path.contains('\\')
+            || relative_path.contains(':')
+            || relative_path.contains('\0')
+            || relative_path.split('/').any(|p| p.is_empty() || p == "." || p == "..")
+        {
+            return Err(SnapshotCaptureRequestError::InvalidPath);
+        }
+        if max_bytes == 0 || max_bytes > MAX_SNAPSHOT_BYTES {
+            return Err(SnapshotCaptureRequestError::InvalidLimit);
+        }
+        Ok(Self { relative_path: relative_path.to_owned(), max_bytes })
+    }
+
+    pub fn relative_path(&self) -> &str {
+        &self.relative_path
+    }
+
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+}
+
 /// A validated snapshot capture: metadata and bytes are checked to agree.
 /// This object is not an authorization token and cannot be used to write.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,6 +161,28 @@ mod tests {
     }
 
 
+
+
+    #[test]
+    fn capture_request_accepts_valid_relative_path_and_bound() {
+        let req = SnapshotCaptureRequest::new("src/main.rs", 4096).unwrap();
+        assert_eq!(req.relative_path(), "src/main.rs");
+        assert_eq!(req.max_bytes(), 4096);
+    }
+
+    #[test]
+    fn capture_request_rejects_traversal_and_ambiguous_paths() {
+        for path in ["../secret", "src/../secret", "/absolute", "C:/secret", "src\\file", "src//file", "./file", ""] {
+            assert_eq!(SnapshotCaptureRequest::new(path, 100), Err(SnapshotCaptureRequestError::InvalidPath), "path: {path}");
+        }
+    }
+
+    #[test]
+    fn capture_request_enforces_hard_byte_cap() {
+        assert_eq!(SnapshotCaptureRequest::new("file.txt", 0), Err(SnapshotCaptureRequestError::InvalidLimit));
+        assert_eq!(SnapshotCaptureRequest::new("file.txt", MAX_SNAPSHOT_BYTES + 1), Err(SnapshotCaptureRequestError::InvalidLimit));
+        assert!(SnapshotCaptureRequest::new("file.txt", MAX_SNAPSHOT_BYTES).is_ok());
+    }
 
     #[test]
     fn captured_snapshot_exposes_only_validated_metadata_and_bytes() {
