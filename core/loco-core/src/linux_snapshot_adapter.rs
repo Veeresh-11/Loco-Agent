@@ -18,6 +18,19 @@ pub enum LinuxSnapshotAdapterError {
     InvalidRoot,
 }
 
+#[cfg(target_os = "linux")]
+fn metadata_matches(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && before.len() == after.len()
+        && before.nlink() == after.nlink()
+        && before.mtime() == after.mtime()
+        && before.mtime_nsec() == after.mtime_nsec()
+        && before.ctime() == after.ctime()
+        && before.ctime_nsec() == after.ctime_nsec()
+}
+
 pub struct LinuxWorkspaceSnapshotAdapter {
     root: File,
     canonical_root: PathBuf,
@@ -70,15 +83,7 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
         // the bounded read. The captured-byte digest remains authoritative;
         // metadata checks are not an atomic snapshot guarantee.
         let after = file.metadata().map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
-        if after.dev() != metadata.dev()
-            || after.ino() != metadata.ino()
-            || after.len() != metadata.len()
-            || after.nlink() != metadata.nlink()
-            || after.mtime() != metadata.mtime()
-            || after.mtime_nsec() != metadata.mtime_nsec()
-            || after.ctime() != metadata.ctime()
-            || after.ctime_nsec() != metadata.ctime_nsec()
-        {
+        if !metadata_matches(&metadata, &after) {
             return Err(SnapshotPayloadError::AcquisitionFailed);
         }
 
@@ -93,6 +98,29 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
     use crate::snapshot_payload::SnapshotCaptureRequest;
+
+    #[test]
+    fn metadata_comparison_detects_content_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mutable");
+        std::fs::write(&path, b"before").unwrap();
+        let before = std::fs::metadata(&path).unwrap();
+        // Length and timestamps are descriptor/filesystem-derived and should
+        // change after a content mutation; use length to make this deterministic.
+        std::fs::write(&path, b"after plus bytes").unwrap();
+        let after = std::fs::metadata(&path).unwrap();
+        assert!(!metadata_matches(&before, &after));
+    }
+
+    #[test]
+    fn metadata_comparison_accepts_unchanged_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stable");
+        std::fs::write(&path, b"stable").unwrap();
+        let before = std::fs::metadata(&path).unwrap();
+        let after = std::fs::metadata(&path).unwrap();
+        assert!(metadata_matches(&before, &after));
+    }
 
     #[test]
     fn captures_regular_file_and_empty_file() {
