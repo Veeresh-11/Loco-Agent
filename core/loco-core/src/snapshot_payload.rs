@@ -78,8 +78,8 @@ fn is_portable_component(component: &str) -> bool {
     let stem = component.split('.').next().unwrap_or(component).to_ascii_uppercase();
     matches!(stem.as_str(),
         "CON" | "PRN" | "AUX" | "NUL" |
-        "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" |
-        "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+        "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "COM¹" | "COM²" | "COM³" |
+        "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9" | "LPT¹" | "LPT²" | "LPT³"
     ) == false
 }
 
@@ -194,6 +194,19 @@ mod tests {
                 SnapshotCaptureRequest::new(&path, 100),
                 Err(SnapshotCaptureRequestError::InvalidPath),
                 "reserved component should be rejected: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_request_rejects_windows_superscript_reserved_device_names() {
+        for component in ["COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
+                         "com¹.txt", "lpt².log"] {
+            let path = format!("src/{component}");
+            assert_eq!(
+                SnapshotCaptureRequest::new(&path, 100),
+                Err(SnapshotCaptureRequestError::InvalidPath),
+                "Windows superscript device name should be rejected: {path}"
             );
         }
     }
