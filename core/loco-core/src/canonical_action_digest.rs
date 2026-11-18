@@ -82,7 +82,7 @@ mod tests {
     fn unicode_uses_utf8_byte_lengths() {
         let action = ProposedAction::ReadFile { path: "資料/🦀.txt".into(), max_bytes: None };
         let bytes = canonical_action_bytes(&action);
-        assert_eq!(bytes[PREFIX.len()+1..PREFIX.len()+9], (13u64).to_be_bytes());
+        assert_eq!(bytes[PREFIX.len()+1..PREFIX.len()+9], (15u64).to_be_bytes());
     }
 
     #[test]
