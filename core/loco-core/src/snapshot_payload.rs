@@ -45,6 +45,41 @@ pub fn build_snapshot_contract(
     Ok(snapshot)
 }
 
+
+/// A validated snapshot capture: metadata and bytes are checked to agree.
+/// This object is not an authorization token and cannot be used to write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedWorkspaceSnapshot {
+    snapshot: WorkspaceSnapshot,
+    bytes: Vec<u8>,
+}
+
+impl CapturedWorkspaceSnapshot {
+    pub fn new(snapshot: WorkspaceSnapshot, bytes: Vec<u8>) -> Result<Self, SnapshotPayloadError> {
+        validate_snapshot_payload(&snapshot, &bytes)?;
+        Ok(Self { snapshot, bytes })
+    }
+
+    pub fn snapshot(&self) -> &WorkspaceSnapshot {
+        &self.snapshot
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// Read-only adapter boundary. Implementations must acquire bytes through
+/// platform-safe, workspace-root-relative operations and derive identity from
+/// the opened handle. This trait alone does not make an implementation secure.
+pub trait WorkspaceSnapshotAdapter {
+    fn capture(
+        &self,
+        relative_path: &str,
+        max_bytes: usize,
+    ) -> Result<CapturedWorkspaceSnapshot, SnapshotPayloadError>;
+}
+
 pub fn validate_snapshot_payload(
     snapshot: &WorkspaceSnapshot,
     bytes: &[u8],
@@ -83,6 +118,27 @@ mod tests {
         }
     }
 
+
+
+    #[test]
+    fn captured_snapshot_exposes_only_validated_metadata_and_bytes() {
+        let bytes = b"immutable captured bytes".to_vec();
+        let contract = snapshot_for(&bytes);
+        let captured = CapturedWorkspaceSnapshot::new(contract, bytes.clone()).unwrap();
+        assert_eq!(captured.bytes(), bytes.as_slice());
+        assert_eq!(captured.snapshot().byte_length, bytes.len() as u64);
+    }
+
+    #[test]
+    fn captured_snapshot_rejects_inconsistent_payload() {
+        let bytes = b"correct bytes".to_vec();
+        let mut contract = snapshot_for(&bytes);
+        contract.content_sha256 = Some("f".repeat(64));
+        assert!(matches!(
+            CapturedWorkspaceSnapshot::new(contract, bytes),
+            Err(SnapshotPayloadError::DigestMismatch)
+        ));
+    }
 
     #[test]
     fn builder_creates_consistent_contract_from_captured_bytes() {
