@@ -33,7 +33,7 @@ pub fn action_digest(action: &ProposedAction) -> Result<String, serde_json::Erro
 }
 
 fn decode_hex_digest(hex: &str) -> Result<[u8; 32], ApprovalError> {
-    if hex.len() != 64 { return Err(ApprovalError::InvalidDigestFormat); }
+    if hex.len() != 64 || !hex.is_ascii() { return Err(ApprovalError::InvalidDigestFormat); }
     let mut out = [0u8; 32];
     for i in 0..32 {
         let pair = &hex[i*2..i*2+2];
