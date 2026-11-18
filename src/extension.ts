@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import { TextDecoder } from 'util';
 import { LOCOAgent } from './core/locoAgent';
 import { clearHistory, getAllHistory, pruneHistory } from './utils/historyStore';
 import { SidebarChatProvider } from './ui/webview';
@@ -125,6 +127,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (choice === 'Clear History') {
         await clearHistory(context);
         vscode.window.showInformationMessage('LOCO history cleared.');
+      }
+    }),
+    vscode.commands.registerCommand('loco.previewPatchFromFile', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('Open the target file in the editor before previewing a patch.');
+        return;
+      }
+      if (editor.document.isDirty) {
+        const saveChoice = await vscode.window.showWarningMessage(
+          'Save the active file before generating a patch preview?',
+          { modal: true },
+          'Save and Continue'
+        );
+        if (saveChoice !== 'Save and Continue') return;
+        const saved = await editor.document.save();
+        if (!saved) return;
+      }
+      const selected = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        openLabel: 'Preview Proposed File',
+        filters: { 'Text and source files': ['txt', 'ts', 'tsx', 'js', 'jsx', 'py', 'rs', 'json', 'md', 'html', 'css'] }
+      });
+      if (!selected?.[0]) return;
+
+      try {
+        const proposedBytes = await vscode.workspace.fs.readFile(selected[0]);
+        if (proposedBytes.includes(0)) {
+          vscode.window.showWarningMessage('The proposed file appears to be binary and cannot be applied.');
+          return;
+        }
+        const proposedText = new TextDecoder('utf-8', { fatal: true }).decode(proposedBytes);
+        const currentText = editor.document.getText();
+        const result = await agent.applyPatch(editor.document.uri.fsPath, proposedText, currentText);
+        if (result.startsWith('Patch applied')) {
+          vscode.window.showInformationMessage(result);
+        } else {
+          vscode.window.showWarningMessage(result);
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(`Could not read the proposed file: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }),
+    vscode.commands.registerCommand('loco.restorePatchBackup', async () => {
+      const backups = agent.getPatchBackups();
+      if (!backups.length) {
+        vscode.window.showInformationMessage('No LOCO patch backups are available.');
+        return;
+      }
+      const selected = await vscode.window.showQuickPick(
+        backups.slice().reverse().map(backup => ({
+          label: path.basename(backup.targetPath),
+          description: new Date(backup.createdAt).toLocaleString(),
+          detail: backup.targetPath,
+          id: backup.id
+        })),
+        { placeHolder: 'Select a patch backup to preview and restore' }
+      );
+      if (!selected) return;
+      const result = await agent.restorePatchBackup(selected.id);
+      if (result.startsWith('Backup restored')) {
+        vscode.window.showInformationMessage(result);
+      } else {
+        vscode.window.showWarningMessage(result);
       }
     })
   ];
