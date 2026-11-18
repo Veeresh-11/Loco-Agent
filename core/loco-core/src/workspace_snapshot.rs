@@ -33,7 +33,7 @@ pub struct WorkspaceSnapshot {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotContractError {
     UnsupportedVersion,
     EmptyWorkspaceId,
