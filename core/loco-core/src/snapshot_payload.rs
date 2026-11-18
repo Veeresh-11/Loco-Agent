@@ -133,8 +133,7 @@ impl CapturedWorkspaceSnapshot {
 pub trait WorkspaceSnapshotAdapter {
     fn capture(
         &self,
-        relative_path: &str,
-        max_bytes: usize,
+        request: &SnapshotCaptureRequest,
     ) -> Result<CapturedWorkspaceSnapshot, SnapshotPayloadError>;
 }
 
