@@ -67,10 +67,10 @@ impl WorkspaceSnapshot {
             return Err(SnapshotContractError::NonRegularFile);
         }
         let digest = self.content_sha256.as_deref().ok_or(SnapshotContractError::MissingContentDigest)?;
-        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_digit() || (b >= b'a' && b <= b'f')) {
             return Err(SnapshotContractError::InvalidContentDigest);
         }
-        if self.file_identity.as_deref().is_some_and(|identity| identity.trim().is_empty()) {
+        if self.file_identity.as_deref().is_none_or(|identity| identity.trim().is_empty()) {
             return Err(SnapshotContractError::InvalidIdentity);
         }
         Ok(())
@@ -86,11 +86,7 @@ impl WorkspaceSnapshot {
             && self.file_kind == other.file_kind
             && self.byte_length == other.byte_length
             && self.content_sha256 == other.content_sha256
-            && match (&self.file_identity, &other.file_identity) {
-                (Some(a), Some(b)) => a == b,
-                (None, None) => true,
-                _ => false,
-            }
+            && matches!((&self.file_identity, &other.file_identity), (Some(a), Some(b)) if a == b)
     }
 }
 
@@ -147,6 +143,8 @@ mod tests {
         assert_eq!(s.validate_contract(), Err(SnapshotContractError::MissingContentDigest));
         s.content_sha256 = Some("z".repeat(64));
         assert_eq!(s.validate_contract(), Err(SnapshotContractError::InvalidContentDigest));
+        s.content_sha256 = Some("A".repeat(64));
+        assert_eq!(s.validate_contract(), Err(SnapshotContractError::InvalidContentDigest));
     }
 
     #[test]
@@ -169,6 +167,9 @@ mod tests {
         let mut changed = original.clone();
         changed.file_identity = None;
         assert!(!original.same_binding(&changed));
+        changed = original.clone();
+        let missing_identity = WorkspaceSnapshot { file_identity: None, ..original.clone() };
+        assert!(!missing_identity.same_binding(&missing_identity);
         changed = original.clone();
         changed.file_identity = Some("different-id".into());
         assert!(!original.same_binding(&changed));
