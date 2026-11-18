@@ -29,7 +29,8 @@ describe('isPathWithinWorkspace', () => {
     expect(isPathWithinWorkspace(root, '/work/project/src/..')).toBe(false);
   });
 
-  test('rejects empty candidates and absolute escape paths', () => {
+  test('rejects empty roots, empty candidates, and absolute escape paths', () => {
+    expect(isPathWithinWorkspace('', '/work/project/file.ts')).toBe(false);
     expect(isPathWithinWorkspace(root, '')).toBe(false);
     expect(isPathWithinWorkspace(root, '/tmp/outside.txt')).toBe(false);
   });
