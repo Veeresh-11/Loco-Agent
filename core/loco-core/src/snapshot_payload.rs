@@ -182,6 +182,49 @@ mod tests {
 
 
     #[test]
+    fn capture_request_rejects_windows_reserved_names_case_insensitively() {
+        for component in [
+            "CON", "con.txt", "PRN.log", "AUX", "nul.bin",
+            "COM1", "com9.txt", "LPT1", "lpt9.csv",
+        ] {
+            let path = format!("src/{component}");
+            assert_eq!(
+                SnapshotCaptureRequest::new(&path, 100),
+                Err(SnapshotCaptureRequestError::InvalidPath),
+                "reserved component should be rejected: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_request_rejects_trailing_dot_space_and_control_chars() {
+        for path in [
+            "src/name.", "src/name ", "src/tab\\tname", "src/new\\nline",
+            "src/\u{7f}name",
+        ] {
+            assert_eq!(
+                SnapshotCaptureRequest::new(path, 100),
+                Err(SnapshotCaptureRequestError::InvalidPath),
+                "non-portable component should be rejected: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_request_rejects_windows_ads_and_namespace_forms() {
+        for path in [
+            "src/file:stream", "\\\\server\\share\\file",
+            "\\\\?\\C:\\workspace\\file", "C:\\workspace\\file",
+        ] {
+            assert_eq!(
+                SnapshotCaptureRequest::new(path, 100),
+                Err(SnapshotCaptureRequestError::InvalidPath),
+                "Windows namespace or ADS path should be rejected: {path:?}"
+            );
+        }
+    }
+
+    #[test]
     fn capture_request_accepts_valid_relative_path_and_bound() {
         let req = SnapshotCaptureRequest::new("src/main.rs", 4096).unwrap();
         assert_eq!(req.relative_path(), "src/main.rs");
