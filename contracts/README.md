@@ -6,7 +6,7 @@ These schemas define the first proposed cross-component message shapes for the T
 
 - `action-proposal.schema.json`: AI-generated request for a possible action. **Untrusted input; never an authorization.**
 - `security-decision.schema.json`: security-core response: `deny`, `approval_required`, or `allow`. The client must correlate it to the request and verify freshness. Example: `examples/security-decision.json`; Rust wire DTO: `core/loco-core/src/security_decision_contract.rs`.
-- `audit-event.schema.json`: minimized security and execution metadata. Do not put credentials, full prompts, or full file contents in audit details.
+- `audit-event.schema.json`: minimized security and execution metadata; details are limited to 32 scalar fields. Example: `examples/audit-event.json`, validated by `contracts/tests/test_audit_event_schema.py`. Do not put credentials, full prompts, or full file contents in audit details.
 
 ## Flow
 
