@@ -60,3 +60,8 @@ This provides a binding-validation prototype, not a complete approval system.
 ## Patch proposal validation prototype
 
 `patch_validation::validate_patch_proposal` checks a bounded unified-diff envelope, rejects binary patches, binds the patch headers to the requested relative target, and requires the expected SHA-256 of the current target bytes. It does **not** apply the patch, write files, authorize the operation, or provide race-resistant filesystem protection. It is validation groundwork only; real patch application must use secure handle-relative/platform primitives and an authorization/approval gate.
+
+
+## Strict patch envelope follow-up
+
+The follow-up validator prototype deliberately supports one file and one hunk only, and checks unified-diff hunk line counts. Multi-file and multi-hunk patches are rejected. This remains envelope validation, not a patch parser/application engine; tests must confirm behavior before use.
