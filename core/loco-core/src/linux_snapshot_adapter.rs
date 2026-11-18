@@ -66,6 +66,22 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
             .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
         if bytes.len() > limit { return Err(SnapshotPayloadError::LimitExceeded); }
 
+        // Best-effort mutation detection: compare handle metadata before/after
+        // the bounded read. The captured-byte digest remains authoritative;
+        // metadata checks are not an atomic snapshot guarantee.
+        let after = file.metadata().map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        if after.dev() != metadata.dev()
+            || after.ino() != metadata.ino()
+            || after.len() != metadata.len()
+            || after.nlink() != metadata.nlink()
+            || after.mtime() != metadata.mtime()
+            || after.mtime_nsec() != metadata.mtime_nsec()
+            || after.ctime() != metadata.ctime()
+            || after.ctime_nsec() != metadata.ctime_nsec()
+        {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
+
         let identity = format!("dev:{}:ino:{}:captured_len:{}", metadata.dev(), metadata.ino(), bytes.len());
         let contract = build_snapshot_contract(&self.workspace_id, request.relative_path(), &identity, &bytes)?;
         CapturedWorkspaceSnapshot::new(contract, bytes)
