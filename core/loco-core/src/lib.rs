@@ -295,3 +295,5 @@ pub mod path_validation;
 pub mod workspace_fs;
 
 pub mod approval_binding;
+
+pub mod approval_store;
