@@ -57,7 +57,8 @@ jobs:
           truncate -s 128M "$image"
           mkfs.ext4 -F "$image"
           sudo mount -o loop "$image" "$mountpoint"
-          printf 'distinct-filesystem-sentinel' > "$mountpoint/secret.txt"
+          printf 'distinct-filesystem-sentinel' | sudo tee "$mountpoint/secret.txt" >/dev/null
+          sudo chmod 0644 "$mountpoint/secret.txt"
           mountpoint -q "$mountpoint"
           echo "LOCO_LINUX_LOOP_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Prepare nested APFS volume fixture
