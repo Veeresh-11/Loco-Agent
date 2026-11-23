@@ -53,9 +53,9 @@ PR #65 adds a native Windows test that holds a pre-existing writer handle with n
 
 ### F-06 — Windows uses handle-derived 128-bit file identity [Implementation added; approval semantics remain open]
 
-The adapter now calls `GetFileInformationByHandleEx` with `FileIdInfo` (class 18) for every opened root/directory/final-file handle. Its identity value contains the 64-bit volume serial and full 128-bit file identifier. The manually declared `FILE_ID_INFO` layout has compile-time x64 size/alignment/offset assertions. There is **no fallback** to the legacy 32-bit volume serial + 64-bit file index: if the filesystem or OS cannot provide `FileIdInfo`, acquisition fails closed.
+The adapter now calls `GetFileInformationByHandleEx` with `FileIdInfo` (class 18) for every opened root/directory/final-file handle. Its identity value contains the 64-bit volume serial and full 128-bit file identifier. The manually declared `FILE_ID_INFO` layout has compile-time x64 size/alignment/offset assertions. There is **no fallback** to the legacy 32-bit volume serial + 64-bit file index: if the filesystem or OS cannot provide `FileIdInfo`, acquisition fails closed. Microsoft documents the `FileIdInfo` information class as unsupported before Windows 8 / Windows Server 2012, so older Windows versions are outside the adapter's supported baseline.
 
-A Windows-native test checks that repeated opens of the same file return the same identity, distinct files on the same volume have distinct 128-bit IDs, and the returned identifier is not all-zero. The exact-head Windows job must execute this test.
+A Windows-native test checks that repeated opens of the same file return the same identity and distinct files on the same volume have distinct 128-bit IDs. The exact-head Windows job must execute this test.
 
 This improves per-computer handle identity but does **not** make an approval identifier globally unique, permanent, or safe across volume reformat, restore, clone, file-ID reuse, or filesystem migration. Approval records must bind a fresh handle-derived identity to workspace/policy/action and content digest, and enforcement must reacquire the target and compare identity plus digest immediately before the operation. Never trust a serialized old file ID as authorization by itself.
 
