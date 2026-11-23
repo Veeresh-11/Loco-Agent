@@ -116,3 +116,12 @@ The macOS adapter now queries the filesystem type from the retained workspace-ro
 The native macOS test asserts that the hosted CI temporary workspace reports APFS and that the adapter admits that root. The result is limited to the filesystem actually used by that runner. It does not validate HFS+, network or removable filesystems, APFS firmlinks, or mount arrangements not exercised by the test. Descendant directory and final-file device checks remain the mount-boundary control; native tests are still required to establish their behavior for supported APFS mount configurations.
 
 **Disposition:** APFS is the only admitted macOS filesystem baseline in this prototype. Do not expand the allowlist without filesystem-specific native tests and review. This change remains a read-only snapshot prototype and does not provide atomic file-content snapshots.
+
+
+## Follow-up test — nested APFS volume boundary (2026-11-23)
+
+PR #69 adds a macOS CI fixture that creates a sparse APFS disk image and mounts it beneath a temporary workspace root. The dedicated native test confirms the workspace and nested volume both report `apfs`, confirms their `st_dev` values differ, creates a file on the mounted volume, and requires capture through the workspace-relative path to fail with `AcquisitionFailed`.
+
+This directly exercises the adapter's existing same-device descendant rule against a distinct mounted APFS volume. The test is explicitly invoked by the macOS workflow and is not part of the normal test run unless the fixture is prepared. The job must fail if fixture setup or the dedicated assertion fails.
+
+Scope remains narrow: this does not validate APFS firmlinks, HFS+, network/removable volumes, or every APFS mount arrangement. It also does not establish atomic file-content snapshots. Record the exact-head macOS job result before treating this test as executed evidence.
