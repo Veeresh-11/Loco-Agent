@@ -169,6 +169,8 @@ mod tests {
 
   barrier.wait();
   let request=SnapshotCaptureRequest::new("nested/target.txt",128).unwrap();
+  // This checks path containment under namespace replacement only; it does
+  // not establish an atomic snapshot of concurrently modified file contents.
   for _ in 0..400 {
    match adapter.capture(&request) {
     Ok(captured)=>{
