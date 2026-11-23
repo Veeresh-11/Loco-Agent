@@ -151,8 +151,9 @@ impl WindowsWorkspaceRoot {
             return Err(WindowsRootError::UnsupportedVolumeType);
         }
 
-        // Share read/write but not delete. This pins the root against rename or
-        // deletion while the capability is alive; sharing violations fail closed.
+        // A volume root itself cannot be renamed or deleted; allow normal sharing
+        // here. Descendant directory handles deliberately omit FILE_SHARE_DELETE
+        // so each traversed workspace component is pinned against replacement.
         // OPEN_REPARSE_POINT makes a reparse root inspectable rather than followed.
         // SAFETY: wide is NUL-terminated; null security/template handles are valid.
         let raw = unsafe {
@@ -425,10 +426,19 @@ mod tests {
 
         assert!(std::fs::rename(&workspace, parent.path().join("workspace-moved")).is_err(),
             "the retained directory handle must deny delete-sharing needed for rename");
-        let child = pinned.open_child_directory("child").unwrap();
+        // Pin the final component itself, then attempt the classic
+        // rename-and-replace attack against that exact directory entry.
+        let child_path = workspace.join("child");
+        let moved_child_path = workspace.join("child-moved");
+        let pinned_child = pinned.open_child_directory("child").unwrap();
+        assert!(std::fs::rename(&child_path, &moved_child_path).is_err(),
+            "a retained child handle must deny delete-sharing needed for replacement");
+
+        // A second handle-relative lookup must still resolve to the same object;
+        // the attacker must not be able to substitute a new directory at "child".
         let child_again = pinned.open_child_directory("child").unwrap();
-        assert!(child.is_directory());
-        assert_eq!(child.identity(), child_again.identity());
+        assert!(pinned_child.is_directory());
+        assert_eq!(pinned_child.identity(), child_again.identity());
     }
 
     #[test]
