@@ -1425,14 +1425,15 @@ mod tests {
             &test_workspace_relative_path(&workspace),
             "windows-mounted-volume-boundary",
         );
+        let error = result.expect_err("the adapter must not admit a nested mounted volume");
         assert!(
             matches!(
-                result,
-                Err(WindowsRootError::ReparsePointRejected)
-                    | Err(WindowsRootError::RelativeOpenFailed)
-                    | Err(WindowsRootError::VolumeIdentityChanged)
+                error,
+                WindowsRootError::ReparsePointRejected
+                    | WindowsRootError::RelativeOpenFailed
+                    | WindowsRootError::VolumeIdentityChanged
             ),
-            "the adapter must fail closed at a real mounted-volume boundary; got {result:?}"
+            "unexpected mounted-volume rejection: {error:?}"
         );
     }
 
