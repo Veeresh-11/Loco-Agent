@@ -13,7 +13,7 @@ The Windows-only Rust module `windows_root_handle` currently provides:
 - One-component-at-a-time directory traversal through `NtCreateFile` using the retained parent handle as `OBJECT_ATTRIBUTES.RootDirectory`.
 - `OBJ_DONT_REPARSE` on each relative open, followed by handle metadata inspection and volume-identity comparison.
 - Share read/write but deny delete sharing while each directory handle is retained, so the prototype fails closed on concurrent rename/delete attempts.
-- Windows tests for current-temp-directory traversal, retained workspace and child-component rename denial, stable identity after a blocked component-replacement attempt, invalid path components, and directory-symlink rejection where the runner permits symlink creation.
+- Windows tests for current-temp-directory traversal, retained workspace and child-component rename denial, stable identity after a blocked component-replacement attempt, invalid path components, directory-symlink rejection where the runner permits symlink creation, and rejection of a real NTFS `IO_REPARSE_TAG_MOUNT_POINT` junction.
 
 The implementation intentionally exposes no file read, snapshot construction, patch, write, process, or authorization operation.
 
@@ -31,7 +31,7 @@ The implementation intentionally exposes no file read, snapshot construction, pa
 The PR CI must compile and run the Windows-only tests on `windows-latest`, as well as retain the existing Linux/macOS test matrix. Before this module can be used for snapshots, follow-up work must add:
 
 - A documented NTSTATUS-to-error mapping and native FFI review.
-- Adversarial tests for actual junction/mount-point reparse tags (the current symlink test does not substitute for these), component replacement under concurrent pressure, and share violations across supported NTFS configurations.
+- Adversarial tests for volume mount-point configurations distinct from directory junctions, component replacement under concurrent pressure, and share violations across supported NTFS configurations.
 - Final-file opening with explicit non-directory semantics and opened-handle type/reparse checks.
 - Bounded reads and identity/digest construction using the shared snapshot contract.
 - A documented supported Windows version and filesystem matrix.
