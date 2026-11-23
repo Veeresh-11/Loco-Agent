@@ -107,3 +107,12 @@ Continue to treat the digest as binding the returned bytes to the returned snaps
 ## Review disposition
 
 **Do not approve the snapshot stack for merge yet.** The review found actionable hardening work and policy decisions, but no claim is made here that the adapters are exploitable or that the native APIs fail. Resolve the findings, add the native tests, and obtain an independent review of the Windows FFI and cross-platform mount policy before changing PR readiness.
+
+
+## Follow-up finding — macOS filesystem admission (2026-11-23)
+
+The macOS adapter now queries the filesystem type from the retained workspace-root descriptor with `fstatfs`. Only the exact filesystem name `apfs` is admitted. A failed query, invalid filesystem-name encoding, or any other filesystem name fails closed. This avoids treating the existing `st_dev` descendant check as proof that every filesystem has been reviewed.
+
+The native macOS test asserts that the hosted CI temporary workspace reports APFS and that the adapter admits that root. The result is limited to the filesystem actually used by that runner. It does not validate HFS+, network or removable filesystems, APFS firmlinks, or mount arrangements not exercised by the test. Descendant directory and final-file device checks remain the mount-boundary control; native tests are still required to establish their behavior for supported APFS mount configurations.
+
+**Disposition:** APFS is the only admitted macOS filesystem baseline in this prototype. Do not expand the allowlist without filesystem-specific native tests and review. This change remains a read-only snapshot prototype and does not provide atomic file-content snapshots.
