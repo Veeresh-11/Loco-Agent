@@ -90,11 +90,12 @@ jobs:
           $vhd = Join-Path $env:RUNNER_TEMP 'loco-ntfs-mount-test.vhdx'
           $scriptPath = Join-Path $env:RUNNER_TEMP 'loco-ntfs-detach.txt'
           if (Test-Path $vhd) {
-            @"
-            select vdisk file="$vhd"
-            detach vdisk
-            exit
-            "@ | Set-Content -Encoding ascii $scriptPath
+            $detachCommands = @(
+              "select vdisk file=`"$vhd`"",
+              "detach vdisk",
+              "exit"
+            )
+            $detachCommands | Set-Content -Encoding ascii $scriptPath
             $detachOutput = & diskpart /s $scriptPath 2>&1
             $detachOutput | Write-Host
           }
