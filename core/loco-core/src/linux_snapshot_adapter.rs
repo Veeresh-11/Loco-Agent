@@ -338,4 +338,76 @@ mod tests {
         assert!(matches!(adapter.capture(&SnapshotCaptureRequest::new("data", 4).unwrap()),
             Err(SnapshotPayloadError::LimitExceeded)));
     }
+
+    #[test]
+    fn intermediate_directory_swap_never_escapes_retained_workspace_root() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let parent = tempfile::tempdir().unwrap();
+        let workspace = parent.path().join("workspace");
+        let outside = parent.path().join("outside");
+        let nested = workspace.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(nested.join("target.txt"), b"inside-workspace").unwrap();
+        std::fs::write(outside.join("target.txt"), b"OUTSIDE-SENTINEL").unwrap();
+
+        let adapter = Arc::new(
+            LinuxWorkspaceSnapshotAdapter::new(&workspace, "workspace").unwrap(),
+        );
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_workspace = workspace.clone();
+        let writer_outside = outside.clone();
+        let writer_barrier = barrier.clone();
+
+        let writer = thread::spawn(move || {
+            writer_barrier.wait();
+            for index in 0..200 {
+                let held = writer_workspace.join(format!("nested-held-{index}"));
+                let active = writer_workspace.join("nested");
+
+                // Move the real directory away, briefly replace its pathname
+                // with an outside symlink, then restore the original directory.
+                // openat2(BENEATH | NO_SYMLINKS) must either open the original
+                // in-workspace object or fail closed; it must never follow the
+                // attacker-controlled replacement.
+                std::fs::rename(&active, &held).unwrap();
+                std::os::unix::fs::symlink(&writer_outside, &active).unwrap();
+                std::thread::yield_now();
+                std::fs::remove_file(&active).unwrap();
+                std::fs::rename(&held, &active).unwrap();
+            }
+        });
+
+        barrier.wait();
+        let request = SnapshotCaptureRequest::new("nested/target.txt", 128).unwrap();
+        for _ in 0..400 {
+            match adapter.capture(&request) {
+                Ok(captured) => {
+                    assert_eq!(
+                        captured.bytes(),
+                        b"inside-workspace",
+                        "capture escaped through the swapped intermediate directory",
+                    );
+                    assert_eq!(
+                        crate::snapshot_payload::validate_snapshot_payload(
+                            captured.snapshot(),
+                            captured.bytes(),
+                        ),
+                        Ok(()),
+                    );
+                }
+                Err(SnapshotPayloadError::AcquisitionFailed) => {}
+                Err(other) => panic!("unexpected capture error during path swap: {other:?}"),
+            }
+        }
+        writer.join().unwrap();
+
+        // The workspace-relative path must still resolve to the original file
+        // after the adversarial swap sequence has completed.
+        let final_capture = adapter.capture(&request).unwrap();
+        assert_eq!(final_capture.bytes(), b"inside-workspace");
+    }
+
 }
