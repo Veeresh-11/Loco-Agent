@@ -336,3 +336,14 @@ PR #69 exact-head commit `b9159e4f41f4338c0386022f293743e41b45c94a` passed Rust 
 PR #70 adds a Windows-only CI fixture using DiskPart to create, attach, format as NTFS, and mount a secondary VHDX volume into an existing directory below the temporary workspace. The dedicated ignored native test verifies that the workspace and mounted path resolve to different volume-GUID roots, confirms the secondary volume is NTFS and independently admitted as a root, then requires the workspace adapter to reject traversal through the nested volume mountpoint. The test is explicitly invoked on Windows and must not be silently skipped.
 
 This closes the gap between existing junction/reparse tests and a real secondary-volume directory mount fixture on the hosted Windows runner, if exact-head CI passes. It does not prove behavior for ReFS/FAT/exFAT, removable/network volumes, or every third-party filesystem/filter driver. The NTFS-only allowlist remains unchanged.
+
+
+## Follow-up update — 2026-11-23: real mount-boundary CI evidence
+
+PR #70 implementation head `f07175b81f7e6c0526f08c829adb18b6db22dc43` passed Rust Core Tests run `45186946850` on all three platforms and Contract Validation run `45186946764`. The Windows runner created a secondary NTFS VHDX, mounted it beneath the workspace, executed the dedicated traversal-rejection test successfully, detached the VHDX, and removed the mountpoint.
+
+PR #71 implementation head `dc5f51419261011d4971076693457bcec7562e17` passed Rust Core Tests run `45187459253` on Ubuntu, Windows, and macOS and Contract Validation run `45187459247`. The Ubuntu runner created a real same-device bind mount; the explicit non-skipping test passed and cleanup detached it.
+
+PR #72 implementation head `b6d17385bedc767dd940f5a4347b62151a29f7b9` passed Rust Core Tests run `45187940996` on Ubuntu, Windows, and macOS and Contract Validation run `45187941018`. The Ubuntu runner created both a same-device bind mount and a distinct-device ext4 loop mount. Both dedicated boundary tests passed and both fixtures were detached. The matrix also reran the Windows NTFS and macOS APFS mount tests successfully.
+
+These results establish hosted-runner coverage for the specific NTFS, APFS, Linux bind-mount, and Linux ext4 loop-mount fixtures. They do not generalize to every filesystem, OS release, mount namespace, storage driver, firmlink, or network/removable volume.
