@@ -174,6 +174,7 @@ mod tests {
   std::fs::write(&target,b"data-volume-sentinel").unwrap();
 
   let root=File::open("/").unwrap();
+  let root_device=root.metadata().unwrap().dev();
   let home_handle=File::open(&home).unwrap();
   let users_handle=File::open("/Users").unwrap();
   assert_eq!(filesystem_name(&root).unwrap(),"apfs");
