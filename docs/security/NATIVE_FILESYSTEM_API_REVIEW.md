@@ -27,11 +27,9 @@ A Linux test now attempts to create a real bind mount beneath the workspace and 
 
 The openat2 API remains Linux 5.6+; unsupported syscall/flag behavior continues to fail closed. Do not add a fallback.
 
-### F-02 — Linux captured byte count is not explicitly compared with the initial file size [Medium]
+### F-02 — Linux captured byte count must equal the initial file size [Implemented by PR #62]
 
-The Linux adapter bounds the read and compares handle metadata before and after, but unlike the macOS and Windows adapters it does not explicitly require `bytes.len() == metadata.len()` after reading.
-
-Add the exact-length check before constructing the snapshot. This is a low-risk consistency hardening change and should have tests for short reads and concurrent truncation. Metadata comparison remains best-effort and must not be described as an atomic content snapshot.
+The Linux adapter now requires the captured byte count to equal the initial opened-handle metadata length before constructing the snapshot. Deterministic helper tests cover exact, short, and over-length results. This is consistency validation only: metadata comparison remains best-effort and does not create an atomic content snapshot.
 
 ### F-03 — Windows native FFI declarations have an x64 ABI/layout gate [Partially implemented]
 
@@ -51,11 +49,13 @@ Directory opens omit delete sharing and final-file opens share read only. This p
 
 PR #65 adds a native Windows test that holds a pre-existing writer handle with no sharing and verifies snapshot capture returns `AcquisitionFailed`. Existing tests cover the inverse direction: an acquired snapshot handle blocks subsequent writes and renames. The test still needs exact-head Windows CI execution. Compatibility failures from editors, indexers, antivirus/filter drivers, sync clients, and other handles remain expected behavior and should be surfaced as acquisition failures.
 
-### F-06 — Windows file/volume identity should not be treated as globally unique [Medium]
+### F-06 — Windows uses handle-derived 128-bit file identity [Implementation added; approval semantics remain open]
 
-The current adapter builds identity from the 32-bit volume serial and 64-bit file index exposed by `BY_HANDLE_FILE_INFORMATION`. Treat this only as an identity scoped to the currently held volume/handle context, not as a globally unique or durable identifier for approval records.
+The adapter now calls `GetFileInformationByHandleEx` with `FileIdInfo` (class 18) for every opened root/directory/final-file handle. Its identity value contains the 64-bit volume serial and full 128-bit file identifier. The manually declared `FILE_ID_INFO` layout has compile-time x64 size/alignment/offset assertions. There is **no fallback** to the legacy 32-bit volume serial + 64-bit file index: if the filesystem or OS cannot provide `FileIdInfo`, acquisition fails closed. Microsoft documents the `FileIdInfo` information class as unsupported before Windows 8 / Windows Server 2012, so older Windows versions are outside the adapter's supported baseline.
 
-Before approval integration, evaluate `GetFileInformationByHandleEx(FileIdInfo)` and its volume/file identifier fields, and define how identity is invalidated across volume reformat, restore, clone, or filesystem changes. Bind approvals to a fresh handle-derived identity and content digest at enforcement time.
+A Windows-native test checks that repeated opens of the same file return the same identity and distinct files on the same volume have distinct 128-bit IDs. The exact-head Windows job must execute this test.
+
+This improves per-computer handle identity but does **not** make an approval identifier globally unique, permanent, or safe across volume reformat, restore, clone, file-ID reuse, or filesystem migration. Approval records must bind a fresh handle-derived identity to workspace/policy/action and content digest, and enforcement must reacquire the target and compare identity plus digest immediately before the operation. Never trust a serialized old file ID as authorization by itself.
 
 ### F-07 — Windows volume type is not the same as a supported-filesystem allowlist [Medium]
 
@@ -79,17 +79,17 @@ Continue to treat the digest as binding the returned bytes to the returned snaps
 
 | Platform | Current primitive | Required support baseline / caveat |
 |---|---|---|
-| Linux | `openat2` with `BENEATH`, `NO_SYMLINKS`, `NO_MAGICLINKS` | Linux 5.6+; no fallback; mount-crossing policy is unresolved |
+| Linux | `openat2` with `BENEATH`, `NO_SYMLINKS`, `NO_MAGICLINKS`, `NO_XDEV` for descendants | Linux 5.6+; no fallback; descendant mount and bind-mount crossings are rejected |
 | macOS | component-wise `openat` with `O_NOFOLLOW` | native APFS/HFS+ and mount behavior still require testing |
 | Windows | `CreateFileW` for volume root; `NtCreateFile` with `RootDirectory` and `OBJ_DONT_REPARSE` for descendants | manually declared FFI requires ABI gates; fixed-volume admission is not yet a filesystem allowlist |
 
 ## Required implementation/review order
 
-1. Resolve F-01 mount policy and implement real mount/bind-mount tests on a privileged Linux VM.
-2. Add F-02 exact Linux byte-count validation.
-3. Add F-03 Windows ABI/layout assertions and define supported architectures.
-4. Complete F-04/F-05 native Windows reparse and sharing tests, including a real second-volume mount point.
-5. Decide F-06 identity format before binding snapshots to approvals.
+1. Run PR #63 bind-mount and distinct-filesystem mount tests on a privileged Linux VM; hosted CI may lack mount privileges.
+2. F-02 exact Linux byte-count validation is implemented by PR #62.
+3. F-03 Windows ABI/layout assertions and the x64-only target gate are implemented by PR #64; independent SDK-header review remains.
+4. Complete F-04/F-05 native Windows reparse and sharing tests, including a real second-volume mount point; PR #65 adds pre-existing sharing-conflict coverage.
+5. F-06 now uses `FILE_ID_INFO`; define approval freshness/digest semantics and test supported filesystems.
 6. Define and test F-07 filesystem allowlist.
 7. Complete F-08 native macOS filesystem/mount matrix.
 8. Re-run the complete CI matrix and update the roadmap with exact run IDs and platforms actually tested.

@@ -4,8 +4,8 @@
 **Repository:** https://github.com/Veeresh-11/Loco-Agent  
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
-**Latest fully validated stack PR at snapshot:** #59 (CI passed; draft). PR #60 contract validation passed; Ubuntu/Windows Rust jobs passed and macOS was queued at the last check.  
-**Current follow-up branch:** `security/linux-no-mount-crossing` (stacked on #62)
+**Latest validated implementation in this follow-up:** PR #64 exact-head Rust matrix and Contract Validation passed. PR #65 exact-head Contract Validation passed; its Rust matrix was still running at the last check. PR #63 exact-head Rust matrix and Contract Validation passed. Recheck GitHub Actions before relying on this snapshot.  
+**Current follow-up branch:** `security/windows-file-id-info` (stacked on #65)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 62 pull requests:
+At the current follow-up snapshot, the repository has 66 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#62 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#66 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **57 open PRs (#6–#62)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **61 open PRs (#6–#66)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #62, based on #61.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #66, based on #65.
 
 ### PR history and delivered scope
 
@@ -187,31 +187,35 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: native API findings and Linux read-length hardening
+## 5. Current follow-up task: native API findings and Windows file identity hardening
 
 Native review: [PR #61 — native filesystem API review](https://github.com/Veeresh-11/Loco-Agent/pull/61) (open, draft)  
 Linux hardening: [PR #62 — reject short snapshot reads](https://github.com/Veeresh-11/Loco-Agent/pull/62) (open, draft)  
 Current top branch: `fix/linux-snapshot-exact-read-length`, stacked on PR #61.
 
-PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements the low-risk Linux finding: the captured byte count must exactly equal the initial opened-handle size before a snapshot is built. It adds deterministic tests for exact, short, and over-length results. This check is additional consistency validation; it does not provide atomic content snapshots.
+PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements exact Linux captured-length equality with deterministic exact, short, and over-length tests. PR #63 implements strict descendant mount rejection with `RESOLVE_NO_XDEV`. PR #64 adds the Windows x64 ABI gate; PR #65 adds pre-existing sharing-conflict coverage; PR #66 upgrades handle-derived Windows identity to `FILE_ID_INFO`. These checks do not provide atomic content snapshots or durable approval identity by themselves.
 
-**Still open:** Linux mount/bind-mount policy (F-01), Windows FFI ABI and supported-architecture gates, Windows real volume-mount-point and filesystem allowlist tests, and native macOS filesystem/mount validation. No production approval/write/execution path is added.
+**Still open:** privileged Linux mount/bind-mount execution, Windows real secondary-volume mount-point and filesystem allowlist tests, independent Windows SDK/FFI review, approval freshness/digest binding, and native macOS filesystem/mount validation. No production approval/write/execution path is added.
 
 PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
 
-### PR #65 — Windows pre-existing share-conflict test (in progress)
+### PR #66 — Windows 128-bit handle-derived file identity (in progress; exact-head CI pending)
+
+PR #66 is stacked on #65. It uses `GetFileInformationByHandleEx(FileIdInfo)` to obtain a 64-bit volume serial and 128-bit file ID from each opened handle, with compile-time x64 layout assertions. There is no fallback to the legacy 32-bit serial/64-bit index; filesystems that cannot provide `FileIdInfo` fail closed. A Windows-native test checks identity stability for repeated opens and distinction between separate files. Microsoft documents the FileIdInfo class as unsupported before Windows 8 / Windows Server 2012; older Windows versions and filesystems without this capability fail closed. This is not a globally durable approval identifier: approvals still need fresh handle reacquisition and content-digest verification at enforcement time.
+
+### PR #65 — Windows pre-existing share-conflict test (Contract Validation passed; Rust matrix pending)
 
 PR #65 is stacked on #64. It adds a Windows-native contention test that opens a target file first with write access and no share permissions, then verifies snapshot acquisition fails closed. This complements the existing tests proving that an acquired snapshot handle blocks later writes and renames. The test does not introduce a retry or weaker sharing fallback.
 
-### PR #64 — Windows x64 native FFI ABI gate (in progress)
+### PR #64 — Windows x64 native FFI ABI gate (exact-head CI passed: Ubuntu, Windows, macOS; Contract Validation passed)
 
 PR #64 is stacked on #63. It adds compile-time size/alignment/offset assertions for the manually declared Windows native structures and makes the supported Windows target explicit: x86_64 only. This prevents accidental compilation on unreviewed x86/ARM64 targets. The assertions do not replace independent SDK-header review or runtime testing; Windows FFI remains a merge gate.
 
-### PR #63 — Linux strict descendant mount boundary (in progress)
+### PR #63 — Linux strict descendant mount boundary (exact-head CI passed: Ubuntu, Windows, macOS; Contract Validation passed)
 
 PR #63 is stacked on #62 and chooses the strict F-01 policy: descendant `openat2` resolution sets `RESOLVE_NO_XDEV`, rejecting mount and bind-mount crossings below the retained workspace root. Root acquisition does not set this flag, so a workspace rooted on a separate mounted filesystem remains admissible. This intentionally disallows nested bind-mounted dependency/source trees. A Linux test attempts a real bind mount and asserts fail-closed capture when privileges are available; hosted unprivileged CI may skip that privileged assertion. A privileged Linux VM must still execute bind-mount and distinct-filesystem mount tests before native coverage is claimed.
 
-At this update, PR #62 Contract Validation run `45180875545` passed, while Rust Core Tests run `45180875554` was still pending with no jobs reported. PR #60 Rust run `45178926550` had Ubuntu and Windows pass and macOS queued. Recheck these runs before claiming final status.
+CI status at this update: PR #62 exact-head Rust Core Tests and Contract Validation passed; PR #63 exact-head Rust matrix and Contract Validation passed; PR #64 exact-head Rust matrix and Contract Validation passed. PR #65 Contract Validation passed and Ubuntu/Windows Rust jobs passed, while macOS was queued. PR #66 checks are pending/being created for its latest head; recheck the exact SHA before claiming success.
 
 ## 6. Roadmap and remaining work
 
@@ -219,7 +223,7 @@ Recommended order; keep each item in a coherent, reviewable PR.
 
 ### A. Complete platform snapshot adversarial coverage
 
-- Linux: PR #62 adds an exact captured-byte-length check. Still review mount-crossing behavior, kernel/openat2 availability, final/intermediate replacement and concurrent mutation boundaries.
+- Linux: PR #62 adds an exact captured-byte-length check; PR #63 rejects all descendant mount and bind-mount crossings with `RESOLVE_NO_XDEV`. A privileged Linux VM must still execute real bind-mount and distinct-filesystem mount tests. Keep openat2 no-fallback behavior.
 - Windows: test junctions/reparse tags, component replacement, sharing violations, and final-file mutation. Root admission now rejects DOS/mounted-folder paths; a real second-volume mount-point traversal fixture remains outstanding, along with unsupported-filesystem coverage.
 - macOS: add intermediate-component replacement coverage; test symlink swaps, mount boundaries, FIFO/non-regular targets, hard links, and concurrent writes on supported filesystems.
 - Keep race tests bounded, synchronized, deterministic where possible, and explicit about accepted fail-closed outcomes.
