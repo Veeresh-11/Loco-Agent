@@ -5,7 +5,7 @@
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
 **Latest fully validated stack PR at snapshot:** #59 (CI passed; draft). PR #60 contract validation passed; Ubuntu/Windows Rust jobs passed and macOS was queued at the last check.  
-**Current follow-up branch:** `security/native-filesystem-api-review` (stacked on #60)
+**Current follow-up branch:** `security/linux-no-mount-crossing` (stacked on #62)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -198,6 +198,12 @@ PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW
 **Still open:** Linux mount/bind-mount policy (F-01), Windows FFI ABI and supported-architecture gates, Windows real volume-mount-point and filesystem allowlist tests, and native macOS filesystem/mount validation. No production approval/write/execution path is added.
 
 PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
+
+### PR #63 — Linux strict descendant mount boundary (in progress)
+
+PR #63 is stacked on #62 and chooses the strict F-01 policy: descendant `openat2` resolution sets `RESOLVE_NO_XDEV`, rejecting mount and bind-mount crossings below the retained workspace root. Root acquisition does not set this flag, so a workspace rooted on a separate mounted filesystem remains admissible. This intentionally disallows nested bind-mounted dependency/source trees. A Linux test attempts a real bind mount and asserts fail-closed capture when privileges are available; hosted unprivileged CI may skip that privileged assertion. A privileged Linux VM must still execute bind-mount and distinct-filesystem mount tests before native coverage is claimed.
+
+At this update, PR #62 Contract Validation run `45180875545` passed, while Rust Core Tests run `45180875554` was still pending with no jobs reported. PR #60 Rust run `45178926550` had Ubuntu and Windows pass and macOS queued. Recheck these runs before claiming final status.
 
 ## 6. Roadmap and remaining work
 
