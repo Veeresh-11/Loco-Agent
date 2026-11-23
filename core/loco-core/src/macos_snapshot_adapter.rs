@@ -148,6 +148,41 @@ mod tests {
   );
  }
 
+ #[test]
+ fn rejects_users_firmlink_into_data_volume(){
+  use std::os::unix::fs::MetadataExt;
+
+  // On the hosted macOS runner, /Users is a firmlink into the APFS Data
+  // volume. Construct the adapter directly from / only inside this test:
+  // production workspace admission intentionally does not allow / as a root.
+  let home=PathBuf::from(std::env::var("HOME").expect("macOS CI must define HOME"));
+  assert!(home.starts_with("/Users"),"expected hosted account home beneath /Users, got {home:?}");
+  let workspace=tempfile::tempdir_in(&home).unwrap();
+  let target=workspace.path().join("firmlink-sentinel.txt");
+  std::fs::write(&target,b"data-volume-sentinel").unwrap();
+
+  let root=File::open("/").unwrap();
+  let root_device=root.metadata().unwrap().dev();
+  let home_handle=File::open(&home).unwrap();
+  assert_eq!(filesystem_name(&root).unwrap(),"apfs");
+  assert_eq!(filesystem_name(&home_handle).unwrap(),"apfs");
+  assert_ne!(
+   root_device,home_handle.metadata().unwrap().dev(),
+   "/Users firmlink must resolve to a distinct APFS Data-volume device"
+  );
+
+  let relative=target.strip_prefix("/").unwrap().to_string_lossy().replace('\\',"/");
+  let adapter=MacOsWorkspaceSnapshotAdapter{
+   root,root_device,workspace_id:"firmlink-boundary-test".into(),
+   canonical_root:PathBuf::from("/")
+  };
+  assert_eq!(
+   adapter.capture(&SnapshotCaptureRequest::new(&relative,128).unwrap()),
+   Err(SnapshotPayloadError::AcquisitionFailed),
+   "descriptor-relative traversal must fail closed when /Users crosses the APFS firmlink volume boundary"
+  );
+ }
+
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();
   let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(d.path()).unwrap(),"workspace").unwrap();
