@@ -1,8 +1,8 @@
 //! Windows-only trusted-volume-root and handle-relative directory traversal prototype.
 //!
-//! This is deliberately not a WorkspaceSnapshotAdapter yet. It establishes a
-//! narrow root capability and proves one-component directory opens. No writes,
-//! file reads, path-based fallback, or authorization decisions are exposed.
+//! Read-only Windows workspace acquisition prototype. It pins a workspace
+//! directory beneath a trusted local volume root and captures bounded regular
+//! files through handle-relative opens. No writes or authorization decisions.
 
 use std::fs::File;
 use std::mem::{size_of, zeroed};
@@ -873,6 +873,7 @@ mod tests {
     }
 
     fn test_workspace_relative_path(path: &std::path::Path) -> String {
+        use std::os::windows::ffi::OsStringExt;
         use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
         let path_wide = to_wide_nul(path.to_string_lossy().as_ref());
         let mut mount = vec![0u16; 1024];
