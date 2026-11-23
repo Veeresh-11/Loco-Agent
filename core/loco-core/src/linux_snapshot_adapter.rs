@@ -31,7 +31,8 @@ fn metadata_matches(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bo
         && before.ctime_nsec() == after.ctime_nsec()
 }
 
-// A successful bounded read must account for the complete size observed on the opened handle.\nfn captured_length_matches(expected: u64, actual: usize) -> bool {
+// A successful bounded read must account for the complete size observed on the opened handle.
+fn captured_length_matches(expected: u64, actual: usize) -> bool {
     u64::try_from(actual).map(|length| length == expected).unwrap_or(false)
 }
 
