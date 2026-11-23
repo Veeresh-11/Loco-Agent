@@ -1279,4 +1279,47 @@ mod tests {
         assert_eq!(final_capture.bytes(), b"inside-workspace");
     }
 
+    #[test]
+    fn snapshot_capture_fails_closed_when_existing_handle_denies_read_sharing() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+
+        const GENERIC_WRITE_VALUE: u32 = 0x4000_0000;
+        const FILE_ATTRIBUTE_NORMAL_VALUE: u32 = 0x0000_0080;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let target = workspace.path().join("busy.txt");
+        std::fs::write(&target, b"contended").unwrap();
+
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-share-conflict-workspace",
+        ).unwrap();
+
+        let wide = to_wide_nul(target.to_string_lossy().as_ref());
+        // Open an incompatible pre-existing writer handle: it requests write
+        // access while sharing no access with subsequent opens. The snapshot
+        // adapter must not retry by pathname or weaken the requested sharing.
+        // SAFETY: wide is NUL-terminated; null security/template handles are valid.
+        let raw = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                GENERIC_WRITE_VALUE,
+                0,
+                null(),
+                OPEN_EXISTING_VALUE,
+                FILE_ATTRIBUTE_NORMAL_VALUE,
+                null_mut(),
+            )
+        };
+        assert_ne!(raw, invalid_handle_value(), "failed to create share-conflict fixture");
+        // SAFETY: raw is a uniquely owned handle returned by CreateFileW.
+        let _blocking_writer = unsafe { OwnedHandle::from_raw_handle(raw as RawHandle) };
+
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("busy.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        ), "an incompatible pre-existing handle must cause fail-closed capture");
+    }
+
 }

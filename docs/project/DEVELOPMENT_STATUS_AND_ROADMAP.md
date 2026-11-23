@@ -199,6 +199,10 @@ PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW
 
 PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
 
+### PR #65 — Windows pre-existing share-conflict test (in progress)
+
+PR #65 is stacked on #64. It adds a Windows-native contention test that opens a target file first with write access and no share permissions, then verifies snapshot acquisition fails closed. This complements the existing tests proving that an acquired snapshot handle blocks later writes and renames. The test does not introduce a retry or weaker sharing fallback.
+
 ### PR #64 — Windows x64 native FFI ABI gate (in progress)
 
 PR #64 is stacked on #63. It adds compile-time size/alignment/offset assertions for the manually declared Windows native structures and makes the supported Windows target explicit: x86_64 only. This prevents accidental compilation on unreviewed x86/ARM64 targets. The assertions do not replace independent SDK-header review or runtime testing; Windows FFI remains a merge gate.
