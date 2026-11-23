@@ -5,7 +5,7 @@
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
 **Latest completed stack PR at snapshot:** #59 (CI passed; draft)  
-**Current follow-up branch:** `test/windows-final-file-mutation-race` (stacked on #58)
+**Current follow-up branch:** `test/windows-volume-mountpoint-coverage` (stacked on #59)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 59 pull requests:
+At the snapshot date, the repository has 60 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#59 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#60 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **54 open PRs (#6–#59)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **55 open PRs (#6–#60)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #59, based on #58.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #60, based on #59.
 
 ### PR history and delivered scope
 
@@ -107,6 +107,7 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#57 — Windows intermediate junction replacement race tests:** verifies the snapshot adapter rejects an intermediate NTFS mount-point junction and races directory replacement with captures. Windows CI passed; the PR remains draft and is not merged.
 - **#58 — Windows symlink reparse-point coverage:** adds snapshot-adapter tests for intermediate directory symlinks and final-file symlinks. The tests require symlink creation to succeed rather than silently skipping; the Windows test job passed with the tests executed.
 - **#59 — Windows final-file mutation race:** races complete-content writes against snapshot capture. Successful captures must match one of the complete known payloads and validate the shared digest; fail-closed acquisition errors are accepted. The full Ubuntu/macOS/Windows Rust matrix and contract validation passed.
+- **#60 — Windows mounted-folder root admission coverage:** verifies that a DOS path to a mounted folder is not accepted as the trusted volume root; only canonical volume-GUID roots are admitted. This is lexical/root-admission coverage, not a test that creates or traverses a real secondary-volume mount point.
 
 ## 3. Current implementation maturity
 
@@ -173,27 +174,18 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: Windows final-file mutation race
+## 5. Current follow-up task: Windows volume mount-point boundary
 
-Pull request: [#59 — test(windows): cover final-file mutation during snapshot capture](https://github.com/Veeresh-11/Loco-Agent/pull/59) (open, draft)  
-Branch: `test/windows-final-file-mutation-race`  
-Base: PR #58 branch `test/windows-symlink-reparse-coverage`  
-Head: `40b3d3da84e3bace2f0484d2d378a2c748d54365`
+Pull request: [#60 — test(windows): reject mounted-folder paths as trusted roots](https://github.com/Veeresh-11/Loco-Agent/pull/60) (open, draft)  
+Branch: `test/windows-volume-mountpoint-coverage`  
+Base: PR #59 branch `test/windows-final-file-mutation-race`  
+Base head at branch creation: `f2e5c0a27ec6cad8a1039a7e4477615d61720718`
 
-PR #58's stricter symlink setup is included in this branch's base and was exercised by the Windows runner: both intermediate-directory and final-file symlink tests completed successfully. The symlink tests now fail if link creation is denied, so a green Windows result cannot silently represent a permission-based skip.
+PR #60 adds a Windows-only test that passes a DOS path to a temporary directory (the same path form used to address a directory mounted beneath a volume) to `WindowsWorkspaceRoot::open` and requires `InvalidVolumeGuidRoot`. It also rejects drive-letter extended-namespace and UNC paths in the canonical volume-root parser. This protects the trust boundary from treating a caller-supplied mounted-folder path as the volume authority; callers must resolve and supply the canonical volume-GUID root.
 
-PR #59 adds a Windows-only final-file mutation contention test:
-1. A writer repeatedly attempts to publish one of two known complete file contents.
-2. Snapshot capture runs concurrently against the same final path.
-3. A successful capture must contain exactly one complete known payload and validate against the shared snapshot digest; acquisition failures during sharing contention are acceptable.
-4. The writer must complete at least one write, and a final capture must return one complete payload.
+**Important limitation:** this does not create a real volume mount point backed by a second volume, nor does it prove traversal across such a mount point is rejected on every Windows filesystem. The hosted Windows runner does not provide a dependable second writable volume plus the mount-manager privilege needed for a deterministic real mount-point fixture. Existing intermediate NTFS junction tests exercise the mount-point reparse tag used by junctions, but a junction is not equivalent to a mounted volume. A privileged native Windows test on a dedicated VM with two test volumes remains required before claiming real volume-mount-point traversal coverage.
 
-Validation for PR #59 head:
-- Rust Core Tests run `45177587125`: Ubuntu, macOS, and Windows jobs passed. Windows ran 102 tests; the final-file mutation race and both symlink reparse tests passed.
-- Contract Validation run `45177586998`: passed.
-- PR remains open/draft and is not merged.
-
-The test exercises Windows read-handle sharing and bounded snapshot behavior under concurrent mutation. It does not establish an atomic content snapshot across arbitrary filesystems or validate volume mount-point configurations. Test-only; no production adapter changes.
+Validation is pending for this PR's exact head. Keep the PR open/draft; no production adapter behavior is changed.
 
 ## 6. Roadmap and remaining work
 
@@ -202,7 +194,7 @@ Recommended order; keep each item in a coherent, reviewable PR.
 ### A. Complete platform snapshot adversarial coverage
 
 - Linux: review mount-crossing behavior, kernel/openat2 availability, final/intermediate replacement and concurrent mutation boundaries.
-- Windows: test junctions/mount points/reparse tags, component replacement, sharing violations, final-file mutation, and unsupported filesystems.
+- Windows: test junctions/reparse tags, component replacement, sharing violations, and final-file mutation. Root admission now rejects DOS/mounted-folder paths; a real second-volume mount-point traversal fixture remains outstanding, along with unsupported-filesystem coverage.
 - macOS: add intermediate-component replacement coverage; test symlink swaps, mount boundaries, FIFO/non-regular targets, hard links, and concurrent writes on supported filesystems.
 - Keep race tests bounded, synchronized, deterministic where possible, and explicit about accepted fail-closed outcomes.
 
