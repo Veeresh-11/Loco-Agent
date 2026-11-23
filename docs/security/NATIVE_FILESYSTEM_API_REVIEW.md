@@ -33,15 +33,11 @@ The Linux adapter bounds the read and compares handle metadata before and after,
 
 Add the exact-length check before constructing the snapshot. This is a low-risk consistency hardening change and should have tests for short reads and concurrent truncation. Metadata comparison remains best-effort and must not be described as an atomic content snapshot.
 
-### F-03 — Windows native FFI declarations need an ABI/layout gate [High]
+### F-03 — Windows native FFI declarations have an x64 ABI/layout gate [Partially implemented]
 
-The Windows adapter manually declares `UNICODE_STRING`, `OBJECT_ATTRIBUTES`, `IO_STATUS_BLOCK`, `BY_HANDLE_FILE_INFORMATION`, and `NtCreateFile`. The declarations use `repr(C)` and `extern "system"`, which are directionally appropriate, but current CI evidence is the hosted Windows runner's target architecture only.
+The manual `UNICODE_STRING`, `OBJECT_ATTRIBUTES`, `FILETIME`, `BY_HANDLE_FILE_INFORMATION`, `IO_STATUS_BLOCK`, and `NtCreateFile` declarations now have compile-time x64 size, alignment, and field-offset assertions. The module explicitly emits a compile error for non-x86_64 Windows targets. The declared support scope is therefore **Windows x64 only**; x86 and ARM64 are unsupported until their ABI/calling-convention declarations and native tests are separately added.
 
-Before relying on these declarations:
-- Prefer SDK-backed definitions where practical; otherwise add compile-time size/alignment/offset assertions for every supported target architecture.
-- Add a Windows x64 and any intended x86/ARM64 compile/test matrix. If an architecture is not supported, explicitly exclude it from the support matrix.
-- Keep the exact native return status and raw NTSTATUS in diagnostic/test context; continue to fail closed for unknown failures.
-- Verify desired-access, share-access, create-options, and synchronous-I/O flags against the SDK headers used by the supported Windows SDK.
+These assertions reduce silent layout drift but do not replace an independent comparison against the exact Windows SDK headers or runtime validation of desired-access/share/create flags and NTSTATUS handling. Prefer SDK-backed definitions for public structures where practical. The FFI gate remains open for independent review before approval integration.
 
 ### F-04 — `OBJ_DONT_REPARSE` is documented, but the adapter must retain post-open verification [High]
 

@@ -199,6 +199,10 @@ PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW
 
 PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
 
+### PR #64 — Windows x64 native FFI ABI gate (in progress)
+
+PR #64 is stacked on #63. It adds compile-time size/alignment/offset assertions for the manually declared Windows native structures and makes the supported Windows target explicit: x86_64 only. This prevents accidental compilation on unreviewed x86/ARM64 targets. The assertions do not replace independent SDK-header review or runtime testing; Windows FFI remains a merge gate.
+
 ### PR #63 — Linux strict descendant mount boundary (in progress)
 
 PR #63 is stacked on #62 and chooses the strict F-01 policy: descendant `openat2` resolution sets `RESOLVE_NO_XDEV`, rejecting mount and bind-mount crossings below the retained workspace root. Root acquisition does not set this flag, so a workspace rooted on a separate mounted filesystem remains admissible. This intentionally disallows nested bind-mounted dependency/source trees. A Linux test attempts a real bind mount and asserts fail-closed capture when privileges are available; hosted unprivileged CI may skip that privileged assertion. A privileged Linux VM must still execute bind-mount and distinct-filesystem mount tests before native coverage is claimed.
