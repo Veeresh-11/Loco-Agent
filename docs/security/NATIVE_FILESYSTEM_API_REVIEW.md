@@ -134,3 +134,13 @@ PR #70 adds a Windows CI fixture that creates and attaches a VHDX, formats its p
 This is distinct from the existing junction test: it uses a real secondary volume mountpoint rather than a junction to another directory on the same volume. The workflow explicitly invokes the ignored test and detaches the VHDX in an always-run cleanup step. Treat this as executed native evidence only after the exact-head Windows CI job passes.
 
 The test covers the hosted runner's NTFS behavior only. It does not expand the allowlist or validate ReFS, FAT/exFAT, removable/network filesystems, or all Windows storage/filter-driver combinations.
+
+
+## Follow-up native mount evidence (2026-11-23)
+
+- **Windows secondary NTFS volume:** PR #70 implementation head `f07175b81f7e6c0526f08c829adb18b6db22dc43`; Rust matrix run `45186946850` and Contract Validation `45186946764` passed. The Windows runner created a separate NTFS VHDX mounted beneath the workspace; the capture traversal test and cleanup passed.
+- **Linux same-device bind mount:** PR #71 implementation head `dc5f51419261011d4971076693457bcec7562e17`; Rust matrix run `45187459253` and Contract Validation `45187459247` passed. Ubuntu created a real bind mount whose device identity matched the workspace; the explicit `RESOLVE_NO_XDEV` rejection test passed.
+- **Linux distinct ext4 mount:** PR #72 implementation head `b6d17385bedc767dd940f5a4347b62151a29f7b9`; Rust matrix run `45187940996` and Contract Validation `45187941018` passed. Ubuntu created and mounted an ext4 loop image with a distinct device identity; capture failed closed as required.
+- **macOS nested APFS volume:** rerun in PR #72's matrix; the APFS sparse-image fixture and dedicated mount-boundary test passed.
+
+These are exact hosted CI environment results, not universal platform guarantees. Linux's bind-mount test proves a case that `st_dev` alone cannot distinguish; `RESOLVE_NO_XDEV` is the enforcement tested. The ext4 loop mount tests a different-device crossing. The Windows result is limited to NTFS and the macOS result to APFS. Firmlinks, HFS+, ReFS, FAT/exFAT, network/removable filesystems, and broader native OS/storage combinations remain outside this evidence.
