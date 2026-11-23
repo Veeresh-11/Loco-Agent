@@ -478,4 +478,37 @@ mod tests {
         assert_eq!(final_capture.bytes(), b"inside-workspace");
     }
 
+    #[test]
+    #[ignore = "requires a real bind mount prepared by the Linux CI workflow"]
+    fn rejects_ci_prepared_real_bind_mount_crossing() {
+        use std::os::unix::fs::MetadataExt;
+
+        let workspace = std::path::PathBuf::from(
+            std::env::var("LOCO_LINUX_BIND_MOUNT_WORKSPACE")
+                .expect("Linux bind-mount fixture workflow must set LOCO_LINUX_BIND_MOUNT_WORKSPACE"),
+        );
+        let mountpoint = workspace.join("mounted");
+        assert_eq!(
+            std::fs::metadata(&workspace).unwrap().dev(),
+            std::fs::metadata(&mountpoint).unwrap().dev(),
+            "bind mount must expose the same underlying device identity"
+        );
+        assert_eq!(
+            std::fs::read(mountpoint.join("secret.txt")).unwrap(),
+            b"outside-bind-mount",
+            "fixture must contain the external sentinel"
+        );
+
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(
+            std::fs::canonicalize(&workspace).unwrap(),
+            "linux-bind-mount-workspace",
+        )
+        .unwrap();
+        assert_eq!(
+            adapter.capture(&SnapshotCaptureRequest::new("mounted/secret.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed),
+            "RESOLVE_NO_XDEV must reject a same-device bind mount below the workspace root"
+        );
+    }
+
 }
