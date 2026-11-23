@@ -289,11 +289,10 @@ mod tests {
   let root=File::open("/").unwrap();
   let root_device=root.metadata().unwrap().dev();
   let home_handle=File::open(&home).unwrap();
-  let users_handle=File::open("/Users").unwrap();
   assert_eq!(filesystem_name(&root).unwrap(),"apfs");
   assert_eq!(filesystem_name(&home_handle).unwrap(),"apfs");
   assert!(directory_entry_is_firmlink(&root,"Users").unwrap(),
-   "the opened /Users entry must retain SF_FIRMLINK in handle metadata");
+   "the /Users directory entry must expose SF_FIRMLINK in ATTR_CMN_FLAGS");
 
   let relative=target.strip_prefix("/").unwrap().to_string_lossy().replace('\\',"/");
   let adapter=MacOsWorkspaceSnapshotAdapter{
