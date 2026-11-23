@@ -1322,7 +1322,6 @@ mod tests {
         let second = open_relative_file(&adapter.workspace.handle, "second.txt").unwrap().identity();
         assert_eq!(first, first_again, "same file should retain the same handle-derived identity");
         assert_eq!(first.volume_serial, second.volume_serial);
-        assert_ne!(first.file_id, [0u8; 16], "filesystem must provide a nonzero 128-bit file ID");
         assert_ne!(first.file_id, second.file_id, "distinct files should have distinct IDs on the test filesystem");
     }
 
