@@ -171,18 +171,21 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: Windows symlink reparse-tag coverage
+## 5. Current follow-up task: Windows final-file mutation race
 
-Pull request: pending creation — `test/windows-symlink-reparse-coverage` (stacked on PR #57)  
-Base commit: `c6d74d0319acc237b28ae3bf1e4bec3a499b5d4d`
+Pull request: [#59 — test(windows): cover final-file mutation during snapshot capture](https://github.com/Veeresh-11/Loco-Agent/pull/59) (open, draft)  
+Branch: `test/windows-final-file-mutation-race`  
+Base: PR #58 branch `test/windows-symlink-reparse-coverage`
 
-PR #57's Windows-only intermediate NTFS junction tests passed on `windows-latest`, alongside the macOS/Ubuntu Rust matrix and contract validation. The PR remains open/draft.
+PR #58's previous head passed Rust Core Tests and Contract Validation on Ubuntu, macOS, and Windows. Its symlink test setup has since been tightened to fail if the Windows runner cannot create symbolic links; the updated head requires fresh CI before its result can be accepted.
 
-This follow-up adds two Windows-only snapshot-adapter tests:
-1. Reject an intermediate directory symbolic link before it can redirect traversal to an outside target.
-2. Reject a final-file symbolic link rather than opening and reading its outside target.
+This follow-up adds a Windows-only final-file mutation contention test:
+1. A writer repeatedly attempts to publish one of two known complete file contents.
+2. Snapshot capture runs concurrently against the same final path.
+3. A successful capture must contain exactly one complete known payload and validate against the shared digest contract; acquisition failures during sharing contention are acceptable.
+4. The writer must complete at least one write, and a final capture must return one complete payload.
 
-These exercise the symlink reparse-point path separately from the NTFS mount-point junction path covered by PR #57. Tests use the standard Windows symlink creation APIs and return early when the runner does not grant symlink creation rights; CI logs and runner policy must therefore be checked before claiming the symlink test bodies actually exercised the attack. No production adapter behavior changes.
+The test exercises read-handle sharing and bounded snapshot behavior under concurrent mutation. It does not establish an atomic content snapshot across arbitrary filesystems or validate volume mount-point configurations. Test-only; no production adapter changes.
 
 ## 6. Roadmap and remaining work
 
