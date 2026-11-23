@@ -171,6 +171,7 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 
 ## 5. Current follow-up task: macOS intermediate-directory swap race
 
+Pull request: [#56 — test(macos): exercise intermediate-directory swap races](https://github.com/Veeresh-11/Loco-Agent/pull/56) (open, draft)  
 Branch: `test/macos-intermediate-directory-swap-race`  
 Base: PR #55 branch `security/linux-intermediate-directory-race-tests`  
 Base commit at branch creation: `16c95dea3a40cf2463c8cac35f30ca99c69b5920`
