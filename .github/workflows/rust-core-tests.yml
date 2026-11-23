@@ -45,6 +45,21 @@ jobs:
           sudo mount --bind "$external" "$mountpoint"
           mountpoint -q "$mountpoint"
           echo "LOCO_LINUX_BIND_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare distinct Linux filesystem mount fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-loop-workspace"
+          mountpoint="$workspace/mounted"
+          image="$RUNNER_TEMP/loco-linux-ext4-mount-test.img"
+          mkdir -p "$mountpoint"
+          truncate -s 128M "$image"
+          mkfs.ext4 -F "$image"
+          sudo mount -o loop "$image" "$mountpoint"
+          printf 'distinct-filesystem-sentinel' > "$mountpoint/secret.txt"
+          mountpoint -q "$mountpoint"
+          echo "LOCO_LINUX_LOOP_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash
@@ -138,6 +153,26 @@ jobs:
             rm -rf "$workspace" "$RUNNER_TEMP/loco-linux-external"
           fi
           exit 0
+      - name: Verify distinct Linux filesystem mount boundary
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_ci_prepared_distinct_filesystem_mount_crossing
+      - name: Detach distinct Linux filesystem mount fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-loop-workspace"
+          mountpoint="$workspace/mounted"
+          image="$RUNNER_TEMP/loco-linux-ext4-mount-test.img"
+          if mountpoint -q "$mountpoint"; then
+            sudo umount "$mountpoint"
+          fi
+          if mountpoint -q "$mountpoint"; then
+            echo "loop-mounted filesystem is still active; refusing to remove fixture" >&2
+            exit 1
+          fi
+          rm -rf "$workspace"
+          rm -f "$image"
       - name: Verify nested APFS mount boundary
         if: runner.os == 'macOS'
         run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_nested_apfs_volume_mount
