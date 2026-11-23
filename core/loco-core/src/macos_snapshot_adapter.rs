@@ -96,7 +96,7 @@ mod tests {
  use std::os::unix::fs::symlink;
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();
-  let a=MacOsWorkspaceSnapshotAdapter::new(d.path(),"workspace").unwrap();
+  let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(d.path()).unwrap(),"workspace").unwrap();
   let x=a.capture(&SnapshotCaptureRequest::new("a",64).unwrap()).unwrap(); assert_eq!(x.bytes(),b"macOS capture");
   assert_eq!(crate::snapshot_payload::validate_snapshot_payload(x.snapshot(),x.bytes()),Ok(()));
   assert!(a.capture(&SnapshotCaptureRequest::new("e",1).unwrap()).unwrap().bytes().is_empty());
@@ -106,23 +106,23 @@ mod tests {
   let link=p.path().join("link"); symlink(actual.path(),&link).unwrap();
   assert!(MacOsWorkspaceSnapshotAdapter::new(&link,"w").is_err());
   let w=tempfile::tempdir().unwrap(); symlink(actual.path(),w.path().join("linked")).unwrap();
-  let a=MacOsWorkspaceSnapshotAdapter::new(w.path(),"w").unwrap();
+  let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(w.path()).unwrap(),"w").unwrap();
   assert!(a.capture(&SnapshotCaptureRequest::new("linked/secret",32).unwrap()).is_err());
  }
  #[test] fn rejects_hard_links_directories_and_over_limit(){
   let w=tempfile::tempdir().unwrap(); std::fs::create_dir(w.path().join("dir")).unwrap();
   std::fs::write(w.path().join("large"),b"12345").unwrap(); std::fs::write(w.path().join("origin"),b"shared").unwrap();
   std::fs::hard_link(w.path().join("origin"),w.path().join("alias")).unwrap();
-  let a=MacOsWorkspaceSnapshotAdapter::new(w.path(),"w").unwrap();
+  let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(w.path()).unwrap(),"w").unwrap();
   assert!(matches!(a.capture(&SnapshotCaptureRequest::new("dir",64).unwrap()),Err(SnapshotPayloadError::InvalidFileType)));
   assert!(matches!(a.capture(&SnapshotCaptureRequest::new("large",4).unwrap()),Err(SnapshotPayloadError::LimitExceeded)));
   assert!(matches!(a.capture(&SnapshotCaptureRequest::new("alias",64).unwrap()),Err(SnapshotPayloadError::HardLinkNotAllowed)));
  }
  #[test] fn rejects_missing_and_relative_roots(){
-  let w=tempfile::tempdir().unwrap(); let a=MacOsWorkspaceSnapshotAdapter::new(w.path(),"w").unwrap();
+  let w=tempfile::tempdir().unwrap(); let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(w.path()).unwrap(),"w").unwrap();
   assert_eq!(a.capture(&SnapshotCaptureRequest::new("missing",64).unwrap()),Err(SnapshotPayloadError::AcquisitionFailed));
   assert!(MacOsWorkspaceSnapshotAdapter::new("relative/path","w").is_err());
-  assert!(MacOsWorkspaceSnapshotAdapter::new(w.path()," ").is_err());
+  assert!(MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(w.path()).unwrap()," ").is_err());
  }
  #[test] fn metadata_comparison_detects_mutation(){
   let d=tempfile::tempdir().unwrap(); let p=d.path().join("x"); std::fs::write(&p,b"before").unwrap();
