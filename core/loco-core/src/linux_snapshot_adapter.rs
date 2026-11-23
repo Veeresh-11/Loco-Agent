@@ -96,7 +96,7 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
             request.relative_path(),
             OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
             Mode::empty(),
-            ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+            ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS | ResolveFlags::NO_XDEV,
         ).map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
 
         let mut file = File::from(fd);
@@ -353,6 +353,58 @@ mod tests {
         let adapter = LinuxWorkspaceSnapshotAdapter::new(dir.path(), "workspace").unwrap();
         assert!(matches!(adapter.capture(&SnapshotCaptureRequest::new("data", 4).unwrap()),
             Err(SnapshotPayloadError::LimitExceeded)));
+    }
+
+    #[test]
+    fn rejects_bind_mount_crossing_when_kernel_allows_mount_setup() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        struct BindMountGuard(std::path::PathBuf);
+        impl Drop for BindMountGuard {
+            fn drop(&mut self) {
+                let target = CString::new(self.0.as_os_str().as_bytes()).unwrap();
+                // SAFETY: target is a valid NUL-terminated path for the mount target.
+                let result = unsafe { libc::umount2(target.as_ptr(), 0) };
+                assert_eq!(result, 0, "failed to unmount bind-mount test fixture");
+            }
+        }
+
+        let workspace = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let mountpoint = workspace.path().join("mounted");
+        std::fs::create_dir(&mountpoint).unwrap();
+        std::fs::write(external.path().join("secret.txt"), b"outside-mount").unwrap();
+
+        let source = CString::new(external.path().as_os_str().as_bytes()).unwrap();
+        let target = CString::new(mountpoint.as_os_str().as_bytes()).unwrap();
+        // SAFETY: both C strings are valid paths; MS_BIND attaches the existing
+        // external directory at the empty workspace child mountpoint.
+        let mounted = unsafe {
+            libc::mount(
+                source.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                libc::MS_BIND,
+                std::ptr::null(),
+            )
+        };
+        if mounted != 0 {
+            let error = std::io::Error::last_os_error();
+            if matches!(error.raw_os_error(), Some(libc::EPERM) | Some(libc::EACCES)) {
+                eprintln!("skipping privileged bind-mount assertion: {error}");
+                return;
+            }
+            panic!("could not create bind-mount fixture: {error}");
+        }
+        let _mount_guard = BindMountGuard(mountpoint);
+
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(workspace.path(), "workspace").unwrap();
+        let request = SnapshotCaptureRequest::new("mounted/secret.txt", 128).unwrap();
+        assert!(matches!(
+            adapter.capture(&request),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        ), "descendant bind-mount traversal must fail closed");
     }
 
     #[test]
