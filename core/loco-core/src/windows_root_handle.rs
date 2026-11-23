@@ -1403,8 +1403,6 @@ mod tests {
     #[test]
     #[ignore = "requires a real secondary NTFS volume mounted by the Windows CI workflow"]
     fn rejects_real_secondary_ntfs_volume_mountpoint() {
-        use crate::snapshot_payload::SnapshotCaptureRequest;
-
         let workspace = std::path::PathBuf::from(
             std::env::var("LOCO_WINDOWS_MOUNT_WORKSPACE")
                 .expect("Windows mount fixture workflow must set LOCO_WINDOWS_MOUNT_WORKSPACE"),
@@ -1436,10 +1434,6 @@ mod tests {
             ),
             "the adapter must fail closed at a real mounted-volume boundary; got {result:?}"
         );
-
-        // The mounted sentinel must not be reachable by the workspace adapter.
-        assert!(result.is_err());
-        let _ = SnapshotCaptureRequest::new("mounted/probe.txt", 128).unwrap();
     }
 
 
