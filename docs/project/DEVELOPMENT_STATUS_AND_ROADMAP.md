@@ -318,3 +318,12 @@ PR #67 exact-head commit `468a248f26b3a4c8c989739caa570db1ba7bf285` has now comp
 The next macOS hardening change is being developed on `security/macos-apfs-filesystem-admission`, stacked on #67. The adapter queries filesystem type from the retained workspace-root descriptor using `fstatfs` and admits only `apfs`. A macOS-native test asserts that the CI temporary workspace is APFS and that the adapter admits it. Unsupported filesystem names and query errors fail closed. Descendant `st_dev` checks remain in place to reject cross-device traversal.
 
 This is an explicit APFS-only baseline, not a claim that HFS+, firmlinks, network/removable volumes, or every APFS mount arrangement has been validated. The exact-head macOS CI result must be checked before describing this change as tested. Next native validation remains: APFS volume/mount fixtures, firmlink behavior, and a supported/unsupported filesystem matrix where runners are available.
+
+
+## Follow-up update — 2026-11-23: nested APFS mount-boundary test
+
+PR #68 exact-head commit `b15e48ec836b7713e90d461f00d2010544265d44` passed Rust Core Tests on Ubuntu, Windows, and macOS (run `45184396095`) and Contract Validation (run `45184396003`).
+
+PR #69 adds a macOS-only CI fixture that creates and mounts a separate APFS sparse disk image beneath a temporary workspace. A dedicated ignored native test verifies that both workspace and mounted volume report APFS, that their device identities differ, and that the macOS adapter rejects capture through the nested mount. The test is invoked explicitly by the macOS workflow after the ordinary cross-platform unit-test step. It is not silently skipped when the fixture is unavailable: fixture setup or the dedicated test fails the macOS job.
+
+This exercises a distinct nested APFS volume on the hosted macOS runner. It does not prove firmlink semantics, HFS+ behavior, network/removable filesystem behavior, or all APFS mount configurations. The workflow's detach step is best-effort cleanup on the ephemeral runner; native results must be recorded from the exact PR head before claiming the mount assertion passed.
