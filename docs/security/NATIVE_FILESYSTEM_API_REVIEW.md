@@ -27,11 +27,9 @@ A Linux test now attempts to create a real bind mount beneath the workspace and 
 
 The openat2 API remains Linux 5.6+; unsupported syscall/flag behavior continues to fail closed. Do not add a fallback.
 
-### F-02 — Linux captured byte count is not explicitly compared with the initial file size [Medium]
+### F-02 — Linux captured byte count must equal the initial file size [Implemented by PR #62]
 
-The Linux adapter bounds the read and compares handle metadata before and after, but unlike the macOS and Windows adapters it does not explicitly require `bytes.len() == metadata.len()` after reading.
-
-Add the exact-length check before constructing the snapshot. This is a low-risk consistency hardening change and should have tests for short reads and concurrent truncation. Metadata comparison remains best-effort and must not be described as an atomic content snapshot.
+The Linux adapter now requires the captured byte count to equal the initial opened-handle metadata length before constructing the snapshot. Deterministic helper tests cover exact, short, and over-length results. This is consistency validation only: metadata comparison remains best-effort and does not create an atomic content snapshot.
 
 ### F-03 — Windows native FFI declarations have an x64 ABI/layout gate [Partially implemented]
 
@@ -81,7 +79,7 @@ Continue to treat the digest as binding the returned bytes to the returned snaps
 
 | Platform | Current primitive | Required support baseline / caveat |
 |---|---|---|
-| Linux | `openat2` with `BENEATH`, `NO_SYMLINKS`, `NO_MAGICLINKS` | Linux 5.6+; no fallback; mount-crossing policy is unresolved |
+| Linux | `openat2` with `BENEATH`, `NO_SYMLINKS`, `NO_MAGICLINKS`, `NO_XDEV` for descendants | Linux 5.6+; no fallback; descendant mount and bind-mount crossings are rejected |
 | macOS | component-wise `openat` with `O_NOFOLLOW` | native APFS/HFS+ and mount behavior still require testing |
 | Windows | `CreateFileW` for volume root; `NtCreateFile` with `RootDirectory` and `OBJ_DONT_REPARSE` for descendants | manually declared FFI requires ABI gates; fixed-volume admission is not yet a filesystem allowlist |
 
