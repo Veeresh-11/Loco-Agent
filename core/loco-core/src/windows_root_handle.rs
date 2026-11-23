@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_directory_handle_survives_path_rename() {
+    fn retained_directory_handle_blocks_workspace_rename() {
         use std::os::windows::ffi::OsStringExt;
         use std::path::Component;
         use windows_sys::Win32::Storage::FileSystem::{
@@ -351,7 +351,6 @@ mod tests {
 
         let parent = tempfile::tempdir().unwrap();
         let workspace = parent.path().join("workspace");
-        let moved = parent.path().join("workspace-moved");
         std::fs::create_dir(&workspace).unwrap();
         std::fs::create_dir(workspace.join("child")).unwrap();
 
@@ -372,7 +371,7 @@ mod tests {
         let volume_root = String::from_utf16(&volume[..volume_end]).unwrap();
 
         let relative = workspace.strip_prefix(&mount_path).unwrap();
-        let mut components: Vec<String> = relative
+        let components: Vec<String> = relative
             .components()
             .filter_map(|part| match part {
                 Component::Normal(value) => value.to_str().map(str::to_owned),
@@ -383,12 +382,12 @@ mod tests {
         let borrowed: Vec<&str> = components.iter().map(String::as_str).collect();
         let pinned = root.open_directory_components(&borrowed).unwrap();
 
-        std::fs::rename(&workspace, &moved).unwrap();
+        assert!(std::fs::rename(&workspace, parent.path().join("workspace-moved")).is_err(),
+            "the retained directory handle must deny delete-sharing needed for rename");
         let child = pinned.open_child_directory("child").unwrap();
-        let expected = std::fs::metadata(moved.join("child")).unwrap();
+        let expected = std::fs::metadata(workspace.join("child")).unwrap();
         assert_eq!(child.identity().volume_serial, expected.volume_serial_number().unwrap());
         assert_eq!(child.identity().file_index, expected.file_index().unwrap());
-        components.clear();
     }
 
     #[test]
