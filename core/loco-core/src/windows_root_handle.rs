@@ -993,4 +993,102 @@ mod tests {
         assert_eq!(pinned.byte_length(), 6);
     }
 
+
+    #[test]
+    fn snapshot_adapter_rejects_intermediate_ntfs_junction() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("target.txt"), b"OUTSIDE-SENTINEL").unwrap();
+        create_junction(&workspace.path().join("junction"), outside.path());
+
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-junction-workspace",
+        ).unwrap();
+
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("junction/target.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        ), "snapshot capture must not traverse an intermediate mount-point junction");
+    }
+
+    #[test]
+    fn intermediate_junction_replacement_race_never_captures_outside_bytes() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let parent = tempfile::tempdir().unwrap();
+        let workspace = parent.path().join("workspace");
+        let outside = parent.path().join("outside");
+        let nested = workspace.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(nested.join("target.txt"), b"inside-workspace").unwrap();
+        std::fs::write(outside.join("target.txt"), b"OUTSIDE-SENTINEL").unwrap();
+
+        let adapter = Arc::new(WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(&workspace),
+            &test_workspace_relative_path(&workspace),
+            "windows-race-workspace",
+        ).unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_workspace = workspace.clone();
+        let writer_outside = outside.clone();
+        let writer_barrier = barrier.clone();
+
+        let writer = thread::spawn(move || {
+            writer_barrier.wait();
+            let mut replacements = 0usize;
+            for index in 0..200 {
+                let active = writer_workspace.join("nested");
+                let held = writer_workspace.join(format!("nested-held-{index}"));
+                // A retained child handle denies delete sharing. If the rename
+                // wins before acquisition, the junction is installed and the
+                // reader must reject it rather than follow it.
+                if std::fs::rename(&active, &held).is_ok() {
+                    create_junction(&active, &writer_outside);
+                    thread::yield_now();
+                    std::fs::remove_dir(&active).unwrap();
+                    std::fs::rename(&held, &active).unwrap();
+                    replacements += 1;
+                } else {
+                    thread::yield_now();
+                }
+            }
+            replacements
+        });
+
+        barrier.wait();
+        let request = SnapshotCaptureRequest::new("nested/target.txt", 128).unwrap();
+        for _ in 0..600 {
+            match adapter.capture(&request) {
+                Ok(captured) => {
+                    assert_eq!(
+                        captured.bytes(),
+                        b"inside-workspace",
+                        "snapshot escaped through a replaced intermediate directory"
+                    );
+                    assert_eq!(
+                        crate::snapshot_payload::validate_snapshot_payload(
+                            captured.snapshot(),
+                            captured.bytes()
+                        ),
+                        Ok(())
+                    );
+                }
+                Err(SnapshotPayloadError::AcquisitionFailed) => {}
+                Err(other) => panic!("unexpected snapshot error during junction race: {other:?}"),
+            }
+        }
+
+        let replacements = writer.join().unwrap();
+        assert!(replacements > 0, "race writer did not complete any directory replacements");
+        let final_capture = adapter.capture(&request).unwrap();
+        assert_eq!(final_capture.bytes(), b"inside-workspace");
+    }
+
 }
