@@ -187,6 +187,14 @@ impl WindowsDirectoryHandle {
         self.identity
     }
 
+    /// Opens one child directory relative to this retained handle.
+    pub fn open_child_directory(&self, component: &str) -> Result<Self, WindowsRootError> {
+        validate_component(component)?;
+        let child = open_relative_directory(&self.handle, component)?;
+        let identity = checked_directory_identity(&child, Some(self.identity.volume_serial))?;
+        Ok(Self { handle: child, identity })
+    }
+
     /// Exposes metadata from the retained handle for diagnostics/tests only.
     pub fn is_directory(&self) -> bool {
         self.handle.metadata().map(|metadata| metadata.is_dir()).unwrap_or(false)
@@ -331,6 +339,56 @@ mod tests {
             assert_eq!(validate_component(component), Err(WindowsRootError::InvalidComponent));
         }
         assert_eq!(validate_component("src"), Ok(()));
+    }
+
+    #[test]
+    fn retained_directory_handle_survives_path_rename() {
+        use std::os::windows::ffi::OsStringExt;
+        use std::path::Component;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        };
+
+        let parent = tempfile::tempdir().unwrap();
+        let workspace = parent.path().join("workspace");
+        let moved = parent.path().join("workspace-moved");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::create_dir(workspace.join("child")).unwrap();
+
+        let path_wide = to_wide_nul(parent.path().to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        // SAFETY: buffers are writable and lengths are UTF-16 code-unit counts.
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let mount_end = mount.iter().position(|value| *value == 0).unwrap();
+        let mount_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..mount_end]));
+        let mut volume = vec![0u16; 128];
+        // SAFETY: mount is NUL-terminated and volume is writable.
+        let ok = unsafe {
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), volume.as_mut_ptr(), volume.len() as u32)
+        };
+        assert_ne!(ok, 0);
+        let volume_end = volume.iter().position(|value| *value == 0).unwrap();
+        let volume_root = String::from_utf16(&volume[..volume_end]).unwrap();
+
+        let relative = workspace.strip_prefix(&mount_path).unwrap();
+        let mut components: Vec<String> = relative
+            .components()
+            .filter_map(|part| match part {
+                Component::Normal(value) => value.to_str().map(str::to_owned),
+                _ => None,
+            })
+            .collect();
+        let root = WindowsWorkspaceRoot::open(&volume_root).unwrap();
+        let borrowed: Vec<&str> = components.iter().map(String::as_str).collect();
+        let pinned = root.open_directory_components(&borrowed).unwrap();
+
+        std::fs::rename(&workspace, &moved).unwrap();
+        let child = pinned.open_child_directory("child").unwrap();
+        let expected = std::fs::metadata(moved.join("child")).unwrap();
+        assert_eq!(child.identity().volume_serial, expected.volume_serial_number().unwrap());
+        assert_eq!(child.identity().file_index, expected.file_index().unwrap());
+        components.clear();
     }
 
     #[test]
