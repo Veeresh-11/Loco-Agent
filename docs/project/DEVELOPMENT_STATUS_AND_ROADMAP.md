@@ -4,8 +4,8 @@
 **Repository:** https://github.com/Veeresh-11/Loco-Agent  
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
-**Latest completed stack PR at snapshot:** #55  
-**Current follow-up branch:** `test/macos-intermediate-directory-swap-race` (stacked on #55)
+**Latest completed stack PR at snapshot:** #56  
+**Current follow-up branch:** `test/windows-intermediate-reparse-race` (stacked on #56)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 55 pull requests:
+At the snapshot date, the repository has 56 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#55 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#56 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **50 open PRs (#6–#55)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **51 open PRs (#6–#56)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #55, based on #54.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #56, based on #55.
 
 ### PR history and delivered scope
 
@@ -103,6 +103,7 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#53 — Windows bounded final-file snapshot adapter:** adds handle-relative final-file acquisition, reparse/type/hard-link checks, bounded reads, pre/post metadata comparison, and shared snapshot digest validation.
 - **#54 — macOS handle-relative snapshot adapter:** adds root acquisition from `/` and descendant traversal with descriptor-relative `openat`, `O_NOFOLLOW`, device checks, regular-file/hard-link/size checks, bounded reads, and best-effort metadata comparison.
 - **#55 — Linux intermediate-directory swap race test:** repeatedly renames an intermediate directory and replaces its pathname with an outside symlink. Capture must fail closed or return only the in-workspace bytes; the outside sentinel must never be captured. This is test-only and does not change adapter behavior.
+- **#56 — macOS intermediate-directory swap race test:** exercises descriptor-relative `openat(O_NOFOLLOW)` acquisition while an intermediate directory is repeatedly replaced with an outside symlink. Successful captures must contain only in-workspace bytes; fail-closed acquisition errors are accepted. Test-only, with no adapter behavior change.
 
 ## 3. Current implementation maturity
 
@@ -169,23 +170,20 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: macOS intermediate-directory swap race
+## 5. Current follow-up task: Windows intermediate junction replacement race
 
-Pull request: [#56 — test(macos): exercise intermediate-directory swap races](https://github.com/Veeresh-11/Loco-Agent/pull/56) (open, draft)  
-Branch: `test/macos-intermediate-directory-swap-race`  
-Base: PR #55 branch `security/linux-intermediate-directory-race-tests`  
-Base commit at branch creation: `16c95dea3a40cf2463c8cac35f30ca99c69b5920`
+Pull request: [#57 — test(windows): cover intermediate junction replacement races](https://github.com/Veeresh-11/Loco-Agent/pull/57) (open, draft)  
+Branch: `test/windows-intermediate-reparse-race`  
+Base: PR #56 branch `test/macos-intermediate-directory-swap-race`  
+Base commit at branch creation: `459c3f723a88da3fd34f858233ef50bff50f44d7`
 
-This follow-up adds a macOS-only adversarial test to the macOS adapter:
-1. Create a workspace with `nested/target.txt` and an outside directory containing a distinct sentinel.
-2. Retain the workspace root through `MacOsWorkspaceSnapshotAdapter`.
-3. In a synchronized writer thread, repeatedly rename `nested`, replace its pathname with a symlink to the outside directory, then remove the symlink and restore the original directory.
-4. Capture `nested/target.txt` during the bounded swap loop.
-5. Require each successful capture to contain only the original in-workspace bytes and validate its snapshot digest. Acquisition failures are allowed during contention; the outside sentinel is never an acceptable result.
-6. Confirm the original target remains readable after the swap loop.
+This follow-up adds two Windows-only adversarial tests to `windows_root_handle.rs`:
+1. Verify the snapshot adapter rejects an intermediate NTFS mount-point junction rather than following it to an outside target.
+2. Race repeated attempts to rename an intermediate workspace directory and replace its pathname with an NTFS junction while bounded snapshots are captured.
+3. Require successful captures to contain only the original in-workspace bytes and validate the shared snapshot digest. Acquisition failures are accepted during contention; outside sentinel bytes are never acceptable.
+4. Require the writer to complete at least one directory replacement and verify the original target is readable after the race ends.
 
-The test is deliberately test-only. It does not change adapter behavior, add a write path, or claim atomic content snapshots. The PR must remain draft until CI and review complete.
-
+The test is deliberately test-only. It does not change Windows adapter behavior or add writes, approvals, or execution. It exercises the existing retained-handle and no-reparse boundary. It does not prove universal Windows/filesystem behavior or an atomic content snapshot. CI must execute the new tests on a Windows runner; Linux/macOS jobs provide only their platform's existing coverage.
 ## 6. Roadmap and remaining work
 
 Recommended order; keep each item in a coherent, reviewable PR.
