@@ -44,8 +44,66 @@ jobs:
           hdiutil create -size 64m -fs APFS -volname LOCO_MOUNT_TEST -type SPARSE -ov "$image"
           sudo hdiutil attach -owners off -nobrowse -mountpoint "$mountpoint" "$image"
           echo "LOCO_MACOS_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare real NTFS volume mountpoint fixture
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workspace = Join-Path $env:RUNNER_TEMP 'loco-windows-workspace'
+          $mountpoint = Join-Path $workspace 'mounted'
+          $vhd = Join-Path $env:RUNNER_TEMP 'loco-ntfs-mount-test.vhdx'
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'loco-ntfs-attach.txt'
+          New-Item -ItemType Directory -Force -Path $mountpoint | Out-Null
+          @"
+          create vdisk file="$vhd" maximum=256 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          format fs=ntfs quick label=LOCO_MOUNT_TEST
+          assign mount="$mountpoint"
+          exit
+          "@ | Set-Content -Encoding ascii $scriptPath
+          $diskpartOutput = & diskpart /s $scriptPath 2>&1
+          $diskpartOutput | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw 'diskpart failed to create the NTFS mount fixture' }
+          $mountInfo = & mountvol $mountpoint /L
+          if ($LASTEXITCODE -ne 0 -or -not ($mountInfo -match 'Volume\{')) {
+            throw 'secondary NTFS volume did not mount at the workspace directory'
+          }
+          $volume = Get-Volume -FileSystemLabel 'LOCO_MOUNT_TEST'
+          if (-not $volume -or $volume.FileSystem -ne 'NTFS') {
+            throw 'secondary fixture volume is not NTFS'
+          }
+          "LOCO_WINDOWS_MOUNT_WORKSPACE=$workspace" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Run core unit tests
         run: cargo test --manifest-path core/loco-core/Cargo.toml
+      - name: Verify real Windows volume mount boundary
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_real_secondary_ntfs_volume_mountpoint
+      - name: Detach real NTFS volume mountpoint fixture
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $workspace = Join-Path $env:RUNNER_TEMP 'loco-windows-workspace'
+          $mountpoint = Join-Path $workspace 'mounted'
+          $vhd = Join-Path $env:RUNNER_TEMP 'loco-ntfs-mount-test.vhdx'
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'loco-ntfs-detach.txt'
+          if (Test-Path $vhd) {
+            @"
+            select vdisk file="$vhd"
+            detach vdisk
+            exit
+            "@ | Set-Content -Encoding ascii $scriptPath
+            $detachOutput = & diskpart /s $scriptPath 2>&1
+            $detachOutput | Write-Host
+          }
+          $mountInfo = & mountvol $mountpoint /L 2>$null
+          if ($LASTEXITCODE -eq 0 -and $mountInfo) {
+            throw 'secondary NTFS volume is still mounted; refusing to delete its mountpoint'
+          }
+          if (Test-Path $workspace) { Remove-Item -Recurse -Force $workspace }
+          if (Test-Path $vhd) { Remove-Item -Force $vhd }
       - name: Verify nested APFS mount boundary
         if: runner.os == 'macOS'
         run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_nested_apfs_volume_mount
