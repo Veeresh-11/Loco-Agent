@@ -45,11 +45,11 @@ Microsoft's `OBJECT_ATTRIBUTES` documentation defines `OBJ_DONT_REPARSE` as prev
 
 Keep both checks. Do not treat the flag alone as a complete security proof. Preserve a native Windows test for intermediate junctions, directory symlinks, final-file symlinks, and real volume mount points. PR #60 does not yet create a real secondary-volume mount point.
 
-### F-05 — Windows sharing modes intentionally trade compatibility for pinning [Medium]
+### F-05 — Windows sharing modes intentionally trade compatibility for pinning [Partially implemented]
 
-The directory opens omit delete sharing, and final-file opens share read only. Windows sharing rules make subsequent conflicting write/delete/rename opens fail while the handle remains open; an existing incompatible handle can also make acquisition fail.
+Directory opens omit delete sharing and final-file opens share read only. This prevents conflicting writes/renames while the snapshot handle is held; an already-open incompatible handle must make acquisition fail closed. The adapter does not retry with weaker sharing or reopen by pathname.
 
-This is a defensible fail-closed strategy, but document that editors, indexers, antivirus/filter drivers, sync clients, and other open handles can cause acquisition failures. Add native tests for pre-existing incompatible handles and record the supported failure behavior. Do not add a fallback that reopens by pathname.
+PR #65 adds a native Windows test that holds a pre-existing writer handle with no sharing and verifies snapshot capture returns `AcquisitionFailed`. Existing tests cover the inverse direction: an acquired snapshot handle blocks subsequent writes and renames. The test still needs exact-head Windows CI execution. Compatibility failures from editors, indexers, antivirus/filter drivers, sync clients, and other handles remain expected behavior and should be surfaced as acquisition failures.
 
 ### F-06 — Windows file/volume identity should not be treated as globally unique [Medium]
 
