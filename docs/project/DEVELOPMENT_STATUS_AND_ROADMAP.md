@@ -5,7 +5,7 @@
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
 **Latest validated implementation in this follow-up:** PR #64 exact-head Rust matrix and Contract Validation passed. PR #65 exact-head Contract Validation passed; its Rust matrix was still running at the last check. PR #63 exact-head Rust matrix and Contract Validation passed. Recheck GitHub Actions before relying on this snapshot.  
-**Current follow-up branch:** `security/windows-file-id-info` (stacked on #65)
+**Current follow-up branch:** `security/windows-ntfs-allowlist` (stacked on #66)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the current follow-up snapshot, the repository has 66 pull requests:
+At the current follow-up snapshot, the repository has 67 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#66 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#67 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **61 open PRs (#6–#66)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **62 open PRs (#6–#67)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #66, based on #65.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #67, based on #66.
 
 ### PR history and delivered scope
 
@@ -193,11 +193,15 @@ Native review: [PR #61 — native filesystem API review](https://github.com/Veer
 Linux hardening: [PR #62 — reject short snapshot reads](https://github.com/Veeresh-11/Loco-Agent/pull/62) (open, draft)  
 Current top branch: `fix/linux-snapshot-exact-read-length`, stacked on PR #61.
 
-PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements exact Linux captured-length equality with deterministic exact, short, and over-length tests. PR #63 implements strict descendant mount rejection with `RESOLVE_NO_XDEV`. PR #64 adds the Windows x64 ABI gate; PR #65 adds pre-existing sharing-conflict coverage; PR #66 upgrades handle-derived Windows identity to `FILE_ID_INFO`. These checks do not provide atomic content snapshots or durable approval identity by themselves.
+PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements exact Linux captured-length equality with deterministic exact, short, and over-length tests. PR #63 implements strict descendant mount rejection with `RESOLVE_NO_XDEV`. PR #64 adds the Windows x64 ABI gate; PR #65 adds pre-existing sharing-conflict coverage; PR #66 upgrades handle-derived Windows identity to `FILE_ID_INFO`; PR #67 adds an NTFS-only Windows filesystem allowlist. These checks do not provide atomic content snapshots or durable approval identity by themselves.
 
-**Still open:** privileged Linux mount/bind-mount execution, Windows real secondary-volume mount-point and filesystem allowlist tests, independent Windows SDK/FFI review, approval freshness/digest binding, and native macOS filesystem/mount validation. No production approval/write/execution path is added.
+**Still open:** privileged Linux mount/bind-mount execution, Windows real secondary-volume mount-point tests, independent Windows SDK/FFI review, approval freshness/digest binding, native macOS filesystem/mount validation, and additional Windows filesystem validation before any allowlist expansion beyond NTFS. No production approval/write/execution path is added.
 
 PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
+
+### PR #67 — Windows NTFS-only filesystem admission (in progress)
+
+PR #67 is stacked on #66. Trusted-root acquisition now queries the actual filesystem name with `GetVolumeInformationW` and admits only NTFS, in addition to the existing fixed-volume and canonical volume-GUID checks. ReFS, FAT/exFAT, unknown filesystems, and query failures fail closed. A Windows-native test asserts the CI temp volume is NTFS and admitted. This is not validation of other filesystem types; the allowlist must remain NTFS until each additional filesystem has its own native adversarial test matrix.
 
 ### PR #66 — Windows 128-bit handle-derived file identity (in progress; exact-head CI pending)
 
