@@ -489,6 +489,142 @@ mod tests {
             "directory reparse points must fail closed");
     }
 
+
+    // Creates a real NTFS mount-point reparse point (junction), not a
+    // symbolic-link reparse point. The test exercises IO_REPARSE_TAG_MOUNT_POINT.
+    fn create_junction(link: &std::path::Path, target: &std::path::Path) {
+        use std::os::windows::ffi::OsStrExt;
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn DeviceIoControl(
+                device: HANDLE,
+                control_code: u32,
+                in_buffer: *const std::ffi::c_void,
+                in_buffer_size: u32,
+                out_buffer: *mut std::ffi::c_void,
+                out_buffer_size: u32,
+                bytes_returned: *mut u32,
+                overlapped: *mut std::ffi::c_void,
+            ) -> i32;
+        }
+
+        const GENERIC_WRITE: u32 = 0x4000_0000;
+        const FSCTL_SET_REPARSE_POINT: u32 = 0x0009_00A4;
+        const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+
+        std::fs::create_dir(link).unwrap();
+        let link_wide: Vec<u16> = link.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: link_wide is NUL-terminated and remains alive for the call.
+        let raw = unsafe {
+            CreateFileW(
+                link_wide.as_ptr(),
+                GENERIC_WRITE,
+                FILE_SHARE_READ_VALUE | FILE_SHARE_WRITE_VALUE | FILE_SHARE_DELETE_VALUE,
+                null(),
+                OPEN_EXISTING_VALUE,
+                FILE_FLAG_BACKUP_SEMANTICS_VALUE | FILE_FLAG_OPEN_REPARSE_POINT_VALUE,
+                null_mut(),
+            )
+        };
+        assert_ne!(raw, invalid_handle_value(), "open junction directory failed");
+        // SAFETY: raw is a valid, uniquely owned handle.
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw as RawHandle) };
+
+        let canonical_target = std::fs::canonicalize(target).unwrap();
+        let display_target = canonical_target
+            .strip_prefix(r"\\?\")
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| canonical_target.to_string_lossy().into_owned());
+        let substitute = format!(r"\??\{}", display_target);
+        let substitute_units: Vec<u16> = substitute.encode_utf16().collect();
+        let print_units: Vec<u16> = display_target.encode_utf16().collect();
+
+        let substitute_len = (substitute_units.len() * 2) as u16;
+        let print_offset = ((substitute_units.len() + 1) * 2) as u16;
+        let print_len = (print_units.len() * 2) as u16;
+
+        let mut path_units = substitute_units;
+        path_units.push(0);
+        path_units.extend(print_units);
+        path_units.push(0);
+
+        // REPARSE_DATA_BUFFER: tag + data length + reserved, then the
+        // mount-point offsets/lengths and UTF-16 path buffer.
+        let data_length = 8 + path_units.len() * 2;
+        let mut buffer = Vec::with_capacity(16 + path_units.len() * 2);
+        buffer.extend_from_slice(&IO_REPARSE_TAG_MOUNT_POINT.to_le_bytes());
+        buffer.extend_from_slice(&(data_length as u16).to_le_bytes());
+        buffer.extend_from_slice(&0u16.to_le_bytes());
+        buffer.extend_from_slice(&0u16.to_le_bytes()); // SubstituteNameOffset
+        buffer.extend_from_slice(&substitute_len.to_le_bytes());
+        buffer.extend_from_slice(&print_offset.to_le_bytes());
+        buffer.extend_from_slice(&print_len.to_le_bytes());
+        for unit in path_units {
+            buffer.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        let mut bytes_returned = 0u32;
+        // SAFETY: buffer is a correctly laid-out mount-point reparse buffer;
+        // handle remains open and all output arguments are valid.
+        let ok = unsafe {
+            DeviceIoControl(
+                handle.as_raw_handle() as HANDLE,
+                FSCTL_SET_REPARSE_POINT,
+                buffer.as_ptr() as *const std::ffi::c_void,
+                buffer.len() as u32,
+                null_mut(),
+                0,
+                &mut bytes_returned,
+                null_mut(),
+            )
+        };
+        assert_ne!(ok, 0, "setting junction mount-point reparse data failed");
+    }
+
+    #[test]
+    fn rejects_ntfs_junction_mount_point_reparse_tag() {
+        use std::os::windows::ffi::OsStringExt;
+        use std::path::Component;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        };
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        create_junction(&workspace.path().join("junction"), outside.path());
+
+        let path_wide = to_wide_nul(workspace.path().to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        // SAFETY: buffers are writable and lengths are UTF-16 code-unit counts.
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let mount_end = mount.iter().position(|value| *value == 0).unwrap();
+        let mount_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..mount_end]));
+        let mut volume = vec![0u16; 128];
+        // SAFETY: mount is NUL-terminated and volume is writable.
+        let ok = unsafe {
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), volume.as_mut_ptr(), volume.len() as u32)
+        };
+        assert_ne!(ok, 0);
+        let volume_end = volume.iter().position(|value| *value == 0).unwrap();
+        let volume_root = String::from_utf16(&volume[..volume_end]).unwrap();
+
+        let relative = workspace.path().strip_prefix(&mount_path).unwrap();
+        let components: Vec<String> = relative
+            .components()
+            .filter_map(|part| match part {
+                Component::Normal(value) => value.to_str().map(str::to_owned),
+                _ => None,
+            })
+            .collect();
+        let root = WindowsWorkspaceRoot::open(&volume_root).unwrap();
+        let borrowed: Vec<&str> = components.iter().map(String::as_str).collect();
+        let pinned_workspace = root.open_directory_components(&borrowed).unwrap();
+        assert!(pinned_workspace.open_child_directory("junction").is_err(),
+            "an NTFS mount-point junction must not be traversed");
+    }
+
     #[test]
     fn opens_current_temp_directory_from_its_volume_root() {
         use std::os::windows::ffi::OsStringExt;
