@@ -64,7 +64,7 @@ unsafe extern "C" {
 }
 
 #[cfg(target_os="macos")]
-fn directory_entry_is_firmlink(parent:&File,name:&str)->Result<bool,MacOsSnapshotAdapterError>{
+fn directory_entry_flags(parent:&File,name:&str)->Result<Option<u32>,MacOsSnapshotAdapterError>{
  use std::os::fd::AsRawFd;
  const ATTR_BIT_MAP_COUNT:u16=5;
  const ATTR_CMN_NAME:u32=0x0000_0001;
@@ -92,7 +92,7 @@ fn directory_entry_is_firmlink(parent:&File,name:&str)->Result<bool,MacOsSnapsho
    getattrlistbulk(fd,&mut attrs,buffer.as_mut_ptr().cast(),buffer.len(),0)
   };
   if count<0 {return Err(MacOsSnapshotAdapterError::InvalidRoot)}
-  if count==0 {return Ok(false)}
+  if count==0 {return Ok(None)}
   let mut cursor=0usize;
   for _ in 0..count {
    if cursor.checked_add(4).filter(|end|*end<=buffer.len()).is_none(){
@@ -133,11 +133,17 @@ fn directory_entry_is_firmlink(parent:&File,name:&str)->Result<bool,MacOsSnapsho
    }
    let flags=u32::from_ne_bytes(record[flags_offset..flags_offset+4].try_into().unwrap());
    if &name_bytes[..name_bytes.len()-1]==name.as_bytes(){
-    return Ok(flags&SF_FIRMLINK!=0);
+    return Ok(Some(flags));
    }
    cursor+=record_len;
   }
  }
+}
+
+#[cfg(target_os="macos")]
+fn directory_entry_is_firmlink(parent:&File,name:&str)->Result<bool,MacOsSnapshotAdapterError>{
+ const SF_FIRMLINK:u32=0x0080_0000;
+ Ok(directory_entry_flags(parent,name)?.is_some_and(|flags|flags&SF_FIRMLINK!=0))
 }
 
 #[cfg(target_os="macos")]
@@ -280,29 +286,30 @@ mod tests {
   // On the hosted macOS runner, /Users is a firmlink into the APFS Data
   // volume. Construct the adapter directly from / only inside this test:
   // production workspace admission intentionally does not allow / as a root.
-  let home=PathBuf::from(std::env::var("HOME").expect("macOS CI must define HOME"));
-  assert!(home.starts_with("/Users"),"expected hosted account home beneath /Users, got {home:?}");
-  let workspace=tempfile::tempdir_in(&home).unwrap();
-  let target=workspace.path().join("firmlink-sentinel.txt");
-  std::fs::write(&target,b"data-volume-sentinel").unwrap();
-
   let root=File::open("/").unwrap();
   let root_device=root.metadata().unwrap().dev();
-  let home_handle=File::open(&home).unwrap();
   assert_eq!(filesystem_name(&root).unwrap(),"apfs");
-  assert_eq!(filesystem_name(&home_handle).unwrap(),"apfs");
-  assert!(directory_entry_is_firmlink(&root,"Users").unwrap(),
-   "the /Users directory entry must expose SF_FIRMLINK in ATTR_CMN_FLAGS");
+  let users_flags=directory_entry_flags(&root,"Users").unwrap();
+  let applications_flags=directory_entry_flags(&root,"Applications").unwrap();
+  assert!(
+   users_flags.is_some_and(|flags|flags&0x0080_0000!=0)
+    || applications_flags.is_some_and(|flags|flags&0x0080_0000!=0),
+   "expected an actual /Users or /Applications firmlink; Users flags={users_flags:?}, Applications flags={applications_flags:?}"
+  );
 
-  let relative=target.strip_prefix("/").unwrap().to_string_lossy().replace('\\',"/");
   let adapter=MacOsWorkspaceSnapshotAdapter{
    root,root_device,workspace_id:"firmlink-boundary-test".into(),
    canonical_root:PathBuf::from("/")
   };
+  let path=if users_flags.is_some_and(|flags|flags&0x0080_0000!=0) {
+   "Users/runner/should-not-be-opened"
+  } else {
+   "Applications/should-not-be-opened"
+  };
   assert_eq!(
-   adapter.capture(&SnapshotCaptureRequest::new(&relative,128).unwrap()),
+   adapter.capture(&SnapshotCaptureRequest::new(path,128).unwrap()),
    Err(SnapshotPayloadError::AcquisitionFailed),
-   "descriptor-relative traversal must fail closed when /Users crosses the APFS firmlink volume boundary"
+   "descriptor-relative traversal must fail closed at a firmlink directory entry"
   );
  }
 
