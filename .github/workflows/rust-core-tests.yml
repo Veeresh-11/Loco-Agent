@@ -32,6 +32,19 @@ jobs:
         uses: actions/checkout@v4
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Prepare real Linux bind mount fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-workspace"
+          external="$RUNNER_TEMP/loco-linux-external"
+          mountpoint="$workspace/mounted"
+          mkdir -p "$mountpoint" "$external"
+          printf 'outside-bind-mount' > "$external/secret.txt"
+          sudo mount --bind "$external" "$mountpoint"
+          mountpoint -q "$mountpoint"
+          echo "LOCO_LINUX_BIND_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash
@@ -107,6 +120,23 @@ jobs:
           }
           if (Test-Path $workspace) { Remove-Item -Recurse -Force $workspace }
           if (Test-Path $vhd) { Remove-Item -Force $vhd }
+          exit 0
+      - name: Verify real Linux bind mount boundary
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_ci_prepared_real_bind_mount_crossing
+      - name: Detach real Linux bind mount fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set +e
+          workspace="$RUNNER_TEMP/loco-linux-workspace"
+          mountpoint="$workspace/mounted"
+          if mountpoint -q "$mountpoint"; then
+            sudo umount "$mountpoint"
+          fi
+          if ! mountpoint -q "$mountpoint"; then
+            rm -rf "$workspace" "$RUNNER_TEMP/loco-linux-external"
+          fi
           exit 0
       - name: Verify nested APFS mount boundary
         if: runner.os == 'macOS'
