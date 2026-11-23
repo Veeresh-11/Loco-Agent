@@ -102,6 +102,7 @@ extern "system" {
         information: *mut ByHandleFileInformation,
     ) -> i32;
     fn GetFileInformationByHandleEx(file_handle: HANDLE, information_class: u32, information: *mut std::ffi::c_void, buffer_size: u32) -> i32;
+    fn GetVolumeInformationW(root_path: *const u16, volume_name: *mut u16, volume_name_size: u32, volume_serial: *mut u32, max_component_length: *mut u32, filesystem_flags: *mut u32, filesystem_name: *mut u16, filesystem_name_size: u32) -> i32;
 }
 
 #[link(name = "ntdll")]
@@ -178,6 +179,7 @@ const _: () = {
 pub enum WindowsRootError {
     InvalidVolumeGuidRoot,
     UnsupportedVolumeType,
+    UnsupportedFileSystem,
     RootAcquisitionFailed,
     InvalidComponent,
     RelativeOpenFailed,
@@ -220,6 +222,10 @@ impl WindowsWorkspaceRoot {
         let drive_type = unsafe { GetDriveTypeW(wide.as_ptr()) };
         if drive_type != DRIVE_FIXED_VALUE {
             return Err(WindowsRootError::UnsupportedVolumeType);
+        }
+        let filesystem = query_filesystem_name(volume_guid_root)?;
+        if !filesystem.eq_ignore_ascii_case("NTFS") {
+            return Err(WindowsRootError::UnsupportedFileSystem);
         }
 
         // A volume root itself cannot be renamed or deleted; allow normal sharing
@@ -393,6 +399,22 @@ fn checked_directory_identity(
     Ok(identity)
 }
 
+
+
+fn query_filesystem_name(volume_guid_root: &str) -> Result<String, WindowsRootError> {
+    let root = to_wide_nul(volume_guid_root);
+    let mut filesystem_name = [0u16; 64];
+    // SAFETY: root is NUL-terminated and both output buffers are valid; all
+    // optional volume metadata outputs are intentionally omitted.
+    let ok = unsafe {
+        GetVolumeInformationW(root.as_ptr(), null_mut(), 0, null_mut(), null_mut(), null_mut(),
+            filesystem_name.as_mut_ptr(), filesystem_name.len() as u32)
+    };
+    if ok == 0 { return Err(WindowsRootError::MetadataUnavailable); }
+    let length = filesystem_name.iter().position(|unit| *unit == 0)
+        .ok_or(WindowsRootError::MetadataUnavailable)?;
+    String::from_utf16(&filesystem_name[..length]).map_err(|_| WindowsRootError::MetadataUnavailable)
+}
 
 fn query_file_identity(file: &File) -> Result<WindowsFileIdentity, WindowsRootError> {
     let mut information = FileIdInfo { volume_serial_number: 0, file_id: [0; 16] };
@@ -651,6 +673,16 @@ fn query_regular_file_metadata(file: &File) -> Result<WindowsFileMetadata, Windo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    #[test]
+    fn trusted_root_admission_requires_ntfs_filesystem() {
+        let workspace = tempfile::tempdir().unwrap();
+        let volume_root = test_volume_root_for(workspace.path());
+        let filesystem = query_filesystem_name(&volume_root).unwrap();
+        assert_eq!(filesystem.to_ascii_uppercase(), "NTFS", "Windows CI filesystem must be in the explicit NTFS allowlist");
+        assert!(WindowsWorkspaceRoot::open(&volume_root).is_ok());
+    }
 
     #[test]
     fn accepts_only_canonical_volume_guid_roots() {
