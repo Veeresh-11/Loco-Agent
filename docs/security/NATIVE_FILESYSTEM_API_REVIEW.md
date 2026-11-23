@@ -57,11 +57,11 @@ A Windows-native test checks that repeated opens of the same file return the sam
 
 This improves per-computer handle identity but does **not** make an approval identifier globally unique, permanent, or safe across volume reformat, restore, clone, file-ID reuse, or filesystem migration. Approval records must bind a fresh handle-derived identity to workspace/policy/action and content digest, and enforcement must reacquire the target and compare identity plus digest immediately before the operation. Never trust a serialized old file ID as authorization by itself.
 
-### F-07 — Windows volume type is not the same as a supported-filesystem allowlist [Medium]
+### F-07 — Windows root admission uses an explicit NTFS allowlist [Implementation added; broader matrix remains open]
 
-The root gate admits `DRIVE_FIXED` volumes. That is not, by itself, a declared filesystem support matrix. The adapter must query and record the actual filesystem type, then explicitly allow only filesystems whose reparse, hard-link, sharing, rename, and metadata semantics have been tested.
+The Windows root gate now queries the filesystem name with `GetVolumeInformationW` after confirming the volume is fixed and the root path is a canonical volume-GUID path. Only `NTFS` is admitted. ReFS, FAT/exFAT, unknown filesystems, and query failures are rejected; there is no compatibility fallback. The allowlist is intentionally narrow because this adapter's handle-relative traversal, reparse, sharing, file-ID, and hard-link behavior has not yet been validated across other filesystems.
 
-Until that allowlist and native tests exist, unsupported or unknown filesystems must fail closed. Keep network/removable/unverified volume types out of scope as already documented.
+A Windows-native test checks that the CI temporary workspace volume reports NTFS and is admitted. This establishes coverage only for the Windows CI runner's NTFS volume. It does not validate ReFS or other filesystems. Before expanding the allowlist, add dedicated native tests for each filesystem's file IDs, reparse semantics, hard links, sharing behavior, rename/mount semantics, and metadata behavior.
 
 ### F-08 — macOS descriptor-relative traversal is appropriately component-wise, but native filesystem validation remains [Medium]
 
@@ -90,7 +90,7 @@ Continue to treat the digest as binding the returned bytes to the returned snaps
 3. F-03 Windows ABI/layout assertions and the x64-only target gate are implemented by PR #64; independent SDK-header review remains.
 4. Complete F-04/F-05 native Windows reparse and sharing tests, including a real second-volume mount point; PR #65 adds pre-existing sharing-conflict coverage.
 5. F-06 now uses `FILE_ID_INFO`; define approval freshness/digest semantics and test supported filesystems.
-6. Define and test F-07 filesystem allowlist.
+6. F-07 now admits NTFS only; add native tests before considering ReFS or other filesystems.
 7. Complete F-08 native macOS filesystem/mount matrix.
 8. Re-run the complete CI matrix and update the roadmap with exact run IDs and platforms actually tested.
 
