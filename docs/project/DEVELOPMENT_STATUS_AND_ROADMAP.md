@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 61 pull requests:
+At the snapshot date, the repository has 62 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#61 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#62 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **56 open PRs (#6–#61)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **57 open PRs (#6–#62)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #61, based on #60.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #62, based on #61.
 
 ### PR history and delivered scope
 
@@ -109,6 +109,7 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#59 — Windows final-file mutation race:** races complete-content writes against snapshot capture. Successful captures must match one of the complete known payloads and validate the shared digest; fail-closed acquisition errors are accepted. The full Ubuntu/macOS/Windows Rust matrix and contract validation passed.
 - **#60 — Windows mounted-folder root admission coverage:** verifies that a DOS path to a mounted folder is not accepted as the trusted volume root; only canonical volume-GUID roots are admitted. This is lexical/root-admission coverage, not a test that creates or traverses a real secondary-volume mount point.
 - **#61 — Native filesystem API review:** records source-level findings for Linux `openat2`, macOS `openat/O_NOFOLLOW`, and Windows `CreateFileW/NtCreateFile`. Identifies mount-policy inconsistency, Linux exact-read-length hardening, Windows FFI/identity/filesystem admission gates, and native macOS/Windows validation still required. Documentation only; no adapter behavior changed.
+- **#62 — Linux exact snapshot read length:** requires captured byte length to equal the initial opened-file size before snapshot construction; adds deterministic helper tests for exact, short, and over-length cases. Does not make the read atomic or resolve mount-crossing policy.
 
 
 ### Review of older open PRs (#6–#8)
@@ -186,22 +187,17 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: cross-platform native filesystem API review
+## 5. Current follow-up task: native API findings and Linux read-length hardening
 
-Pull request: [#61 — docs(security): review native filesystem snapshot APIs](https://github.com/Veeresh-11/Loco-Agent/pull/61) (open, draft)  
-Branch: `security/native-filesystem-api-review`  
-Base: PR #60 branch `test/windows-volume-mountpoint-coverage`  
-Base head at branch creation: `92d9d75f3cb886da4849f3213f8465292fbab6cf`  
-Review: [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md)
+Native review: [PR #61 — native filesystem API review](https://github.com/Veeresh-11/Loco-Agent/pull/61) (open, draft)  
+Linux hardening: [PR #62 — reject short snapshot reads](https://github.com/Veeresh-11/Loco-Agent/pull/62) (open, draft)  
+Current top branch: `fix/linux-snapshot-exact-read-length`, stacked on PR #61.
 
-The review is source-level and makes no claim of native VM validation. Key findings:
+PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements the low-risk Linux finding: the captured byte count must exactly equal the initial opened-handle size before a snapshot is built. It adds deterministic tests for exact, short, and over-length results. This check is additional consistency validation; it does not provide atomic content snapshots.
 
-- **Linux:** descendant opens do not currently set `RESOLVE_NO_XDEV`, so mount and bind-mount traversal is allowed. This differs from the macOS device check and Windows volume-serial check. Choose a consistent explicit policy; do not add `NO_XDEV` without accounting for bind mounts. Linux also needs an explicit `bytes.len() == metadata.len()` check after bounded read. `openat2` requires Linux 5.6+; the no-fallback behavior should remain fail-closed.
-- **Windows:** manually declared native FFI needs ABI/layout assertions and an explicit supported-architecture matrix. Keep `OBJ_DONT_REPARSE` and post-open reparse-attribute checks together. Sharing modes intentionally block conflicting rename/write opens and can fail when pre-existing handles are incompatible. Legacy volume serial/file index values must not be treated as globally unique approval identities. `DRIVE_FIXED` is not a filesystem allowlist.
-- **macOS:** component-wise `openat` with `O_NOFOLLOW` is the intended defense; native APFS/HFS+ and mount behavior, including firmlink/network/removable-volume policy, still need explicit tests and support decisions.
-- **All platforms:** before/after metadata comparisons are best-effort mutation detection, not atomic snapshots. Approval enforcement must reacquire and revalidate the target at use time.
+**Still open:** Linux mount/bind-mount policy (F-01), Windows FFI ABI and supported-architecture gates, Windows real volume-mount-point and filesystem allowlist tests, and native macOS filesystem/mount validation. No production approval/write/execution path is added.
 
-PR #61 is documentation-only and does not change production adapter behavior. The detailed findings and authoritative API references are in the review document. Keep draft until the findings are addressed and native testing/independent review are complete.
+PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
 
 ## 6. Roadmap and remaining work
 
@@ -209,7 +205,7 @@ Recommended order; keep each item in a coherent, reviewable PR.
 
 ### A. Complete platform snapshot adversarial coverage
 
-- Linux: review mount-crossing behavior, kernel/openat2 availability, final/intermediate replacement and concurrent mutation boundaries.
+- Linux: PR #62 adds an exact captured-byte-length check. Still review mount-crossing behavior, kernel/openat2 availability, final/intermediate replacement and concurrent mutation boundaries.
 - Windows: test junctions/reparse tags, component replacement, sharing violations, and final-file mutation. Root admission now rejects DOS/mounted-folder paths; a real second-volume mount-point traversal fixture remains outstanding, along with unsupported-filesystem coverage.
 - macOS: add intermediate-component replacement coverage; test symlink swaps, mount boundaries, FIFO/non-regular targets, hard links, and concurrent writes on supported filesystems.
 - Keep race tests bounded, synchronized, deterministic where possible, and explicit about accepted fail-closed outcomes.
