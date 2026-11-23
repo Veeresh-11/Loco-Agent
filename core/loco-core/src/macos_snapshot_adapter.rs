@@ -9,6 +9,18 @@ use crate::snapshot_payload::{build_snapshot_contract,CapturedWorkspaceSnapshot,
 pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
+fn filesystem_name(file:&File)->Result<String,MacOsSnapshotAdapterError>{
+ use std::ffi::CStr;
+ use std::os::fd::AsRawFd;
+ let mut stat:libc::statfs=unsafe{std::mem::zeroed()};
+ if unsafe{libc::fstatfs(file.as_raw_fd(),&mut stat)}!=0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let name=unsafe{CStr::from_ptr(stat.f_fstypename.as_ptr())};
+ name.to_str().map(str::to_owned).map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)
+}
+
+#[cfg(target_os="macos")]
 fn metadata_matches(a:&std::fs::Metadata,b:&std::fs::Metadata)->bool {
  use std::os::unix::fs::MetadataExt;
  a.dev()==b.dev() && a.ino()==b.ino() && a.len()==b.len() && a.nlink()==b.nlink()
@@ -49,6 +61,11 @@ impl MacOsWorkspaceSnapshotAdapter {
    }
   }
   if !seen{return Err(MacOsSnapshotAdapterError::InvalidRoot)}
+  // Admit only APFS roots until other macOS filesystems have dedicated
+  // native adversarial coverage. Query the retained descriptor, not a path.
+  if filesystem_name(&current)? != "apfs" {
+   return Err(MacOsSnapshotAdapterError::InvalidRoot);
+  }
   let meta=current.metadata().map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
   Ok(Self{root:current,root_device:meta.dev(),workspace_id,canonical_root:canonical})
  }
@@ -94,6 +111,16 @@ mod tests {
  use super::*;
  use crate::snapshot_payload::SnapshotCaptureRequest;
  use std::os::unix::fs::symlink;
+ #[test]
+ fn macos_workspace_root_is_on_apfs(){
+  let d=tempfile::tempdir().unwrap();
+  let root=File::open(d.path()).unwrap();
+  assert_eq!(filesystem_name(&root).unwrap(),"apfs");
+  assert!(MacOsWorkspaceSnapshotAdapter::new(
+   std::fs::canonicalize(d.path()).unwrap(),"workspace"
+  ).is_ok());
+ }
+
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();
   let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(d.path()).unwrap(),"workspace").unwrap();
