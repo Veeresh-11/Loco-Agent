@@ -579,6 +579,23 @@ mod tests {
     }
 
     #[test]
+    fn rejects_volume_mount_paths_as_trusted_volume_roots() {
+        // A mounted-folder path (and ordinary drive-letter root) is not the
+        // trusted volume identity. Callers must resolve the containing volume
+        // to its canonical \\?\\Volume{GUID}\\ root before acquisition.
+        let workspace = tempfile::tempdir().unwrap();
+        let mounted_folder_path = workspace.path().to_string_lossy();
+        assert_eq!(
+            WindowsWorkspaceRoot::open(&mounted_folder_path),
+            Err(WindowsRootError::InvalidVolumeGuidRoot),
+            "a DOS/mounted-folder path must never be accepted as the trusted volume root"
+        );
+
+        assert!(!is_volume_guid_root(r"\\?\\C:\\mounted-volume\\"));
+        assert!(!is_volume_guid_root(r"\\\\server\\share\\"));
+    }
+
+    #[test]
     fn rejects_unsafe_or_multi_component_names() {
         for component in ["", ".", "..", "a/b", r"a\b", "file:stream", "CON.txt", "name."] {
             assert_eq!(validate_component(component), Err(WindowsRootError::InvalidComponent));
