@@ -125,3 +125,12 @@ PR #69 adds a macOS CI fixture that creates a sparse APFS disk image and mounts 
 This directly exercises the adapter's existing same-device descendant rule against a distinct mounted APFS volume. The test is explicitly invoked by the macOS workflow and is not part of the normal test run unless the fixture is prepared. The job must fail if fixture setup or the dedicated assertion fails.
 
 Scope remains narrow: this does not validate APFS firmlinks, HFS+, network/removable volumes, or every APFS mount arrangement. It also does not establish atomic file-content snapshots. Record the exact-head macOS job result before treating this test as executed evidence.
+
+
+## Follow-up test — real Windows secondary NTFS volume mountpoint (2026-11-23)
+
+PR #70 adds a Windows CI fixture that creates and attaches a VHDX, formats its partition as NTFS, and assigns it to a directory mounted beneath the workspace. The dedicated test verifies that the workspace and mounted directory resolve to distinct volume-GUID roots, confirms the mounted volume is admitted as NTFS on its own, and requires the workspace-relative directory traversal to fail closed with a reparse, relative-open, or volume-identity error.
+
+This is distinct from the existing junction test: it uses a real secondary volume mountpoint rather than a junction to another directory on the same volume. The workflow explicitly invokes the ignored test and detaches the VHDX in an always-run cleanup step. Treat this as executed native evidence only after the exact-head Windows CI job passes.
+
+The test covers the hosted runner's NTFS behavior only. It does not expand the allowlist or validate ReFS, FAT/exFAT, removable/network filesystems, or all Windows storage/filter-driver combinations.

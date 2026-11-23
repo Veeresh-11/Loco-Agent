@@ -1400,4 +1400,42 @@ mod tests {
         ), "an incompatible pre-existing handle must cause fail-closed capture");
     }
 
+    #[test]
+    #[ignore = "requires a real secondary NTFS volume mounted by the Windows CI workflow"]
+    fn rejects_real_secondary_ntfs_volume_mountpoint() {
+        use crate::snapshot_payload::{
+            SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter,
+        };
+
+        let workspace = std::path::PathBuf::from(
+            std::env::var("LOCO_WINDOWS_MOUNT_WORKSPACE")
+                .expect("Windows mount fixture workflow must set LOCO_WINDOWS_MOUNT_WORKSPACE"),
+        );
+        let mounted = workspace.join("mounted");
+        std::fs::write(mounted.join("probe.txt"), b"mounted-volume-sentinel").unwrap();
+
+        let workspace_volume = test_volume_root_for(&workspace);
+        let mounted_volume = test_volume_root_for(&mounted);
+        assert_ne!(
+            workspace_volume, mounted_volume,
+            "fixture must use a distinct secondary volume"
+        );
+        // Confirm the secondary volume is itself within the current NTFS-only
+        // support baseline before checking the workspace-relative boundary.
+        assert!(WindowsWorkspaceRoot::open(&mounted_volume).is_ok());
+
+        // Bind to the workspace directory itself. The mountpoint is a child
+        // encountered later by capture(), which is the boundary under test.
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &workspace_volume,
+            &test_workspace_relative_path(&workspace),
+            "windows-mounted-volume-boundary",
+        )
+        .unwrap();
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("mounted/probe.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        ), "capture must fail closed when traversal reaches a real secondary-volume mountpoint");
+    }
+
 }

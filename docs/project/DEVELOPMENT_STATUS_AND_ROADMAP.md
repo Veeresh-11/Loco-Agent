@@ -327,3 +327,12 @@ PR #68 exact-head commit `b15e48ec836b7713e90d461f00d2010544265d44` passed Rust 
 PR #69 adds a macOS-only CI fixture that creates and mounts a separate APFS sparse disk image beneath a temporary workspace. A dedicated ignored native test verifies that both workspace and mounted volume report APFS, that their device identities differ, and that the macOS adapter rejects capture through the nested mount. The test is invoked explicitly by the macOS workflow after the ordinary cross-platform unit-test step. It is not silently skipped when the fixture is unavailable: fixture setup or the dedicated test fails the macOS job.
 
 This exercises a distinct nested APFS volume on the hosted macOS runner. It does not prove firmlink semantics, HFS+ behavior, network/removable filesystem behavior, or all APFS mount configurations. The workflow's detach step is best-effort cleanup on the ephemeral runner; native results must be recorded from the exact PR head before claiming the mount assertion passed.
+
+
+## Follow-up update — 2026-11-23: real Windows secondary-volume mountpoint
+
+PR #69 exact-head commit `b9159e4f41f4338c0386022f293743e41b45c94a` passed Rust Core Tests (run `45185300748`) on Ubuntu, Windows, and macOS. On macOS, the APFS sparse-image fixture mounted successfully, the ordinary test suite passed, the dedicated nested-volume boundary test passed, and the detach step completed. Contract Validation run `45185300723` passed.
+
+PR #70 adds a Windows-only CI fixture using DiskPart to create, attach, format as NTFS, and mount a secondary VHDX volume into an existing directory below the temporary workspace. The dedicated ignored native test verifies that the workspace and mounted path resolve to different volume-GUID roots, confirms the secondary volume is NTFS and independently admitted as a root, then requires the workspace adapter to reject traversal through the nested volume mountpoint. The test is explicitly invoked on Windows and must not be silently skipped.
+
+This closes the gap between existing junction/reparse tests and a real secondary-volume directory mount fixture on the hosted Windows runner, if exact-head CI passes. It does not prove behavior for ReFS/FAT/exFAT, removable/network volumes, or every third-party filesystem/filter driver. The NTFS-only allowlist remains unchanged.
