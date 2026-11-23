@@ -129,4 +129,72 @@ mod tests {
   let before=std::fs::metadata(&p).unwrap(); std::fs::write(&p,b"after and longer").unwrap();
   assert!(!metadata_matches(&before,&std::fs::metadata(&p).unwrap()));
  }
+
+ #[test]
+ fn intermediate_directory_swap_never_escapes_retained_workspace_root() {
+  use std::sync::{Arc,Barrier};
+  use std::thread;
+
+  let parent=tempfile::tempdir().unwrap();
+  let workspace=parent.path().join("workspace");
+  let outside=parent.path().join("outside");
+  let nested=workspace.join("nested");
+  std::fs::create_dir_all(&nested).unwrap();
+  std::fs::create_dir(&outside).unwrap();
+  std::fs::write(nested.join("target.txt"),b"inside-workspace").unwrap();
+  std::fs::write(outside.join("target.txt"),b"OUTSIDE-SENTINEL").unwrap();
+
+  let adapter=Arc::new(MacOsWorkspaceSnapshotAdapter::new(
+   std::fs::canonicalize(&workspace).unwrap(),"workspace"
+  ).unwrap());
+  let barrier=Arc::new(Barrier::new(2));
+  let writer_workspace=workspace.clone();
+  let writer_outside=outside.clone();
+  let writer_barrier=barrier.clone();
+
+  let writer=thread::spawn(move||{
+   writer_barrier.wait();
+   for index in 0..200 {
+    let held=writer_workspace.join(format!("nested-held-{index}"));
+    let active=writer_workspace.join("nested");
+    // Replace the intermediate pathname with an outside symlink while the
+    // reader repeatedly opens it relative to the retained workspace handle.
+    std::fs::rename(&active,&held).unwrap();
+    symlink(&writer_outside,&active).unwrap();
+    thread::yield_now();
+    std::fs::remove_file(&active).unwrap();
+    std::fs::rename(&held,&active).unwrap();
+   }
+  });
+
+  barrier.wait();
+  let request=SnapshotCaptureRequest::new("nested/target.txt",128).unwrap();
+  // This checks path containment under namespace replacement only; it does
+  // not establish an atomic snapshot of concurrently modified file contents.
+  for _ in 0..400 {
+   match adapter.capture(&request) {
+    Ok(captured)=>{
+     assert_eq!(
+      captured.bytes(),b"inside-workspace",
+      "capture escaped through the swapped intermediate directory"
+     );
+     assert_eq!(
+      crate::snapshot_payload::validate_snapshot_payload(
+       captured.snapshot(),captured.bytes()
+      ),
+      Ok(())
+     );
+    },
+    Err(SnapshotPayloadError::AcquisitionFailed)=>{},
+    Err(other)=>panic!("unexpected capture error during path swap: {other:?}"),
+   }
+  }
+  writer.join().unwrap();
+
+  // Once the attacker-controlled swap sequence ends, the original relative
+  // target must still be readable through the retained workspace root.
+  let final_capture=adapter.capture(&request).unwrap();
+  assert_eq!(final_capture.bytes(),b"inside-workspace");
+ }
+
 }
