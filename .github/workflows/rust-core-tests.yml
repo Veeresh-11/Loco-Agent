@@ -98,10 +98,15 @@ jobs:
             $detachCommands | Set-Content -Encoding ascii $scriptPath
             $detachOutput = & diskpart /s $scriptPath 2>&1
             $detachOutput | Write-Host
+            if ($LASTEXITCODE -ne 0) { throw 'diskpart failed to detach the secondary VHDX' }
           }
           $mountInfo = & mountvol $mountpoint /L 2>$null
           if ($LASTEXITCODE -eq 0 -and $mountInfo) {
-            throw 'secondary NTFS volume is still mounted; refusing to delete its mountpoint'
+            & mountvol $mountpoint /D
+          }
+          $remainingMount = & mountvol $mountpoint /L 2>$null
+          if ($LASTEXITCODE -eq 0 -and $remainingMount) {
+            throw 'secondary NTFS volume mountpoint remains; refusing to delete its directory'
           }
           if (Test-Path $workspace) { Remove-Item -Recurse -Force $workspace }
           if (Test-Path $vhd) { Remove-Item -Force $vhd }
