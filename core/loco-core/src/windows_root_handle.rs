@@ -425,6 +425,9 @@ impl crate::snapshot_payload::WorkspaceSnapshotAdapter for WindowsWorkspaceSnaps
 
         let mut file = open_relative_file(&parent, components[components.len() - 1])
             .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        if file.metadata.identity.volume_serial != self.root.identity.volume_serial {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
         let before = file.metadata;
         if before.links != 1 {
             return Err(SnapshotPayloadError::HardLinkNotAllowed);
@@ -949,6 +952,8 @@ mod tests {
             workspace.path().join("stable.txt"),
             workspace.path().join("moved.txt")
         ).is_err(), "open file handle must deny delete sharing");
+        assert!(std::fs::write(workspace.path().join("stable.txt"), b"changed").is_err(),
+            "open file handle must deny concurrent write sharing");
         assert_eq!(pinned.byte_length(), 6);
     }
 
