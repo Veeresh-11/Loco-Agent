@@ -54,8 +54,15 @@ jobs:
         shell: bash
         run: |
           set +e
-          mountpoint="$RUNNER_TEMP/loco-apfs-workspace/mounted"
+          workspace="$RUNNER_TEMP/loco-apfs-workspace"
+          mountpoint="$workspace/mounted"
           image="$RUNNER_TEMP/loco-apfs-mount-test.sparseimage"
-          hdiutil detach "$mountpoint"
-          rm -rf "$RUNNER_TEMP/loco-apfs-workspace" "$image"
+          if mount | grep -F " on $mountpoint (" >/dev/null; then
+            hdiutil detach -force "$mountpoint"
+          fi
+          if ! mount | grep -F " on $mountpoint (" >/dev/null; then
+            rmdir "$mountpoint" 2>/dev/null
+            rmdir "$workspace" 2>/dev/null
+          fi
+          rm -f "$image"
           exit 0
