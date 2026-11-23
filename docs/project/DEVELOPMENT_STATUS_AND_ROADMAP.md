@@ -187,21 +187,21 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: native API findings and Linux read-length hardening
+## 5. Current follow-up task: native API findings and Windows file identity hardening
 
 Native review: [PR #61 — native filesystem API review](https://github.com/Veeresh-11/Loco-Agent/pull/61) (open, draft)  
 Linux hardening: [PR #62 — reject short snapshot reads](https://github.com/Veeresh-11/Loco-Agent/pull/62) (open, draft)  
 Current top branch: `fix/linux-snapshot-exact-read-length`, stacked on PR #61.
 
-PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements the low-risk Linux finding: the captured byte count must exactly equal the initial opened-handle size before a snapshot is built. It adds deterministic tests for exact, short, and over-length results. This check is additional consistency validation; it does not provide atomic content snapshots.
+PR #61 records the source-level review findings in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md). PR #62 implements exact Linux captured-length equality with deterministic exact, short, and over-length tests. PR #63 implements strict descendant mount rejection with `RESOLVE_NO_XDEV`. PR #64 adds the Windows x64 ABI gate; PR #65 adds pre-existing sharing-conflict coverage; PR #66 upgrades handle-derived Windows identity to `FILE_ID_INFO`. These checks do not provide atomic content snapshots or durable approval identity by themselves.
 
 **Still open:** privileged Linux mount/bind-mount execution, Windows real secondary-volume mount-point and filesystem allowlist tests, independent Windows SDK/FFI review, approval freshness/digest binding, and native macOS filesystem/mount validation. No production approval/write/execution path is added.
 
 PR #60 Contract Validation passed (run `45178926525`); its Rust run `45178926550` had Ubuntu and Windows success while macOS remained queued at the last check. PR #61 and #62 are documentation/code follow-ups respectively; #62 CI is pending for its exact head.
 
-### PR #66 — Windows 128-bit handle-derived file identity (in progress)
+### PR #66 — Windows 128-bit handle-derived file identity (in progress; exact-head CI pending)
 
-PR #66 is stacked on #65. It uses `GetFileInformationByHandleEx(FileIdInfo)` to obtain a 64-bit volume serial and 128-bit file ID from each opened handle, with compile-time x64 layout assertions. There is no fallback to the legacy 32-bit serial/64-bit index; filesystems that cannot provide `FileIdInfo` fail closed. A Windows-native test checks identity stability for repeated opens and distinction between separate files. This is not a globally durable approval identifier: approvals still need fresh handle reacquisition and content-digest verification at enforcement time.
+PR #66 is stacked on #65. It uses `GetFileInformationByHandleEx(FileIdInfo)` to obtain a 64-bit volume serial and 128-bit file ID from each opened handle, with compile-time x64 layout assertions. There is no fallback to the legacy 32-bit serial/64-bit index; filesystems that cannot provide `FileIdInfo` fail closed. A Windows-native test checks identity stability for repeated opens and distinction between separate files. Microsoft documents the FileIdInfo class as unsupported before Windows 8 / Windows Server 2012; older Windows versions and filesystems without this capability fail closed. This is not a globally durable approval identifier: approvals still need fresh handle reacquisition and content-digest verification at enforcement time.
 
 ### PR #65 — Windows pre-existing share-conflict test (Contract Validation passed; Rust matrix pending)
 
@@ -215,7 +215,7 @@ PR #64 is stacked on #63. It adds compile-time size/alignment/offset assertions 
 
 PR #63 is stacked on #62 and chooses the strict F-01 policy: descendant `openat2` resolution sets `RESOLVE_NO_XDEV`, rejecting mount and bind-mount crossings below the retained workspace root. Root acquisition does not set this flag, so a workspace rooted on a separate mounted filesystem remains admissible. This intentionally disallows nested bind-mounted dependency/source trees. A Linux test attempts a real bind mount and asserts fail-closed capture when privileges are available; hosted unprivileged CI may skip that privileged assertion. A privileged Linux VM must still execute bind-mount and distinct-filesystem mount tests before native coverage is claimed.
 
-At this update, PR #62 Contract Validation run `45180875545` passed, while Rust Core Tests run `45180875554` was still pending with no jobs reported. PR #60 Rust run `45178926550` had Ubuntu and Windows pass and macOS queued. Recheck these runs before claiming final status.
+CI status at this update: PR #62 exact-head Rust Core Tests and Contract Validation passed; PR #63 exact-head Rust matrix and Contract Validation passed; PR #64 exact-head Rust matrix and Contract Validation passed. PR #65 Contract Validation passed and Ubuntu/Windows Rust jobs passed, while macOS was queued. PR #66 checks are pending/being created for its latest head; recheck the exact SHA before claiming success.
 
 ## 6. Roadmap and remaining work
 
@@ -223,7 +223,7 @@ Recommended order; keep each item in a coherent, reviewable PR.
 
 ### A. Complete platform snapshot adversarial coverage
 
-- Linux: PR #62 adds an exact captured-byte-length check. Still review mount-crossing behavior, kernel/openat2 availability, final/intermediate replacement and concurrent mutation boundaries.
+- Linux: PR #62 adds an exact captured-byte-length check; PR #63 rejects all descendant mount and bind-mount crossings with `RESOLVE_NO_XDEV`. A privileged Linux VM must still execute real bind-mount and distinct-filesystem mount tests. Keep openat2 no-fallback behavior.
 - Windows: test junctions/reparse tags, component replacement, sharing violations, and final-file mutation. Root admission now rejects DOS/mounted-folder paths; a real second-volume mount-point traversal fixture remains outstanding, along with unsupported-filesystem coverage.
 - macOS: add intermediate-component replacement coverage; test symlink swaps, mount boundaries, FIFO/non-regular targets, hard links, and concurrent writes on supported filesystems.
 - Keep race tests bounded, synchronized, deterministic where possible, and explicit about accepted fail-closed outcomes.
