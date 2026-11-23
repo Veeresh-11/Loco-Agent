@@ -1,13 +1,14 @@
 //! Windows-only trusted-volume-root and handle-relative directory traversal prototype.
 //!
-//! This is deliberately not a WorkspaceSnapshotAdapter yet. It establishes a
-//! narrow root capability and proves one-component directory opens. No writes,
-//! file reads, path-based fallback, or authorization decisions are exposed.
+//! Read-only Windows workspace acquisition prototype. It pins a workspace
+//! directory beneath a trusted local volume root and captures bounded regular
+//! files through handle-relative opens. No writes or authorization decisions.
 
 use std::fs::File;
 use std::mem::{size_of, zeroed};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::ptr::{null, null_mut};
+use std::io::Read;
 
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Storage::FileSystem::{
@@ -118,6 +119,8 @@ pub enum WindowsRootError {
     NotDirectory,
     VolumeIdentityChanged,
     MetadataUnavailable,
+    NotRegularFile,
+    InvalidWorkspaceId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,6 +364,206 @@ fn to_wide_nul(value: &str) -> Vec<u16> {
 
 fn invalid_handle_value() -> HANDLE {
     -1isize as HANDLE
+}
+
+
+/// Read-only Windows adapter that captures regular files through retained
+/// volume/workspace directory handles and validates the shared snapshot payload.
+pub struct WindowsWorkspaceSnapshotAdapter {
+    workspace: WindowsDirectoryHandle,
+    volume_serial: u32,
+    workspace_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowsFileMetadata {
+    identity: WindowsFileIdentity,
+    attributes: u32,
+    size: u64,
+    links: u32,
+    creation_time: (u32, u32),
+    last_write_time: (u32, u32),
+}
+
+pub struct WindowsFileHandle {
+    handle: File,
+    metadata: WindowsFileMetadata,
+}
+
+impl WindowsWorkspaceSnapshotAdapter {
+    /// Binds the adapter to an explicit workspace path relative to the trusted
+    /// volume-GUID root. Every component is opened and retained by handle.
+    pub fn new(
+        volume_guid_root: &str,
+        workspace_relative_path: &str,
+        workspace_id: impl Into<String>,
+    ) -> Result<Self, WindowsRootError> {
+        let workspace_id = workspace_id.into();
+        if workspace_id.trim().is_empty() {
+            return Err(WindowsRootError::InvalidWorkspaceId);
+        }
+        let components: Vec<&str> = workspace_relative_path.split('/').collect();
+        if components.is_empty() || components.iter().any(|part| validate_component(part).is_err()) {
+            return Err(WindowsRootError::InvalidComponent);
+        }
+        let root = WindowsWorkspaceRoot::open(volume_guid_root)?;
+        let volume_serial = root.identity.volume_serial;
+        let workspace = root.open_directory_components(&components)?;
+        Ok(Self { workspace, volume_serial, workspace_id })
+    }
+}
+
+impl crate::snapshot_payload::WorkspaceSnapshotAdapter for WindowsWorkspaceSnapshotAdapter {
+    fn capture(
+        &self,
+        request: &crate::snapshot_payload::SnapshotCaptureRequest,
+    ) -> Result<crate::snapshot_payload::CapturedWorkspaceSnapshot, crate::snapshot_payload::SnapshotPayloadError> {
+        use crate::snapshot_payload::{build_snapshot_contract, CapturedWorkspaceSnapshot, SnapshotPayloadError, MAX_SNAPSHOT_BYTES};
+
+        let components: Vec<&str> = request.relative_path().split('/').collect();
+        if components.is_empty() || components.iter().any(|part| validate_component(part).is_err()) {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
+
+        let mut parent = self.workspace.handle.try_clone().map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        for component in &components[..components.len() - 1] {
+            let child = open_relative_directory(&parent, component)
+                .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+            let identity = checked_directory_identity(&child, Some(self.volume_serial))
+                .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+            if identity.volume_serial != self.volume_serial {
+                return Err(SnapshotPayloadError::AcquisitionFailed);
+            }
+            parent = child;
+        }
+
+        let mut file = open_relative_file(&parent, components[components.len() - 1])
+            .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        if file.metadata.identity.volume_serial != self.volume_serial {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
+        let before = file.metadata;
+        if before.links != 1 {
+            return Err(SnapshotPayloadError::HardLinkNotAllowed);
+        }
+        let limit = MAX_SNAPSHOT_BYTES.min(request.max_bytes());
+        if before.size > limit as u64 {
+            return Err(SnapshotPayloadError::LimitExceeded);
+        }
+
+        let mut bytes = Vec::with_capacity(before.size as usize);
+        (&mut file.handle).take(limit as u64 + 1).read_to_end(&mut bytes)
+            .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        if bytes.len() > limit {
+            return Err(SnapshotPayloadError::LimitExceeded);
+        }
+        if bytes.len() as u64 != before.size {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
+
+        let after = query_regular_file_metadata(&file.handle)
+            .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        if before != after {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
+
+        let identity = format!(
+            "windows:volume:{}:file:{}:captured_len:{}",
+            before.identity.volume_serial, before.identity.file_index, bytes.len()
+        );
+        let snapshot = build_snapshot_contract(
+            &self.workspace_id,
+            request.relative_path(),
+            &identity,
+            &bytes,
+        )?;
+        CapturedWorkspaceSnapshot::new(snapshot, bytes)
+    }
+}
+
+impl WindowsFileHandle {
+    pub fn identity(&self) -> WindowsFileIdentity { self.metadata.identity }
+    pub fn byte_length(&self) -> u64 { self.metadata.size }
+}
+
+fn open_relative_file(parent: &File, component: &str) -> Result<WindowsFileHandle, WindowsRootError> {
+    validate_component(component)?;
+    let mut name: Vec<u16> = component.encode_utf16().collect();
+    let byte_len = name.len().checked_mul(2).ok_or(WindowsRootError::InvalidComponent)?;
+    if byte_len == 0 || byte_len > u16::MAX as usize {
+        return Err(WindowsRootError::InvalidComponent);
+    }
+    let mut unicode_name = UnicodeString {
+        length: byte_len as u16,
+        maximum_length: byte_len as u16,
+        buffer: name.as_mut_ptr(),
+    };
+    let mut attributes = ObjectAttributes {
+        length: size_of::<ObjectAttributes>() as u32,
+        root_directory: parent.as_raw_handle() as HANDLE,
+        object_name: &mut unicode_name,
+        attributes: OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE,
+        security_descriptor: null_mut(),
+        security_quality_of_service: null_mut(),
+    };
+    let mut io_status: IoStatusBlock = unsafe { zeroed() };
+    let mut raw_handle: HANDLE = null_mut();
+    const FILE_READ_DATA_VALUE: u32 = 0x0001;
+    const FILE_NON_DIRECTORY_FILE_VALUE: u32 = 0x0040;
+    let status = unsafe {
+        NtCreateFile(
+            &mut raw_handle,
+            FILE_READ_DATA_VALUE | FILE_READ_ATTRIBUTES_VALUE | SYNCHRONIZE_VALUE,
+            &mut attributes,
+            &mut io_status,
+            null_mut(),
+            0,
+            FILE_SHARE_READ_VALUE,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE_VALUE | FILE_SYNCHRONOUS_IO_NONALERT,
+            null_mut(),
+            0,
+        )
+    };
+    if status == STATUS_REPARSE_POINT_ENCOUNTERED {
+        return Err(WindowsRootError::ReparsePointRejected);
+    }
+    if status < 0 || raw_handle.is_null() {
+        return Err(WindowsRootError::RelativeOpenFailed);
+    }
+    let handle = unsafe { File::from(OwnedHandle::from_raw_handle(raw_handle as RawHandle)) };
+    let metadata = query_regular_file_metadata(&handle)?;
+    Ok(WindowsFileHandle { handle, metadata })
+}
+
+fn query_regular_file_metadata(file: &File) -> Result<WindowsFileMetadata, WindowsRootError> {
+    let mut information: ByHandleFileInformation = unsafe { zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut information) };
+    if ok == 0 {
+        return Err(WindowsRootError::MetadataUnavailable);
+    }
+    if information.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(WindowsRootError::ReparsePointRejected);
+    }
+    if information.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        return Err(WindowsRootError::NotRegularFile);
+    }
+    let metadata = file.metadata().map_err(|_| WindowsRootError::MetadataUnavailable)?;
+    if !metadata.is_file() {
+        return Err(WindowsRootError::NotRegularFile);
+    }
+    let identity = WindowsFileIdentity {
+        volume_serial: information.volume_serial_number,
+        file_index: ((information.file_index_high as u64) << 32) | information.file_index_low as u64,
+    };
+    Ok(WindowsFileMetadata {
+        identity,
+        attributes: information.file_attributes,
+        size: ((information.file_size_high as u64) << 32) | information.file_size_low as u64,
+        links: information.number_of_links,
+        creation_time: (information.creation_time.high_date_time, information.creation_time.low_date_time),
+        last_write_time: (information.last_write_time.high_date_time, information.last_write_time.low_date_time),
+    })
 }
 
 #[cfg(test)]
@@ -668,4 +871,126 @@ mod tests {
         assert!(opened.is_directory());
         assert_eq!(opened.identity().volume_serial, root.identity().volume_serial);
     }
+
+    fn test_workspace_relative_path(path: &std::path::Path) -> String {
+        use std::os::windows::ffi::OsStringExt;
+        use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
+        let path_wide = to_wide_nul(path.to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let end = mount.iter().position(|value| *value == 0).unwrap();
+        let mount_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..end]));
+        let relative = path.strip_prefix(&mount_path).unwrap();
+        relative.components().filter_map(|part| match part {
+            std::path::Component::Normal(value) => value.to_str().map(str::to_owned),
+            _ => None,
+        }).collect::<Vec<_>>().join("/")
+    }
+
+    fn test_volume_root_for(path: &std::path::Path) -> String {
+        use std::os::windows::ffi::OsStringExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        };
+        let path_wide = to_wide_nul(path.to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let mut volume = vec![0u16; 128];
+        let ok = unsafe { GetVolumeNameForVolumeMountPointW(mount.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) };
+        assert_ne!(ok, 0);
+        let end = volume.iter().position(|value| *value == 0).unwrap();
+        String::from_utf16(&volume[..end]).unwrap()
+    }
+
+    #[test]
+    fn captures_regular_and_empty_files_with_shared_snapshot_contract() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, WorkspaceSnapshotAdapter};
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("sample.txt"), b"bounded capture").unwrap();
+        std::fs::write(workspace.path().join("empty.txt"), b"").unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-test-workspace"
+        ).unwrap();
+
+        let captured = adapter.capture(&SnapshotCaptureRequest::new("sample.txt", 128).unwrap()).unwrap();
+        assert_eq!(captured.bytes(), b"bounded capture");
+        assert_eq!(captured.snapshot().byte_length, 15);
+        assert_eq!(crate::snapshot_payload::validate_snapshot_payload(captured.snapshot(), captured.bytes()), Ok(()));
+
+        let empty = adapter.capture(&SnapshotCaptureRequest::new("empty.txt", 1).unwrap()).unwrap();
+        assert!(empty.bytes().is_empty());
+        assert_eq!(empty.snapshot().byte_length, 0);
+    }
+
+    #[test]
+    fn rejects_oversized_and_hard_linked_files() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("large.bin"), b"12345").unwrap();
+        std::fs::write(workspace.path().join("origin.bin"), b"linked").unwrap();
+        std::fs::hard_link(workspace.path().join("origin.bin"), workspace.path().join("alias.bin")).unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-test-workspace"
+        ).unwrap();
+
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("large.bin", 4).unwrap()),
+            Err(SnapshotPayloadError::LimitExceeded)
+        ));
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("alias.bin", 64).unwrap()),
+            Err(SnapshotPayloadError::HardLinkNotAllowed)
+        ));
+    }
+
+    #[test]
+    fn rejects_directories_and_pins_open_file_against_rename() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, WorkspaceSnapshotAdapter};
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::create_dir(workspace.path().join("folder")).unwrap();
+        std::fs::write(workspace.path().join("stable.txt"), b"stable").unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-test-workspace"
+        ).unwrap();
+        assert!(adapter.capture(&SnapshotCaptureRequest::new("folder", 64).unwrap()).is_err());
+
+        let root_components = {
+            use std::path::Component;
+            let mount_path = {
+                use std::os::windows::ffi::OsStringExt;
+                use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
+                let wide = to_wide_nul(workspace.path().to_string_lossy().as_ref());
+                let mut mount = vec![0u16; 1024];
+                let ok = unsafe { GetVolumePathNameW(wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+                assert_ne!(ok, 0);
+                let end = mount.iter().position(|value| *value == 0).unwrap();
+                std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..end]))
+            };
+            workspace.path().strip_prefix(&mount_path).unwrap().components()
+                .filter_map(|part| match part {
+                    Component::Normal(value) => value.to_str().map(str::to_owned),
+                    _ => None,
+                }).collect::<Vec<_>>()
+        };
+        let root = WindowsWorkspaceRoot::open(&test_volume_root_for(workspace.path())).unwrap();
+        let refs: Vec<&str> = root_components.iter().map(String::as_str).collect();
+        let parent = root.open_directory_components(&refs).unwrap();
+        let pinned = open_relative_file(&parent.handle, "stable.txt").unwrap();
+        assert!(std::fs::rename(
+            workspace.path().join("stable.txt"),
+            workspace.path().join("moved.txt")
+        ).is_err(), "open file handle must deny delete sharing");
+        assert!(std::fs::write(workspace.path().join("stable.txt"), b"changed").is_err(),
+            "open file handle must deny concurrent write sharing");
+        assert_eq!(pinned.byte_length(), 6);
+    }
+
 }
