@@ -346,3 +346,6 @@ pub mod linux_snapshot_adapter;
 
 #[cfg(target_os = "windows")]
 pub mod windows_root_handle;
+
+#[cfg(target_os = "macos")]
+pub mod macos_snapshot_adapter;
