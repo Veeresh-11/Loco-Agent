@@ -110,6 +110,17 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#60 — Windows mounted-folder root admission coverage:** verifies that a DOS path to a mounted folder is not accepted as the trusted volume root; only canonical volume-GUID roots are admitted. This is lexical/root-admission coverage, not a test that creates or traverses a real secondary-volume mount point.
 - **#61 — Native filesystem API review:** records source-level findings for Linux `openat2`, macOS `openat/O_NOFOLLOW`, and Windows `CreateFileW/NtCreateFile`. Identifies mount-policy inconsistency, Linux exact-read-length hardening, Windows FFI/identity/filesystem admission gates, and native macOS/Windows validation still required. Documentation only; no adapter behavior changed.
 
+
+### Review of older open PRs (#6–#8)
+
+These PRs are retained as historical feature work, not approved for merge based on branch cleanliness alone.
+
+- **#6 — Feature-stack consolidation:** useful feature baseline, but its current head's check-runs show only GitGuardian success; the PR body cites earlier Node 20/22 evidence for a different streaming feature head, not the current consolidated head. Manual VS Code Extension Development Host smoke testing is still recorded as pending. Static patch review also shows the extension's TypeScript layer still performs patch application and invokes shell operations. That is incompatible with the final authority invariant until the Rust gate is integrated; keep this legacy behavior preserved but do not merge it as the completed migration.
+- **#7 — Retrieval metric deduplication:** current head likewise has only GitGuardian check evidence, not a recorded Node/Jest/ESLint run. The deduplication correction is useful, but the path normalization behavior must be specified for case-sensitive versus case-insensitive filesystems. Leading `..` segments are collapsed by the current normalizer instead of being rejected; this is a metric/evaluation correctness concern, not a filesystem authorization primitive.
+- **#8 — Workspace path-boundary tests:** current head likewise has only GitGuardian check evidence. The helper uses lexical `path.resolve/path.relative` containment and its own comment says symlinks must be resolved by callers. It is a regression guard, not a secure filesystem boundary; the filesystem operation must use the Rust handle-relative authority and race-resistant checks.
+
+**Disposition:** keep #6–#8 open while the migration stack is completed. Before merge, rerun the current heads through Node 20/22 compile, Jest, ESLint and perform the VS Code smoke test. Reassess #6's direct TypeScript privileged paths and reconcile #7's platform-specific path identity semantics. Do not close these PRs as obsolete until their changes are either incorporated into the eventual reviewed stack or deliberately superseded with a documented replacement.
+
 ## 3. Current implementation maturity
 
 ### What exists
