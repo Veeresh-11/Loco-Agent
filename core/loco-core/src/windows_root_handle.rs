@@ -38,6 +38,7 @@ const FILE_OPEN: u32 = 1;
 const FILE_DIRECTORY_FILE: u32 = 0x0000_0001;
 const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x0000_0020;
 const STATUS_REPARSE_POINT_ENCOUNTERED: i32 = 0xC000_050B_u32 as i32;
+const FILE_ID_INFO_CLASS: u32 = 18;
 
 #[repr(C)]
 struct UnicodeString {
@@ -77,6 +78,12 @@ struct ByHandleFileInformation {
 }
 
 #[repr(C)]
+struct FileIdInfo {
+    volume_serial_number: u64,
+    file_id: [u8; 16],
+}
+
+#[repr(C)]
 union IoStatusValue {
     status: i32,
     pointer: *mut std::ffi::c_void,
@@ -94,6 +101,7 @@ extern "system" {
         file_handle: HANDLE,
         information: *mut ByHandleFileInformation,
     ) -> i32;
+    fn GetFileInformationByHandleEx(file_handle: HANDLE, information_class: u32, information: *mut std::ffi::c_void, buffer_size: u32) -> i32;
 }
 
 #[link(name = "ntdll")]
@@ -153,6 +161,11 @@ const _: () = {
     assert!(offset_of!(ByHandleFileInformation, file_index_high) == 44);
     assert!(offset_of!(ByHandleFileInformation, file_index_low) == 48);
 
+    assert!(size_of::<FileIdInfo>() == 24);
+    assert!(align_of::<FileIdInfo>() == 8);
+    assert!(offset_of!(FileIdInfo, volume_serial_number) == 0);
+    assert!(offset_of!(FileIdInfo, file_id) == 8);
+
     assert!(size_of::<IoStatusValue>() == 8);
     assert!(align_of::<IoStatusValue>() == 8);
     assert!(offset_of!(IoStatusBlock, value) == 0);
@@ -178,8 +191,10 @@ pub enum WindowsRootError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowsFileIdentity {
-    pub volume_serial: u32,
-    pub file_index: u64,
+    /// 64-bit volume serial from FILE_ID_INFO; scoped to this computer/volume.
+    pub volume_serial: u64,
+    /// Full 128-bit file identifier from FILE_ID_INFO.
+    pub file_id: [u8; 16],
 }
 
 pub struct WindowsWorkspaceRoot {
@@ -349,7 +364,7 @@ fn open_relative_directory(parent: &File, component: &str) -> Result<File, Windo
 
 fn checked_directory_identity(
     file: &File,
-    expected_volume: Option<u32>,
+    expected_volume: Option<u64>,
 ) -> Result<WindowsFileIdentity, WindowsRootError> {
     let metadata = file.metadata().map_err(|_| WindowsRootError::MetadataUnavailable)?;
     if !metadata.is_dir() {
@@ -371,13 +386,28 @@ fn checked_directory_identity(
     if information.file_attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
         return Err(WindowsRootError::NotDirectory);
     }
-    let volume_serial = information.volume_serial_number;
-    let file_index = ((information.file_index_high as u64) << 32)
-        | information.file_index_low as u64;
-    if expected_volume.is_some_and(|expected| expected != volume_serial) {
+    let identity = query_file_identity(file)?;
+    if expected_volume.is_some_and(|expected| expected != identity.volume_serial) {
         return Err(WindowsRootError::VolumeIdentityChanged);
     }
-    Ok(WindowsFileIdentity { volume_serial, file_index })
+    Ok(identity)
+}
+
+
+fn query_file_identity(file: &File) -> Result<WindowsFileIdentity, WindowsRootError> {
+    let mut information = FileIdInfo { volume_serial_number: 0, file_id: [0; 16] };
+    // FileIdInfo (class 18) returns a 64-bit volume serial and 128-bit file ID.
+    // There is deliberately no fallback to BY_HANDLE_FILE_INFORMATION: a
+    // filesystem that cannot provide this identity is unsupported and fails closed.
+    // SAFETY: file is a live owned handle; information is writable for exactly
+    // FILE_ID_INFO's 24-byte x64 layout, asserted above.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(file.as_raw_handle() as HANDLE, FILE_ID_INFO_CLASS,
+            &mut information as *mut FileIdInfo as *mut std::ffi::c_void,
+            size_of::<FileIdInfo>() as u32)
+    };
+    if ok == 0 { return Err(WindowsRootError::MetadataUnavailable); }
+    Ok(WindowsFileIdentity { volume_serial: information.volume_serial_number, file_id: information.file_id })
 }
 
 fn validate_component(component: &str) -> Result<(), WindowsRootError> {
@@ -424,7 +454,7 @@ fn invalid_handle_value() -> HANDLE {
 /// volume/workspace directory handles and validates the shared snapshot payload.
 pub struct WindowsWorkspaceSnapshotAdapter {
     workspace: WindowsDirectoryHandle,
-    volume_serial: u32,
+    volume_serial: u64,
     workspace_id: String,
 }
 
@@ -521,8 +551,10 @@ impl crate::snapshot_payload::WorkspaceSnapshotAdapter for WindowsWorkspaceSnaps
         }
 
         let identity = format!(
-            "windows:volume:{}:file:{}:captured_len:{}",
-            before.identity.volume_serial, before.identity.file_index, bytes.len()
+            "windows:volume:{:016x}:file:{}:captured_len:{}",
+            before.identity.volume_serial,
+            before.identity.file_id.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+            bytes.len()
         );
         let snapshot = build_snapshot_contract(
             &self.workspace_id,
@@ -605,10 +637,7 @@ fn query_regular_file_metadata(file: &File) -> Result<WindowsFileMetadata, Windo
     if !metadata.is_file() {
         return Err(WindowsRootError::NotRegularFile);
     }
-    let identity = WindowsFileIdentity {
-        volume_serial: information.volume_serial_number,
-        file_index: ((information.file_index_high as u64) << 32) | information.file_index_low as u64,
-    };
+    let identity = query_file_identity(file)?;
     Ok(WindowsFileMetadata {
         identity,
         attributes: information.file_attributes,
@@ -1277,6 +1306,24 @@ mod tests {
         assert!(replacements > 0, "race writer did not complete any directory replacements");
         let final_capture = adapter.capture(&request).unwrap();
         assert_eq!(final_capture.bytes(), b"inside-workspace");
+    }
+
+
+    #[test]
+    fn file_identity_uses_full_file_id_info_and_is_stable_for_same_opened_file() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("first.txt"), b"first").unwrap();
+        std::fs::write(workspace.path().join("second.txt"), b"second").unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()), &test_workspace_relative_path(workspace.path()),
+            "windows-file-id-info-workspace").unwrap();
+        let first = open_relative_file(&adapter.workspace.handle, "first.txt").unwrap().identity();
+        let first_again = open_relative_file(&adapter.workspace.handle, "first.txt").unwrap().identity();
+        let second = open_relative_file(&adapter.workspace.handle, "second.txt").unwrap().identity();
+        assert_eq!(first, first_again, "same file should retain the same handle-derived identity");
+        assert_eq!(first.volume_serial, second.volume_serial);
+        assert_ne!(first.file_id, [0u8; 16], "filesystem must provide a nonzero 128-bit file ID");
+        assert_ne!(first.file_id, second.file_id, "distinct files should have distinct IDs on the test filesystem");
     }
 
     #[test]
