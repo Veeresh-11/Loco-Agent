@@ -5,6 +5,7 @@
 
 use sha2::{Digest, Sha256};
 use crate::workspace_snapshot::{WorkspaceSnapshot, SnapshotContractError};
+use crate::portable_path::is_safe_portable_relative_path;
 
 pub const MAX_SNAPSHOT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -65,33 +66,9 @@ pub enum SnapshotCaptureRequestError {
     InvalidLimit,
 }
 
-fn is_portable_component(component: &str) -> bool {
-    if component.is_empty() || component.ends_with('.') || component.ends_with(' ') {
-        return false;
-    }
-    // Reject Windows-invalid filename characters on every platform so contracts
-    // remain portable and cannot be reinterpreted differently by adapters.
-    if component.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | '"' | '|' | '?' | '*')) {
-        return false;
-    }
-    // Windows device names are reserved even when followed by an extension.
-    let stem = component.split('.').next().unwrap_or(component).to_ascii_uppercase();
-    matches!(stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" |
-        "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" | "COM¹" | "COM²" | "COM³" |
-        "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9" | "LPT¹" | "LPT²" | "LPT³"
-    ) == false
-}
-
 impl SnapshotCaptureRequest {
     pub fn new(relative_path: &str, max_bytes: usize) -> Result<Self, SnapshotCaptureRequestError> {
-        if relative_path.is_empty()
-            || relative_path.starts_with('/')
-            || relative_path.contains('\\')
-            || relative_path.contains(':')
-            || relative_path.contains('\0')
-            || relative_path.split('/').any(|p| !is_portable_component(p))
-        {
+        if !is_safe_portable_relative_path(relative_path) {
             return Err(SnapshotCaptureRequestError::InvalidPath);
         }
         if max_bytes == 0 || max_bytes > MAX_SNAPSHOT_BYTES {

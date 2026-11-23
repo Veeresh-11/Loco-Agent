@@ -5,6 +5,7 @@
 //! inspect, or read files and does NOT itself provide filesystem security.
 
 use serde::{Deserialize, Serialize};
+use crate::portable_path::is_safe_portable_relative_path;
 
 pub const SNAPSHOT_CONTRACT_VERSION: &str = "1";
 
@@ -55,12 +56,7 @@ impl WorkspaceSnapshot {
         if self.workspace_id.trim().is_empty() {
             return Err(SnapshotContractError::EmptyWorkspaceId);
         }
-        if self.relative_path.is_empty()
-            || self.relative_path.starts_with('/')
-            || self.relative_path.contains('\\')
-            || self.relative_path.contains(':')
-            || self.relative_path.split('/').any(|part| part.is_empty() || part == "." || part == "..")
-        {
+        if !is_safe_portable_relative_path(&self.relative_path) {
             return Err(SnapshotContractError::InvalidRelativePath);
         }
         if self.file_kind != SnapshotFileKind::RegularFile {

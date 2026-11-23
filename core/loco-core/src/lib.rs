@@ -82,22 +82,7 @@ impl Default for PolicyConfig {
 /// Basic syntactic path guard only. Not a substitute for canonical filesystem
 /// resolution, symlink checks, or race-resistant file access.
 pub fn is_safe_relative_path(path: &str) -> bool {
-    if path.trim().is_empty() || path.contains('\0') {
-        return false;
-    }
-
-    let normalized = path.replace('\\', "/");
-    if normalized.starts_with('/')
-        || normalized.starts_with("//")
-        || normalized.starts_with("~/")
-        || (normalized.len() >= 2
-            && normalized.as_bytes()[1] == b':'
-            && normalized.as_bytes()[0].is_ascii_alphabetic())
-    {
-        return false;
-    }
-
-    !normalized.split('/').any(|segment| segment == "..")
+    crate::portable_path::is_safe_portable_relative_path(path)
 }
 
 pub fn evaluate(proposal: &ActionProposal, config: PolicyConfig) -> SecurityDecision {
@@ -251,6 +236,15 @@ mod tests {
     }
 
     #[test]
+    fn policy_uses_shared_portable_path_rules() {
+        for path in ["src/CON.txt", "src/com².log", "src/bad?name", "src/name.", "src/name "] {
+            assert!(!is_safe_relative_path(path), "should reject: {path:?}");
+        }
+        assert!(is_safe_relative_path(".env"));
+        assert!(is_safe_relative_path("src/main.rs"));
+    }
+
+    #[test]
     fn patches_always_require_approval() {
         let p = proposal(ProposedAction::ProposePatch {
             path: "src/main.rs".into(),
@@ -323,6 +317,7 @@ mod tests {
 
 
 pub mod path_validation;
+pub mod portable_path;
 
 pub mod workspace_fs;
 
