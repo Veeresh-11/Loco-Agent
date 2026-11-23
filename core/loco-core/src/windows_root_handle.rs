@@ -1025,9 +1025,10 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         std::fs::write(outside.path().join("target.txt"), b"OUTSIDE-SENTINEL").unwrap();
         if symlink_dir(outside.path(), workspace.path().join("linked")).is_err() {
-            // Some Windows runners do not grant symbolic-link creation rights.
+            eprintln!("SKIP: Windows runner denied directory symlink creation; attack path not exercised");
             return;
         }
+        eprintln!("EXERCISED: intermediate directory symlink reparse-point rejection");
 
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
             &test_volume_root_for(workspace.path()),
@@ -1051,9 +1052,10 @@ mod tests {
         let outside_file = outside.path().join("target.txt");
         std::fs::write(&outside_file, b"OUTSIDE-SENTINEL").unwrap();
         if symlink_file(&outside_file, workspace.path().join("linked.txt")).is_err() {
-            // Some Windows runners do not grant symbolic-link creation rights.
+            eprintln!("SKIP: Windows runner denied file symlink creation; attack path not exercised");
             return;
         }
+        eprintln!("EXERCISED: final-file symlink reparse-point rejection");
 
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
             &test_volume_root_for(workspace.path()),
