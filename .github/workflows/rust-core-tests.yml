@@ -61,6 +61,15 @@ jobs:
           sudo chmod 0644 "$mountpoint/secret.txt"
           mountpoint -q "$mountpoint"
           echo "LOCO_LINUX_LOOP_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Inspect native macOS firmlink metadata
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -ldO /Users /Applications /Library /System/Volumes/Data
+          if [ -f /usr/share/firmlinks ]; then
+            cat /usr/share/firmlinks
+          fi
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash
