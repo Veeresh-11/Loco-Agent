@@ -42,7 +42,7 @@ jobs:
           image="$RUNNER_TEMP/loco-apfs-mount-test.sparseimage"
           mkdir -p "$mountpoint"
           hdiutil create -size 64m -fs APFS -volname LOCO_MOUNT_TEST -type SPARSE -ov "$image"
-          hdiutil attach -nobrowse -mountpoint "$mountpoint" "$image"
+          sudo hdiutil attach -owners off -nobrowse -mountpoint "$mountpoint" "$image"
           echo "LOCO_MACOS_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Run core unit tests
         run: cargo test --manifest-path core/loco-core/Cargo.toml
@@ -58,7 +58,7 @@ jobs:
           mountpoint="$workspace/mounted"
           image="$RUNNER_TEMP/loco-apfs-mount-test.sparseimage"
           if mount | grep -F " on $mountpoint (" >/dev/null; then
-            hdiutil detach -force "$mountpoint"
+            sudo hdiutil detach -force "$mountpoint"
           fi
           if ! mount | grep -F " on $mountpoint (" >/dev/null; then
             rmdir "$mountpoint" 2>/dev/null
