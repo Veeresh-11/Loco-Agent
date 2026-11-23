@@ -1,11 +1,11 @@
 //! Linux-only, workspace-root anchored snapshot acquisition using openat2.
 //! Fail closed when the syscall or required resolution flags are unavailable.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Read};
 use std::path::{Path, PathBuf};
 
-use rustix::fs::{openat2, Mode, OFlags, ResolveFlags};
+use rustix::fs::{openat2, Mode, OFlags, ResolveFlags, CWD};
 use rustix::fd::OwnedFd;
 
 use crate::snapshot_payload::{
@@ -31,6 +31,14 @@ fn metadata_matches(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bo
         && before.ctime_nsec() == after.ctime_nsec()
 }
 
+fn same_directory_identity(expected: &std::fs::Metadata, opened: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    expected.is_dir()
+        && opened.is_dir()
+        && expected.dev() == opened.dev()
+        && expected.ino() == opened.ino()
+}
+
 pub struct LinuxWorkspaceSnapshotAdapter {
     root: File,
     canonical_root: PathBuf,
@@ -38,16 +46,38 @@ pub struct LinuxWorkspaceSnapshotAdapter {
 }
 
 impl LinuxWorkspaceSnapshotAdapter {
-    /// Canonicalize and open the root once; future captures use this directory handle.
+    /// Securely acquire and retain the workspace root directory handle.
+    ///
+    /// Symlink components in the supplied root path are rejected. The handle is
+    /// opened with openat2 and no-symlink resolution; the path metadata check
+    /// binds the diagnostic canonical path to the directory actually opened.
     pub fn new(root: impl AsRef<Path>, workspace_id: impl Into<String>) -> Result<Self, LinuxSnapshotAdapterError> {
-        let canonical_root = std::fs::canonicalize(root).map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?;
-        let root = OpenOptions::new().read(true).open(&canonical_root)
-            .map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?;
-        if !root.metadata().map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?.is_dir() {
+        let root_path = root.as_ref();
+        let root_fd = openat2(
+            &CWD,
+            root_path,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+        ).map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?;
+        let root = File::from(root_fd);
+        let opened_metadata = root.metadata().map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?;
+        if !opened_metadata.is_dir() {
             return Err(LinuxSnapshotAdapterError::InvalidRoot);
         }
+
+        let canonical_root = std::fs::canonicalize(root_path)
+            .map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?;
+        let path_metadata = std::fs::metadata(&canonical_root)
+            .map_err(|_| LinuxSnapshotAdapterError::InvalidRoot)?;
+        if !same_directory_identity(&opened_metadata, &path_metadata) {
+            return Err(LinuxSnapshotAdapterError::InvalidRoot);
+        }
+
         let workspace_id = workspace_id.into();
-        if workspace_id.trim().is_empty() { return Err(LinuxSnapshotAdapterError::InvalidRoot); }
+        if workspace_id.trim().is_empty() {
+            return Err(LinuxSnapshotAdapterError::InvalidRoot);
+        }
         Ok(Self { root, canonical_root, workspace_id })
     }
 
@@ -166,6 +196,48 @@ mod tests {
         assert!(successful_captures > 0, "stress loop never produced a successful capture");
     }
 
+
+    #[test]
+    fn rejects_symlinked_workspace_root() {
+        let parent = tempfile::tempdir().unwrap();
+        let actual = tempfile::tempdir().unwrap();
+        let link = parent.path().join("workspace-link");
+        symlink(actual.path(), &link).unwrap();
+        assert!(matches!(
+            LinuxWorkspaceSnapshotAdapter::new(&link, "workspace"),
+            Err(LinuxSnapshotAdapterError::InvalidRoot)
+        ));
+    }
+
+    #[test]
+    fn rejects_non_directory_workspace_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("not-a-directory");
+        std::fs::write(&file, b"file").unwrap();
+        assert!(matches!(
+            LinuxWorkspaceSnapshotAdapter::new(&file, "workspace"),
+            Err(LinuxSnapshotAdapterError::InvalidRoot)
+        ));
+    }
+
+    #[test]
+    fn retained_root_handle_survives_path_replacement() {
+        let parent = tempfile::tempdir().unwrap();
+        let workspace = parent.path().join("workspace");
+        let moved_workspace = parent.path().join("workspace-moved");
+        let outside = parent.path().join("outside");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(workspace.join("target.txt"), b"inside").unwrap();
+        std::fs::write(outside.join("target.txt"), b"outside").unwrap();
+
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(&workspace, "workspace").unwrap();
+        std::fs::rename(&workspace, &moved_workspace).unwrap();
+        symlink(&outside, &workspace).unwrap();
+
+        let captured = adapter.capture(&SnapshotCaptureRequest::new("target.txt", 100).unwrap()).unwrap();
+        assert_eq!(captured.bytes(), b"inside");
+    }
 
     #[test]
     fn captures_regular_file_and_empty_file() {
