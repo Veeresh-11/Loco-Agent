@@ -121,6 +121,33 @@ mod tests {
   ).is_ok());
  }
 
+ #[test]
+ #[ignore = "requires a real nested APFS volume mounted by the macOS CI workflow"]
+ fn rejects_nested_apfs_volume_mount(){
+  use std::os::unix::fs::MetadataExt;
+  let workspace=PathBuf::from(std::env::var("LOCO_MACOS_MOUNT_WORKSPACE")
+   .expect("macOS mount fixture workflow must set LOCO_MACOS_MOUNT_WORKSPACE"));
+  let mounted=workspace.join("mounted");
+  let root=File::open(&workspace).unwrap();
+  let volume=File::open(&mounted).unwrap();
+  assert_eq!(filesystem_name(&root).unwrap(),"apfs");
+  assert_eq!(filesystem_name(&volume).unwrap(),"apfs");
+  assert_ne!(
+   root.metadata().unwrap().dev(),
+   volume.metadata().unwrap().dev(),
+   "fixture must be a distinct mounted APFS volume"
+  );
+  std::fs::write(mounted.join("probe.txt"),b"mounted-volume-sentinel").unwrap();
+  let adapter=MacOsWorkspaceSnapshotAdapter::new(
+   std::fs::canonicalize(&workspace).unwrap(),"workspace"
+  ).unwrap();
+  assert_eq!(
+   adapter.capture(&SnapshotCaptureRequest::new("mounted/probe.txt",128).unwrap()),
+   Err(SnapshotPayloadError::AcquisitionFailed),
+   "capture must reject traversal into a separately mounted APFS volume"
+  );
+ }
+
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();
   let a=MacOsWorkspaceSnapshotAdapter::new(std::fs::canonicalize(d.path()).unwrap(),"workspace").unwrap();
