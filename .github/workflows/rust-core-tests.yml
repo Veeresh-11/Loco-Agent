@@ -86,7 +86,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $workspace = Join-Path $env:RUNNER_TEMP 'loco-windows-workspace'
-          $mountpoint = Join-Path $workspace 'mounted'
+          $mountpoint = (Join-Path $workspace 'mounted') + '\'
           $vhd = Join-Path $env:RUNNER_TEMP 'loco-ntfs-mount-test.vhdx'
           $scriptPath = Join-Path $env:RUNNER_TEMP 'loco-ntfs-detach.txt'
           if (Test-Path $vhd) {
@@ -100,16 +100,14 @@ jobs:
             $detachOutput | Write-Host
             if ($LASTEXITCODE -ne 0) { throw 'diskpart failed to detach the secondary VHDX' }
           }
-          $mountInfo = & mountvol $mountpoint /L 2>$null
-          if ($LASTEXITCODE -eq 0 -and $mountInfo) {
-            & mountvol $mountpoint /D
-          }
+          & mountvol $mountpoint /D
           $remainingMount = & mountvol $mountpoint /L 2>$null
           if ($LASTEXITCODE -eq 0 -and $remainingMount) {
             throw 'secondary NTFS volume mountpoint remains; refusing to delete its directory'
           }
           if (Test-Path $workspace) { Remove-Item -Recurse -Force $workspace }
           if (Test-Path $vhd) { Remove-Item -Force $vhd }
+          exit 0
       - name: Verify nested APFS mount boundary
         if: runner.os == 'macOS'
         run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_nested_apfs_volume_mount
