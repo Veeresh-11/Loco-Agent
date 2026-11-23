@@ -10,7 +10,7 @@ Use a workspace directory descriptor as trust anchor. Acquire files relative to 
 - RESOLVE_BENEATH: prohibit resolution escaping the supplied directory descriptor.
 - RESOLVE_NO_SYMLINKS: reject symlink components.
 - RESOLVE_NO_MAGICLINKS: reject proc-style magic links.
-- Consider RESOLVE_NO_XDEV as an explicit policy choice; it rejects mount crossings (including bind mounts) and may break legitimate workspace layouts.
+- Descendant opens now require RESOLVE_NO_XDEV. This is a strict policy: reject every mount crossing, including bind mounts, even when the mounted subtree is on the same filesystem. Root acquisition itself does not use NO_XDEV, so a workspace root located on a separate mounted filesystem can still be admitted. Nested mounted dependencies/source trees are intentionally unsupported until a separately reviewed trusted-mount policy exists.
 
 Open read-only and close-on-exec. Never fall back to path-based std::fs::File::open if openat2 is unavailable. Treat ENOSYS, unsupported flags, EAGAIN, and resolution failures as explicit errors; retries must be bounded.
 
@@ -32,7 +32,7 @@ Open read-only and close-on-exec. Never fall back to path-based std::fs::File::o
 - Concurrent path swap stress test.
 - Hard-link policy documented and tested.
 - Kernel lacking openat2 or syscall blocked: fail closed.
-- Mount-crossing behavior if NO_XDEV selected.
+- A real bind-mount descendant test (runs only when the test host has mount privileges); a privileged Linux VM must execute it before claiming native coverage.\n- A real distinct-filesystem mount crossing test on a privileged Linux VM.
 - Identity from opened descriptor; digest from captured bytes.
 
 ## Implementation gate

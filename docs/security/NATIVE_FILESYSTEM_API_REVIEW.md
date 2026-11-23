@@ -15,19 +15,17 @@ The adapters use the right general direction: retain a root directory handle, re
 
 ## Findings
 
-### F-01 — Linux mount crossing is currently permitted [High: policy decision required]
+### F-01 — Linux descendant mount crossings are rejected [Implementation added; native test gate remains]
 
-The Linux root acquisition uses `NO_SYMLINKS | NO_MAGICLINKS`; descendant capture uses `BENEATH | NO_SYMLINKS | NO_MAGICLINKS`. Neither call sets `RESOLVE_NO_XDEV`. Therefore the current code does not reject mount-point or bind-mount crossings during resolution.
+Linux descendant capture now sets `RESOLVE_NO_XDEV` in addition to `BENEATH | NO_SYMLINKS | NO_MAGICLINKS`. The policy is intentionally strict: **all descendant mount crossings are denied, including bind mounts**, even when the mounted subtree resides on the same underlying filesystem. This aligns the Linux adapter with the macOS device-boundary and Windows volume-boundary intent and avoids silently treating a mounted subtree as ordinary workspace content.
 
-The macOS adapter rejects descendant objects whose `st_dev` differs from the workspace root; the Windows adapter checks the volume serial against the retained volume root. This makes the current cross-platform policy inconsistent.
+The workspace root itself is acquired without `NO_XDEV`, so a workspace whose root directory resides on a separate mounted filesystem can still be admitted. The restriction applies to resolution below the retained root handle.
 
-**Required decision:** explicitly choose one of:
-1. Reject all descendant mount crossings on Linux by adding `RESOLVE_NO_XDEV`, with tests and documented bind-mount compatibility impact; or
-2. Permit selected mounted subtrees and define a trusted mount-admission policy that is equivalent across platforms.
+Compatibility cost: workspaces that intentionally include nested mounts or bind-mounted dependency/source directories will receive fail-closed acquisition errors for paths beneath those mounts. Users must choose a workspace root that contains the desired files on one mount, or a future separately reviewed trusted-mount admission design must replace this strict policy. No path-based fallback is permitted.
 
-Do not add `NO_XDEV` blindly: Linux documentation notes it rejects bind mounts too, which are common in containerized and developer environments. Add tests for a real mount and bind mount on a privileged Linux runner/VM before claiming coverage.
+A Linux test now attempts to create a real bind mount beneath the workspace and verifies capture fails closed. It runs the assertion when the runner has mount privileges; hosted unprivileged runners report a permission-based skip. **A privileged Linux VM test remains required before claiming the real bind-mount behavior has been exercised.** A real distinct-filesystem mount test is also still required.
 
-The `openat2` API was introduced in Linux 5.6. The current adapter intentionally has no path-based fallback; keep that fail-closed behavior and document the minimum kernel requirement clearly.
+The openat2 API remains Linux 5.6+; unsupported syscall/flag behavior continues to fail closed. Do not add a fallback.
 
 ### F-02 — Linux captured byte count is not explicitly compared with the initial file size [Medium]
 
