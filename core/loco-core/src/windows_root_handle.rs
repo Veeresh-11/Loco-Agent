@@ -6,7 +6,6 @@
 
 use std::fs::File;
 use std::mem::{size_of, zeroed};
-use std::os::windows::fs::MetadataExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::ptr::{null, null_mut};
 
@@ -51,6 +50,26 @@ struct ObjectAttributes {
 }
 
 #[repr(C)]
+struct FileTime {
+    low_date_time: u32,
+    high_date_time: u32,
+}
+
+#[repr(C)]
+struct ByHandleFileInformation {
+    file_attributes: u32,
+    creation_time: FileTime,
+    last_access_time: FileTime,
+    last_write_time: FileTime,
+    volume_serial_number: u32,
+    file_size_high: u32,
+    file_size_low: u32,
+    number_of_links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+#[repr(C)]
 union IoStatusValue {
     status: i32,
     pointer: *mut std::ffi::c_void,
@@ -60,6 +79,14 @@ union IoStatusValue {
 struct IoStatusBlock {
     value: IoStatusValue,
     information: usize,
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetFileInformationByHandle(
+        file_handle: HANDLE,
+        information: *mut ByHandleFileInformation,
+    ) -> i32;
 }
 
 #[link(name = "ntdll")]
@@ -267,15 +294,28 @@ fn checked_directory_identity(
     expected_volume: Option<u32>,
 ) -> Result<WindowsFileIdentity, WindowsRootError> {
     let metadata = file.metadata().map_err(|_| WindowsRootError::MetadataUnavailable)?;
-    let attributes = metadata.file_attributes();
-    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Err(WindowsRootError::ReparsePointRejected);
-    }
-    if !metadata.is_dir() || attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+    if !metadata.is_dir() {
         return Err(WindowsRootError::NotDirectory);
     }
-    let volume_serial = metadata.volume_serial_number().ok_or(WindowsRootError::MetadataUnavailable)?;
-    let file_index = metadata.file_index().ok_or(WindowsRootError::MetadataUnavailable)?;
+
+    let mut information: ByHandleFileInformation = unsafe { zeroed() };
+    // SAFETY: file owns a live Windows handle and information is writable for
+    // the exact BY_HANDLE_FILE_INFORMATION-compatible layout declared above.
+    let ok = unsafe {
+        GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut information)
+    };
+    if ok == 0 {
+        return Err(WindowsRootError::MetadataUnavailable);
+    }
+    if information.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(WindowsRootError::ReparsePointRejected);
+    }
+    if information.file_attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err(WindowsRootError::NotDirectory);
+    }
+    let volume_serial = information.volume_serial_number;
+    let file_index = ((information.file_index_high as u64) << 32)
+        | information.file_index_low as u64;
     if expected_volume.is_some_and(|expected| expected != volume_serial) {
         return Err(WindowsRootError::VolumeIdentityChanged);
     }
@@ -385,9 +425,9 @@ mod tests {
         assert!(std::fs::rename(&workspace, parent.path().join("workspace-moved")).is_err(),
             "the retained directory handle must deny delete-sharing needed for rename");
         let child = pinned.open_child_directory("child").unwrap();
-        let expected = std::fs::metadata(workspace.join("child")).unwrap();
-        assert_eq!(child.identity().volume_serial, expected.volume_serial_number().unwrap());
-        assert_eq!(child.identity().file_index, expected.file_index().unwrap());
+        let child_again = pinned.open_child_directory("child").unwrap();
+        assert!(child.is_directory());
+        assert_eq!(child.identity(), child_again.identity());
     }
 
     #[test]
