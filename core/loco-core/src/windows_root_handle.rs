@@ -431,7 +431,7 @@ impl crate::snapshot_payload::WorkspaceSnapshotAdapter for WindowsWorkspaceSnaps
                 .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
             let identity = checked_directory_identity(&child, Some(self.volume_serial))
                 .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
-            if identity.volume_serial != self.root.identity.volume_serial {
+            if identity.volume_serial != self.volume_serial {
                 return Err(SnapshotPayloadError::AcquisitionFailed);
             }
             parent = child;
