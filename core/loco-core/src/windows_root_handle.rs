@@ -858,4 +858,102 @@ mod tests {
         assert!(opened.is_directory());
         assert_eq!(opened.identity().volume_serial, root.identity().volume_serial);
     }
+
+    fn test_volume_root_for(path: &std::path::Path) -> String {
+        use std::os::windows::ffi::OsStringExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        };
+        let path_wide = to_wide_nul(path.to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let mut volume = vec![0u16; 128];
+        let ok = unsafe { GetVolumeNameForVolumeMountPointW(mount.as_ptr(), volume.as_mut_ptr(), volume.len() as u32) };
+        assert_ne!(ok, 0);
+        let end = volume.iter().position(|value| *value == 0).unwrap();
+        String::from_utf16(&volume[..end]).unwrap()
+    }
+
+    #[test]
+    fn captures_regular_and_empty_files_with_shared_snapshot_contract() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, WorkspaceSnapshotAdapter};
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("sample.txt"), b"bounded capture").unwrap();
+        std::fs::write(workspace.path().join("empty.txt"), b"").unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()), "windows-test-workspace"
+        ).unwrap();
+
+        let captured = adapter.capture(&SnapshotCaptureRequest::new("sample.txt", 128).unwrap()).unwrap();
+        assert_eq!(captured.bytes(), b"bounded capture");
+        assert_eq!(captured.snapshot().byte_length, 15);
+        assert_eq!(crate::snapshot_payload::validate_snapshot_payload(captured.snapshot(), captured.bytes()), Ok(()));
+
+        let empty = adapter.capture(&SnapshotCaptureRequest::new("empty.txt", 1).unwrap()).unwrap();
+        assert!(empty.bytes().is_empty());
+        assert_eq!(empty.snapshot().byte_length, 0);
+    }
+
+    #[test]
+    fn rejects_oversized_and_hard_linked_files() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("large.bin"), b"12345").unwrap();
+        std::fs::write(workspace.path().join("origin.bin"), b"linked").unwrap();
+        std::fs::hard_link(workspace.path().join("origin.bin"), workspace.path().join("alias.bin")).unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()), "windows-test-workspace"
+        ).unwrap();
+
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("large.bin", 4).unwrap()),
+            Err(SnapshotPayloadError::LimitExceeded)
+        ));
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("alias.bin", 64).unwrap()),
+            Err(SnapshotPayloadError::HardLinkNotAllowed)
+        ));
+    }
+
+    #[test]
+    fn rejects_directories_and_pins_open_file_against_rename() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, WorkspaceSnapshotAdapter};
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::create_dir(workspace.path().join("folder")).unwrap();
+        std::fs::write(workspace.path().join("stable.txt"), b"stable").unwrap();
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()), "windows-test-workspace"
+        ).unwrap();
+        assert!(adapter.capture(&SnapshotCaptureRequest::new("folder", 64).unwrap()).is_err());
+
+        let root_components = {
+            use std::path::Component;
+            let mount_path = {
+                use std::os::windows::ffi::OsStringExt;
+                use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
+                let wide = to_wide_nul(workspace.path().to_string_lossy().as_ref());
+                let mut mount = vec![0u16; 1024];
+                let ok = unsafe { GetVolumePathNameW(wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+                assert_ne!(ok, 0);
+                let end = mount.iter().position(|value| *value == 0).unwrap();
+                std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..end]))
+            };
+            workspace.path().strip_prefix(&mount_path).unwrap().components()
+                .filter_map(|part| match part {
+                    Component::Normal(value) => value.to_str().map(str::to_owned),
+                    _ => None,
+                }).collect::<Vec<_>>()
+        };
+        let root = WindowsWorkspaceRoot::open(&test_volume_root_for(workspace.path())).unwrap();
+        let refs: Vec<&str> = root_components.iter().map(String::as_str).collect();
+        let parent = root.open_directory_components(&refs).unwrap();
+        let pinned = open_relative_file(&parent.handle, "stable.txt").unwrap();
+        assert!(std::fs::rename(
+            workspace.path().join("stable.txt"),
+            workspace.path().join("moved.txt")
+        ).is_err(), "open file handle must deny delete sharing");
+        assert_eq!(pinned.byte_length(), 6);
+    }
+
 }
