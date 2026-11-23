@@ -4,8 +4,8 @@
 **Repository:** https://github.com/Veeresh-11/Loco-Agent  
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
-**Latest completed stack PR at snapshot:** #57 (CI passed; draft)  
-**Current follow-up branch:** `test/windows-symlink-reparse-coverage` (stacked on #57)
+**Latest completed stack PR at snapshot:** #59 (CI passed; draft)  
+**Current follow-up branch:** `test/windows-final-file-mutation-race` (stacked on #58)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 57 pull requests:
+At the snapshot date, the repository has 59 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#57 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#59 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **52 open PRs (#6–#57)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **54 open PRs (#6–#59)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #57, based on #56.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #59, based on #58.
 
 ### PR history and delivered scope
 
@@ -105,6 +105,8 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#55 — Linux intermediate-directory swap race test:** repeatedly renames an intermediate directory and replaces its pathname with an outside symlink. Capture must fail closed or return only the in-workspace bytes; the outside sentinel must never be captured. This is test-only and does not change adapter behavior.
 - **#56 — macOS intermediate-directory swap race test:** exercises descriptor-relative `openat(O_NOFOLLOW)` acquisition while an intermediate directory is repeatedly replaced with an outside symlink. Successful captures must contain only in-workspace bytes; fail-closed acquisition errors are accepted. Test-only, with no adapter behavior change.
 - **#57 — Windows intermediate junction replacement race tests:** verifies the snapshot adapter rejects an intermediate NTFS mount-point junction and races directory replacement with captures. Windows CI passed; the PR remains draft and is not merged.
+- **#58 — Windows symlink reparse-point coverage:** adds snapshot-adapter tests for intermediate directory symlinks and final-file symlinks. The tests require symlink creation to succeed rather than silently skipping; the Windows test job passed with the tests executed.
+- **#59 — Windows final-file mutation race:** races complete-content writes against snapshot capture. Successful captures must match one of the complete known payloads and validate the shared digest; fail-closed acquisition errors are accepted. The full Ubuntu/macOS/Windows Rust matrix and contract validation passed.
 
 ## 3. Current implementation maturity
 
@@ -175,17 +177,23 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 
 Pull request: [#59 — test(windows): cover final-file mutation during snapshot capture](https://github.com/Veeresh-11/Loco-Agent/pull/59) (open, draft)  
 Branch: `test/windows-final-file-mutation-race`  
-Base: PR #58 branch `test/windows-symlink-reparse-coverage`
+Base: PR #58 branch `test/windows-symlink-reparse-coverage`  
+Head: `40b3d3da84e3bace2f0484d2d378a2c748d54365`
 
-PR #58's previous head passed Rust Core Tests and Contract Validation on Ubuntu, macOS, and Windows. Its symlink test setup has since been tightened to fail if the Windows runner cannot create symbolic links; the updated head requires fresh CI before its result can be accepted.
+PR #58's stricter symlink setup is included in this branch's base and was exercised by the Windows runner: both intermediate-directory and final-file symlink tests completed successfully. The symlink tests now fail if link creation is denied, so a green Windows result cannot silently represent a permission-based skip.
 
-This follow-up adds a Windows-only final-file mutation contention test:
+PR #59 adds a Windows-only final-file mutation contention test:
 1. A writer repeatedly attempts to publish one of two known complete file contents.
 2. Snapshot capture runs concurrently against the same final path.
-3. A successful capture must contain exactly one complete known payload and validate against the shared digest contract; acquisition failures during sharing contention are acceptable.
+3. A successful capture must contain exactly one complete known payload and validate against the shared snapshot digest; acquisition failures during sharing contention are acceptable.
 4. The writer must complete at least one write, and a final capture must return one complete payload.
 
-The test exercises read-handle sharing and bounded snapshot behavior under concurrent mutation. It does not establish an atomic content snapshot across arbitrary filesystems or validate volume mount-point configurations. Test-only; no production adapter changes.
+Validation for PR #59 head:
+- Rust Core Tests run `45177587125`: Ubuntu, macOS, and Windows jobs passed. Windows ran 102 tests; the final-file mutation race and both symlink reparse tests passed.
+- Contract Validation run `45177586998`: passed.
+- PR remains open/draft and is not merged.
+
+The test exercises Windows read-handle sharing and bounded snapshot behavior under concurrent mutation. It does not establish an atomic content snapshot across arbitrary filesystems or validate volume mount-point configurations. Test-only; no production adapter changes.
 
 ## 6. Roadmap and remaining work
 
