@@ -309,3 +309,12 @@ Keep CI claims precise: compilation on a platform is not equivalent to execution
 7. The full dependency stack is reviewed and obsolete/superseded PRs are reconciled.
 
 Until then, preserve the existing TypeScript implementation and keep the new stack unmerged.
+
+
+## Follow-up update — 2026-11-23: macOS filesystem admission
+
+PR #67 exact-head commit `468a248f26b3a4c8c989739caa570db1ba7bf285` has now completed successfully: Rust Core Tests run `45182767243` passed on Ubuntu, Windows, and macOS; Contract Validation run `45182767334` passed. The Windows runner executed the NTFS admission test. This validates only the hosted Windows NTFS environment, not ReFS or other filesystems.
+
+The next macOS hardening change is being developed on `security/macos-apfs-filesystem-admission`, stacked on #67. The adapter queries filesystem type from the retained workspace-root descriptor using `fstatfs` and admits only `apfs`. A macOS-native test asserts that the CI temporary workspace is APFS and that the adapter admits it. Unsupported filesystem names and query errors fail closed. Descendant `st_dev` checks remain in place to reject cross-device traversal.
+
+This is an explicit APFS-only baseline, not a claim that HFS+, firmlinks, network/removable volumes, or every APFS mount arrangement has been validated. The exact-head macOS CI result must be checked before describing this change as tested. Next native validation remains: APFS volume/mount fixtures, firmlink behavior, and a supported/unsupported filesystem matrix where runners are available.
