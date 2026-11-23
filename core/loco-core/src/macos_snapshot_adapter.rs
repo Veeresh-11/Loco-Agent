@@ -21,6 +21,17 @@ fn filesystem_name(file:&File)->Result<String,MacOsSnapshotAdapterError>{
 }
 
 #[cfg(target_os="macos")]
+fn is_firmlink(file:&File)->Result<bool,MacOsSnapshotAdapterError>{
+ use std::os::fd::AsRawFd;
+ const SF_FIRMLINK:u32=0x0080_0000;
+ let mut stat:libc::stat=unsafe{std::mem::zeroed()};
+ if unsafe{libc::fstat(file.as_raw_fd(),&mut stat)}!=0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok((stat.st_flags as u32 & SF_FIRMLINK)!=0)
+}
+
+#[cfg(target_os="macos")]
 fn metadata_matches(a:&std::fs::Metadata,b:&std::fs::Metadata)->bool {
  use std::os::unix::fs::MetadataExt;
  a.dev()==b.dev() && a.ino()==b.ino() && a.len()==b.len() && a.nlink()==b.nlink()
@@ -28,10 +39,11 @@ fn metadata_matches(a:&std::fs::Metadata,b:&std::fs::Metadata)->bool {
  && a.ctime()==b.ctime() && a.ctime_nsec()==b.ctime_nsec()
 }
 
-fn open_dir(parent:&File,name:&str)->Result<File,MacOsSnapshotAdapterError>{
+fn open_dir(parent:&File,name:&str,reject_firmlink:bool)->Result<File,MacOsSnapshotAdapterError>{
  let fd=openat(parent,name,OFlags::RDONLY|OFlags::DIRECTORY|OFlags::CLOEXEC|OFlags::NOFOLLOW,Mode::empty())
   .map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
  let file=File::from(fd);
+ if reject_firmlink && is_firmlink(&file)? {return Err(MacOsSnapshotAdapterError::InvalidRoot)}
  if !file.metadata().map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?.is_dir(){return Err(MacOsSnapshotAdapterError::InvalidRoot)}
  Ok(file)
 }
@@ -55,7 +67,7 @@ impl MacOsWorkspaceSnapshotAdapter {
     Component::Normal(name)=>{
      let name=name.to_str().ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
      if name.is_empty()||name=="."||name==".."{return Err(MacOsSnapshotAdapterError::InvalidRoot)}
-     current=open_dir(&current,name)?; canonical.push(name); seen=true;
+     current=open_dir(&current,name,false)?; canonical.push(name); seen=true;
     },
     _=>return Err(MacOsSnapshotAdapterError::InvalidRoot),
    }
@@ -81,7 +93,7 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
   for part in &parts[..parts.len()-1]{
    let fd=openat(&parent,*part,OFlags::RDONLY|OFlags::DIRECTORY|OFlags::CLOEXEC|OFlags::NOFOLLOW,Mode::empty())
     .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
-   let child=File::from(fd); let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+   let child=File::from(fd); if is_firmlink(&child).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? {return Err(SnapshotPayloadError::AcquisitionFailed)} let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    if !m.is_dir()||m.dev()!=self.root_device{return Err(SnapshotPayloadError::AcquisitionFailed)}
    parent=child;
   }
@@ -162,14 +174,12 @@ mod tests {
   std::fs::write(&target,b"data-volume-sentinel").unwrap();
 
   let root=File::open("/").unwrap();
-  let root_device=root.metadata().unwrap().dev();
   let home_handle=File::open(&home).unwrap();
+  let users_handle=File::open("/Users").unwrap();
   assert_eq!(filesystem_name(&root).unwrap(),"apfs");
   assert_eq!(filesystem_name(&home_handle).unwrap(),"apfs");
-  assert_ne!(
-   root_device,home_handle.metadata().unwrap().dev(),
-   "/Users firmlink must resolve to a distinct APFS Data-volume device"
-  );
+  assert!(is_firmlink(&users_handle).unwrap(),
+   "the opened /Users entry must retain SF_FIRMLINK in handle metadata");
 
   let relative=target.strip_prefix("/").unwrap().to_string_lossy().replace('\\',"/");
   let adapter=MacOsWorkspaceSnapshotAdapter{
