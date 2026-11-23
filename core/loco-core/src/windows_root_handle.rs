@@ -1063,6 +1063,74 @@ mod tests {
         ), "snapshot capture must reject a final-file symlink rather than read its target");
     }
 
+
+    #[test]
+    fn final_file_mutation_race_never_captures_partial_content() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const CONTENT_A: &[u8] = b"complete-original-content-aaaaaaaaaaaaaaaa";
+        const CONTENT_B: &[u8] = b"complete-replacement-content-bbbbbbbbbbbb";
+
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("mutable.txt"), CONTENT_A).unwrap();
+        let adapter = Arc::new(WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-final-mutation-workspace",
+        ).unwrap());
+
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_path = workspace.path().join("mutable.txt");
+        let writer_barrier = barrier.clone();
+        let writer = thread::spawn(move || {
+            writer_barrier.wait();
+            let mut successful_writes = 0usize;
+            for index in 0..300 {
+                let content = if index % 2 == 0 { CONTENT_B } else { CONTENT_A };
+                // A successful capture holds a read-only handle that denies
+                // write sharing. Contending writes may therefore fail; any
+                // successful write must publish one complete known payload.
+                if std::fs::write(&writer_path, content).is_ok() {
+                    successful_writes += 1;
+                }
+                thread::yield_now();
+            }
+            successful_writes
+        });
+
+        barrier.wait();
+        let request = SnapshotCaptureRequest::new("mutable.txt", 128).unwrap();
+        for _ in 0..600 {
+            match adapter.capture(&request) {
+                Ok(captured) => {
+                    assert!(
+                        captured.bytes() == CONTENT_A || captured.bytes() == CONTENT_B,
+                        "capture returned partial or unexpected bytes during concurrent mutation"
+                    );
+                    assert_eq!(
+                        crate::snapshot_payload::validate_snapshot_payload(
+                            captured.snapshot(),
+                            captured.bytes()
+                        ),
+                        Ok(())
+                    );
+                }
+                Err(SnapshotPayloadError::AcquisitionFailed) => {}
+                Err(other) => panic!("unexpected snapshot error during final-file mutation: {other:?}"),
+            }
+        }
+
+        let successful_writes = writer.join().unwrap();
+        assert!(successful_writes > 0, "mutation writer did not complete any writes");
+        let final_capture = adapter.capture(&request).unwrap();
+        assert!(
+            final_capture.bytes() == CONTENT_A || final_capture.bytes() == CONTENT_B,
+            "final capture must contain one complete published payload"
+        );
+    }
+
     #[test]
     fn intermediate_junction_replacement_race_never_captures_outside_bytes() {
         use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
