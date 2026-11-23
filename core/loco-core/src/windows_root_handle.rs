@@ -1015,6 +1015,54 @@ mod tests {
         ), "snapshot capture must not traverse an intermediate mount-point junction");
     }
 
+
+    #[test]
+    fn snapshot_adapter_rejects_intermediate_directory_symlink_reparse_tag() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+        use std::os::windows::fs::symlink_dir;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("target.txt"), b"OUTSIDE-SENTINEL").unwrap();
+        symlink_dir(outside.path(), workspace.path().join("linked"))
+            .expect("Windows CI must permit directory symlink creation for this adversarial test");
+
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-symlink-workspace",
+        ).unwrap();
+
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("linked/target.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        ), "snapshot capture must reject an intermediate directory symlink");
+    }
+
+    #[test]
+    fn snapshot_adapter_rejects_final_file_symlink_reparse_tag() {
+        use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};
+        use std::os::windows::fs::symlink_file;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_file = outside.path().join("target.txt");
+        std::fs::write(&outside_file, b"OUTSIDE-SENTINEL").unwrap();
+        symlink_file(&outside_file, workspace.path().join("linked.txt"))
+            .expect("Windows CI must permit file symlink creation for this adversarial test");
+
+        let adapter = WindowsWorkspaceSnapshotAdapter::new(
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-final-symlink-workspace",
+        ).unwrap();
+
+        assert!(matches!(
+            adapter.capture(&SnapshotCaptureRequest::new("linked.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed)
+        ), "snapshot capture must reject a final-file symlink rather than read its target");
+    }
+
     #[test]
     fn intermediate_junction_replacement_race_never_captures_outside_bytes() {
         use crate::snapshot_payload::{SnapshotCaptureRequest, SnapshotPayloadError, WorkspaceSnapshotAdapter};

@@ -4,8 +4,8 @@
 **Repository:** https://github.com/Veeresh-11/Loco-Agent  
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
-**Latest completed stack PR at snapshot:** #56  
-**Current follow-up branch:** `test/windows-intermediate-reparse-race` (stacked on #56)
+**Latest completed stack PR at snapshot:** #57 (CI passed; draft)  
+**Current follow-up branch:** `test/windows-symlink-reparse-coverage` (stacked on #57)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 56 pull requests:
+At the snapshot date, the repository has 57 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#56 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#57 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **51 open PRs (#6–#56)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **52 open PRs (#6–#57)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #56, based on #55.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #57, based on #56.
 
 ### PR history and delivered scope
 
@@ -104,6 +104,7 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#54 — macOS handle-relative snapshot adapter:** adds root acquisition from `/` and descendant traversal with descriptor-relative `openat`, `O_NOFOLLOW`, device checks, regular-file/hard-link/size checks, bounded reads, and best-effort metadata comparison.
 - **#55 — Linux intermediate-directory swap race test:** repeatedly renames an intermediate directory and replaces its pathname with an outside symlink. Capture must fail closed or return only the in-workspace bytes; the outside sentinel must never be captured. This is test-only and does not change adapter behavior.
 - **#56 — macOS intermediate-directory swap race test:** exercises descriptor-relative `openat(O_NOFOLLOW)` acquisition while an intermediate directory is repeatedly replaced with an outside symlink. Successful captures must contain only in-workspace bytes; fail-closed acquisition errors are accepted. Test-only, with no adapter behavior change.
+- **#57 — Windows intermediate junction replacement race tests:** verifies the snapshot adapter rejects an intermediate NTFS mount-point junction and races directory replacement with captures. Windows CI passed; the PR remains draft and is not merged.
 
 ## 3. Current implementation maturity
 
@@ -170,20 +171,19 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: Windows intermediate junction replacement race
+## 5. Current follow-up task: Windows symlink reparse-tag coverage
 
-Pull request: [#57 — test(windows): cover intermediate junction replacement races](https://github.com/Veeresh-11/Loco-Agent/pull/57) (open, draft)  
-Branch: `test/windows-intermediate-reparse-race`  
-Base: PR #56 branch `test/macos-intermediate-directory-swap-race`  
-Base commit at branch creation: `459c3f723a88da3fd34f858233ef50bff50f44d7`
+Pull request: pending creation — `test/windows-symlink-reparse-coverage` (stacked on PR #57)  
+Base commit: `c6d74d0319acc237b28ae3bf1e4bec3a499b5d4d`
 
-This follow-up adds two Windows-only adversarial tests to `windows_root_handle.rs`:
-1. Verify the snapshot adapter rejects an intermediate NTFS mount-point junction rather than following it to an outside target.
-2. Race repeated attempts to rename an intermediate workspace directory and replace its pathname with an NTFS junction while bounded snapshots are captured.
-3. Require successful captures to contain only the original in-workspace bytes and validate the shared snapshot digest. Acquisition failures are accepted during contention; outside sentinel bytes are never acceptable.
-4. Require the writer to complete at least one directory replacement and verify the original target is readable after the race ends.
+PR #57's Windows-only intermediate NTFS junction tests passed on `windows-latest`, alongside the macOS/Ubuntu Rust matrix and contract validation. The PR remains open/draft.
 
-The test is deliberately test-only. It does not change Windows adapter behavior or add writes, approvals, or execution. It exercises the existing retained-handle and no-reparse boundary. It does not prove universal Windows/filesystem behavior or an atomic content snapshot. CI must execute the new tests on a Windows runner; Linux/macOS jobs provide only their platform's existing coverage.
+This follow-up adds two Windows-only snapshot-adapter tests:
+1. Reject an intermediate directory symbolic link before it can redirect traversal to an outside target.
+2. Reject a final-file symbolic link rather than opening and reading its outside target.
+
+These exercise the symlink reparse-point path separately from the NTFS mount-point junction path covered by PR #57. Tests use the standard Windows symlink creation APIs and return early when the runner does not grant symlink creation rights; CI logs and runner policy must therefore be checked before claiming the symlink test bodies actually exercised the attack. No production adapter behavior changes.
+
 ## 6. Roadmap and remaining work
 
 Recommended order; keep each item in a coherent, reviewable PR.
