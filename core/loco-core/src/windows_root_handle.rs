@@ -8,6 +8,11 @@ use std::fs::File;
 use std::mem::{size_of, zeroed};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::ptr::{null, null_mut};
+
+// The manual NT native declarations below are currently validated for Windows x64 only.
+// Other architectures must not compile against unverified structure layouts/calling conventions.
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
+compile_error!("LOCO Windows native filesystem adapter currently supports x86_64 only");
 use std::io::Read;
 
 use windows_sys::Win32::Foundation::HANDLE;
@@ -107,6 +112,54 @@ extern "system" {
         ea_length: u32,
     ) -> i32;
 }
+
+
+// Compile-time ABI gate for the manually declared Windows SDK/NT structures.
+// Values are from the Windows x64 ABI; keep these assertions adjacent to the
+// declarations so a layout change cannot silently alter NtCreateFile calls.
+const _: () = {
+    use std::mem::{align_of, offset_of, size_of};
+
+    assert!(size_of::<UnicodeString>() == 16);
+    assert!(align_of::<UnicodeString>() == 8);
+    assert!(offset_of!(UnicodeString, length) == 0);
+    assert!(offset_of!(UnicodeString, maximum_length) == 2);
+    assert!(offset_of!(UnicodeString, buffer) == 8);
+
+    assert!(size_of::<ObjectAttributes>() == 48);
+    assert!(align_of::<ObjectAttributes>() == 8);
+    assert!(offset_of!(ObjectAttributes, length) == 0);
+    assert!(offset_of!(ObjectAttributes, root_directory) == 8);
+    assert!(offset_of!(ObjectAttributes, object_name) == 16);
+    assert!(offset_of!(ObjectAttributes, attributes) == 24);
+    assert!(offset_of!(ObjectAttributes, security_descriptor) == 32);
+    assert!(offset_of!(ObjectAttributes, security_quality_of_service) == 40);
+
+    assert!(size_of::<FileTime>() == 8);
+    assert!(align_of::<FileTime>() == 4);
+    assert!(offset_of!(FileTime, low_date_time) == 0);
+    assert!(offset_of!(FileTime, high_date_time) == 4);
+
+    assert!(size_of::<ByHandleFileInformation>() == 52);
+    assert!(align_of::<ByHandleFileInformation>() == 4);
+    assert!(offset_of!(ByHandleFileInformation, file_attributes) == 0);
+    assert!(offset_of!(ByHandleFileInformation, creation_time) == 4);
+    assert!(offset_of!(ByHandleFileInformation, last_access_time) == 12);
+    assert!(offset_of!(ByHandleFileInformation, last_write_time) == 20);
+    assert!(offset_of!(ByHandleFileInformation, volume_serial_number) == 28);
+    assert!(offset_of!(ByHandleFileInformation, file_size_high) == 32);
+    assert!(offset_of!(ByHandleFileInformation, file_size_low) == 36);
+    assert!(offset_of!(ByHandleFileInformation, number_of_links) == 40);
+    assert!(offset_of!(ByHandleFileInformation, file_index_high) == 44);
+    assert!(offset_of!(ByHandleFileInformation, file_index_low) == 48);
+
+    assert!(size_of::<IoStatusValue>() == 8);
+    assert!(align_of::<IoStatusValue>() == 8);
+    assert!(offset_of!(IoStatusBlock, value) == 0);
+    assert!(offset_of!(IoStatusBlock, information) == 8);
+    assert!(size_of::<IoStatusBlock>() == 16);
+    assert!(align_of::<IoStatusBlock>() == 8);
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowsRootError {
