@@ -31,6 +31,10 @@ fn metadata_matches(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bo
         && before.ctime_nsec() == after.ctime_nsec()
 }
 
+fn captured_length_matches(expected: u64, actual: usize) -> bool {
+    u64::try_from(actual).map(|length| length == expected).unwrap_or(false)
+}
+
 fn same_directory_identity(expected: &std::fs::Metadata, opened: &std::fs::Metadata) -> bool {
     use std::os::unix::fs::MetadataExt;
     expected.is_dir()
@@ -108,6 +112,9 @@ impl WorkspaceSnapshotAdapter for LinuxWorkspaceSnapshotAdapter {
         (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes)
             .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
         if bytes.len() > limit { return Err(SnapshotPayloadError::LimitExceeded); }
+        if !captured_length_matches(metadata.len(), bytes.len()) {
+            return Err(SnapshotPayloadError::AcquisitionFailed);
+        }
 
         // Best-effort mutation detection: compare handle metadata before/after
         // the bounded read. The captured-byte digest remains authoritative;
@@ -128,6 +135,14 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
     use crate::snapshot_payload::SnapshotCaptureRequest;
+
+    #[test]
+    fn captured_length_must_match_initial_file_size() {
+        assert!(captured_length_matches(0, 0));
+        assert!(captured_length_matches(17, 17));
+        assert!(!captured_length_matches(17, 16), "short reads must fail closed");
+        assert!(!captured_length_matches(16, 17), "unexpected extra bytes must fail closed");
+    }
 
     #[test]
     fn metadata_comparison_detects_content_change() {
