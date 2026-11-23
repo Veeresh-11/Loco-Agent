@@ -120,11 +120,7 @@ pub enum WindowsRootError {
     VolumeIdentityChanged,
     MetadataUnavailable,
     NotRegularFile,
-    HardLinkNotAllowed,
-    LimitExceeded,
     InvalidWorkspaceId,
-    ReadFailed,
-    FileChanged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
