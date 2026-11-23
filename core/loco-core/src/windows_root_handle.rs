@@ -370,7 +370,8 @@ fn invalid_handle_value() -> HANDLE {
 /// Read-only Windows adapter that captures regular files through retained
 /// volume/workspace directory handles and validates the shared snapshot payload.
 pub struct WindowsWorkspaceSnapshotAdapter {
-    root: WindowsWorkspaceRoot,
+    workspace: WindowsDirectoryHandle,
+    volume_serial: u32,
     workspace_id: String,
 }
 
@@ -390,12 +391,25 @@ pub struct WindowsFileHandle {
 }
 
 impl WindowsWorkspaceSnapshotAdapter {
-    pub fn new(volume_guid_root: &str, workspace_id: impl Into<String>) -> Result<Self, WindowsRootError> {
+    /// Binds the adapter to an explicit workspace path relative to the trusted
+    /// volume-GUID root. Every component is opened and retained by handle.
+    pub fn new(
+        volume_guid_root: &str,
+        workspace_relative_path: &str,
+        workspace_id: impl Into<String>,
+    ) -> Result<Self, WindowsRootError> {
         let workspace_id = workspace_id.into();
         if workspace_id.trim().is_empty() {
             return Err(WindowsRootError::InvalidWorkspaceId);
         }
-        Ok(Self { root: WindowsWorkspaceRoot::open(volume_guid_root)?, workspace_id })
+        let components: Vec<&str> = workspace_relative_path.split('/').collect();
+        if components.is_empty() || components.iter().any(|part| validate_component(part).is_err()) {
+            return Err(WindowsRootError::InvalidComponent);
+        }
+        let root = WindowsWorkspaceRoot::open(volume_guid_root)?;
+        let volume_serial = root.identity.volume_serial;
+        let workspace = root.open_directory_components(&components)?;
+        Ok(Self { workspace, volume_serial, workspace_id })
     }
 }
 
@@ -411,11 +425,11 @@ impl crate::snapshot_payload::WorkspaceSnapshotAdapter for WindowsWorkspaceSnaps
             return Err(SnapshotPayloadError::AcquisitionFailed);
         }
 
-        let mut parent = self.root.root.try_clone().map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+        let mut parent = self.workspace.handle.try_clone().map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
         for component in &components[..components.len() - 1] {
             let child = open_relative_directory(&parent, component)
                 .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
-            let identity = checked_directory_identity(&child, Some(self.root.identity.volume_serial))
+            let identity = checked_directory_identity(&child, Some(self.volume_serial))
                 .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
             if identity.volume_serial != self.root.identity.volume_serial {
                 return Err(SnapshotPayloadError::AcquisitionFailed);
@@ -425,7 +439,7 @@ impl crate::snapshot_payload::WorkspaceSnapshotAdapter for WindowsWorkspaceSnaps
 
         let mut file = open_relative_file(&parent, components[components.len() - 1])
             .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
-        if file.metadata.identity.volume_serial != self.root.identity.volume_serial {
+        if file.metadata.identity.volume_serial != self.volume_serial {
             return Err(SnapshotPayloadError::AcquisitionFailed);
         }
         let before = file.metadata;
@@ -858,6 +872,21 @@ mod tests {
         assert_eq!(opened.identity().volume_serial, root.identity().volume_serial);
     }
 
+    fn test_workspace_relative_path(path: &std::path::Path) -> String {
+        use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
+        let path_wide = to_wide_nul(path.to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let end = mount.iter().position(|value| *value == 0).unwrap();
+        let mount_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..end]));
+        let relative = path.strip_prefix(&mount_path).unwrap();
+        relative.components().filter_map(|part| match part {
+            std::path::Component::Normal(value) => value.to_str().map(str::to_owned),
+            _ => None,
+        }).collect::<Vec<_>>().join("/")
+    }
+
     fn test_volume_root_for(path: &std::path::Path) -> String {
         use std::os::windows::ffi::OsStringExt;
         use windows_sys::Win32::Storage::FileSystem::{
@@ -881,7 +910,9 @@ mod tests {
         std::fs::write(workspace.path().join("sample.txt"), b"bounded capture").unwrap();
         std::fs::write(workspace.path().join("empty.txt"), b"").unwrap();
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
-            &test_volume_root_for(workspace.path()), "windows-test-workspace"
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-test-workspace"
         ).unwrap();
 
         let captured = adapter.capture(&SnapshotCaptureRequest::new("sample.txt", 128).unwrap()).unwrap();
@@ -902,7 +933,9 @@ mod tests {
         std::fs::write(workspace.path().join("origin.bin"), b"linked").unwrap();
         std::fs::hard_link(workspace.path().join("origin.bin"), workspace.path().join("alias.bin")).unwrap();
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
-            &test_volume_root_for(workspace.path()), "windows-test-workspace"
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-test-workspace"
         ).unwrap();
 
         assert!(matches!(
@@ -922,7 +955,9 @@ mod tests {
         std::fs::create_dir(workspace.path().join("folder")).unwrap();
         std::fs::write(workspace.path().join("stable.txt"), b"stable").unwrap();
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
-            &test_volume_root_for(workspace.path()), "windows-test-workspace"
+            &test_volume_root_for(workspace.path()),
+            &test_workspace_relative_path(workspace.path()),
+            "windows-test-workspace"
         ).unwrap();
         assert!(adapter.capture(&SnapshotCaptureRequest::new("folder", 64).unwrap()).is_err());
 
