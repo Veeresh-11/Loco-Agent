@@ -1425,7 +1425,10 @@ mod tests {
             &test_workspace_relative_path(&workspace),
             "windows-mounted-volume-boundary",
         );
-        let error = result.expect_err("the adapter must not admit a nested mounted volume");
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("the adapter must not admit a nested mounted volume"),
+        };
         assert!(
             matches!(
                 error,
