@@ -9,7 +9,7 @@ The Windows-only Rust module `windows_root_handle` currently provides:
 - Strict parsing of a canonical volume GUID root (`\\?\Volume{GUID}\`).
 - A fixed-volume-only admission check.
 - Initial root open through `CreateFileW` with directory semantics and open-reparse-point behavior.
-- Root metadata inspection from the opened handle; require a directory, reject reparse-point attributes, and capture volume serial + file index.
+- Root metadata inspection through GetFileInformationByHandle on the opened handle; require a directory, reject reparse-point attributes, and capture volume serial + file index.
 - One-component-at-a-time directory traversal through `NtCreateFile` using the retained parent handle as `OBJECT_ATTRIBUTES.RootDirectory`.
 - `OBJ_DONT_REPARSE` on each relative open, followed by handle metadata inspection and volume-identity comparison.
 - Share read/write but deny delete sharing while each directory handle is retained, so the prototype fails closed on concurrent rename/delete attempts.
@@ -21,8 +21,8 @@ The implementation intentionally exposes no file read, snapshot construction, pa
 
 1. The initial root is opened directly by a volume GUID root path. The selected workspace path is not passed to `CreateFileW`; it is decomposed and traversed from the retained volume-root handle.
 2. The relative-open implementation uses native `NtCreateFile` and a manually declared minimal FFI surface. Its structure layout, calling convention, access mask, and handle ownership must be reviewed for every supported Windows target.
-3. Microsoft documentation describes `RootDirectory` relative resolution and `OBJ_DONT_REPARSE`, but the user-mode `NtCreateFile` page has narrower wording for object attributes. The prototype therefore treats every non-success status as a hard failure and also checks returned-handle metadata. A Windows CI pass is measured compatibility evidence for that runner, not a universal contract across Windows versions, filesystems, or filter drivers.
-4. The prototype denies delete sharing on directory handles. This is intentionally conservative and can cause sharing violations or compatibility issues. Those outcomes are errors, not reasons to fall back.
+3. Microsoft documentation describes `RootDirectory` relative resolution and `OBJ_DONT_REPARSE`, but the user-mode `NtCreateFile` page has narrower wording for object attributes. The prototype therefore treats every non-success status as a hard failure and also checks returned-handle metadata. Handle identity is read from the stable BY_HANDLE_FILE_INFORMATION structure rather than nightly-only Rust MetadataExt identity accessors. A Windows CI pass is measured compatibility evidence for that runner, not a universal contract across Windows versions, filesystems, or filter drivers.
+4. The prototype allows ordinary sharing on the fixed volume-root handle, but denies delete sharing on traversed workspace directory handles. This is intentionally conservative and can cause sharing violations or compatibility issues. Those outcomes are errors, not reasons to fall back.
 5. Only local fixed volumes are admitted. Network, removable, and non-NTFS behavior is not claimed.
 6. The prototype has not yet opened a final regular file, enforced byte limits, hashed captured bytes, or compared file metadata before/after a read.
 
