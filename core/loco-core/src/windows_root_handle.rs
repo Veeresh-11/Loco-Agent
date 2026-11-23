@@ -1024,11 +1024,8 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         std::fs::write(outside.path().join("target.txt"), b"OUTSIDE-SENTINEL").unwrap();
-        if symlink_dir(outside.path(), workspace.path().join("linked")).is_err() {
-            eprintln!("SKIP: Windows runner denied directory symlink creation; attack path not exercised");
-            return;
-        }
-        eprintln!("EXERCISED: intermediate directory symlink reparse-point rejection");
+        symlink_dir(outside.path(), workspace.path().join("linked"))
+            .expect("Windows CI must permit directory symlink creation for this adversarial test");
 
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
             &test_volume_root_for(workspace.path()),
@@ -1051,11 +1048,8 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         let outside_file = outside.path().join("target.txt");
         std::fs::write(&outside_file, b"OUTSIDE-SENTINEL").unwrap();
-        if symlink_file(&outside_file, workspace.path().join("linked.txt")).is_err() {
-            eprintln!("SKIP: Windows runner denied file symlink creation; attack path not exercised");
-            return;
-        }
-        eprintln!("EXERCISED: final-file symlink reparse-point rejection");
+        symlink_file(&outside_file, workspace.path().join("linked.txt"))
+            .expect("Windows CI must permit file symlink creation for this adversarial test");
 
         let adapter = WindowsWorkspaceSnapshotAdapter::new(
             &test_volume_root_for(workspace.path()),
