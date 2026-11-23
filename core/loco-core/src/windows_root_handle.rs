@@ -391,6 +391,54 @@ mod tests {
     }
 
     #[test]
+    fn rejects_directory_symlink_when_creation_is_permitted() {
+        use std::os::windows::ffi::OsStringExt;
+        use std::os::windows::fs::symlink_dir;
+        use std::path::Component;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+        };
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let link = workspace.path().join("linked");
+        if symlink_dir(outside.path(), &link).is_err() {
+            // Some Windows runners do not grant symbolic-link creation rights.
+            return;
+        }
+
+        let path_wide = to_wide_nul(workspace.path().to_string_lossy().as_ref());
+        let mut mount = vec![0u16; 1024];
+        // SAFETY: buffers are writable and lengths are UTF-16 code-unit counts.
+        let ok = unsafe { GetVolumePathNameW(path_wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) };
+        assert_ne!(ok, 0);
+        let mount_end = mount.iter().position(|value| *value == 0).unwrap();
+        let mount_path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&mount[..mount_end]));
+        let mut volume = vec![0u16; 128];
+        // SAFETY: mount is NUL-terminated and volume is writable.
+        let ok = unsafe {
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), volume.as_mut_ptr(), volume.len() as u32)
+        };
+        assert_ne!(ok, 0);
+        let volume_end = volume.iter().position(|value| *value == 0).unwrap();
+        let volume_root = String::from_utf16(&volume[..volume_end]).unwrap();
+
+        let relative = workspace.path().strip_prefix(&mount_path).unwrap();
+        let mut components: Vec<String> = relative
+            .components()
+            .filter_map(|part| match part {
+                Component::Normal(value) => value.to_str().map(str::to_owned),
+                _ => None,
+            })
+            .collect();
+        components.push("linked".into());
+        let borrowed: Vec<&str> = components.iter().map(String::as_str).collect();
+        let root = WindowsWorkspaceRoot::open(&volume_root).unwrap();
+        assert!(root.open_directory_components(&borrowed).is_err(),
+            "directory reparse points must fail closed");
+    }
+
+    #[test]
     fn opens_current_temp_directory_from_its_volume_root() {
         use std::os::windows::ffi::OsStringExt;
         use std::path::Component;
