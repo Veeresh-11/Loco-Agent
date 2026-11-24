@@ -109,3 +109,32 @@ Version 1.0 contains only an opaque host-issued `workspaceId`, portable workspac
 **This is a shape/lexical contract only.** A workspace ID must later be resolved through a host-owned registry; a syntactically valid relative path is not proof of containment. The contract does not open or read files, and the Rust sidecar does not advertise this capability. The existing `workspace_fs.rs` helper remains explicitly a TOCTOU-vulnerable prototype and is not used as a production implementation.
 
 The next gate is cross-language conformance testing against shared JSON fixtures, then a platform-specific handle-relative acquisition design. No live task path or default behavior changes in this checkpoint.
+
+
+## Follow-up source audit — 2026-11-24
+
+The following additional paths were inspected after the original inventory. They clarify data flow and user-selected writes; they do not make the original inventory a complete transitive dependency audit.
+
+| Location | Operation | Classification | Boundary / follow-up |
+|---|---|---|---|
+| `src/extension.ts:activate / loco.runAgent` | Reads active editor document/selection through VS Code document APIs and passes its filesystem path plus selected/full document text into `runTask` | Workspace data disclosure and path handoff | The path is subsequently read again by `LOCOAgent.readFile`; editor text is also supplied as task data. Define explicit context-disclosure and size policy. Do not treat editor URI as a Rust workspace capability. |
+| `src/ui/webview/index.ts:resolveWebviewView` | Reads active editor selection/full document and passes path/text to `runTask` on chat submission | Workspace data disclosure and path handoff | Webview message supplies prompt only; extension host chooses editor context. Bound the text and make disclosure scope visible. |
+| `src/extension.ts:loco.exportHistory` | Serializes history and writes to a URI selected through VS Code save dialog using `workspace.fs.writeFile` | Explicit user-directed export, not an agent patch write | Keep separate from the privileged workspace write API. Validate export size and report errors; do not silently route this user-selected destination through an agent-controlled target. |
+| `src/utils/historyStore.ts` | Persists chat content in VS Code `globalState` | Extension-state persistence, not workspace filesystem access | Separate privacy/retention concern. The current entry-count cap is configurable; define a serialized-byte cap and redaction/retention policy. |
+| `src/utils/secrets.ts` | Stores provider API keys through VS Code `context.secrets` | Secret-storage API, not workspace filesystem access | Retain VS Code secret storage; never copy keys into task context, logs, or the approval database. |
+| `src/providers/providerManager.ts` and provider adapters | Sends composed prompt/context to selected local/cloud provider and may fall back to another provider | Network/process boundary and data disclosure | Provider routing/fallback is not a filesystem authority. Explicitly disclose which context can be sent to each provider; provider output remains untrusted. |
+
+### Confirmed TypeScript operation details
+
+- `LOCOAgent.runTask` performs retrieval, optional `readFile(filePath)`, and fixed Git metadata query before invoking the provider. The caller-supplied filePath is currently an absolute editor path, not the v1 opaque workspace ID/relative path.
+- `LOCOAgent.readFile` has no method-level byte cap, workspace containment check, symlink/reparse policy, or stable opened-handle identity. It converts all errors to an empty string, which hides denial/error distinctions.
+- `RAGEngine.indexWorkspace` enumerates at most 300 files, stats each candidate, skips files above 1,000,000 bytes, then performs a separate read. There is no aggregate byte, chunk-count, or retained-text budget. Chunk IDs and metadata contain absolute `file.fsPath`. A 30-second in-memory cache does not bind content to a stable file identity.
+- `LOCOAgent.executeShell` permits only two exact Git argument arrays and calls `execFile` (not a shell) with a five-second timeout and 1 MiB output buffer. TypeScript still selects cwd and launches the process; repository config, hooks, environment, and Git's own behavior require separate review before moving this to Rust.
+- `LOCOAgent.applyPatch` reads a caller-supplied absolute path, computes a three-way merge, and writes directly through VS Code filesystem APIs. This remains a direct agent-controlled write bypass; it must stay unavailable in any future Rust-authority mode until the authenticated approval/write gate is complete.
+- `loco.exportHistory` is distinct: its destination is selected by the user through a save dialog. It is a deliberate export operation, not an AI-selected patch target, but still writes a file and needs bounded serialization/error handling.
+
+### Audit limitations
+
+This source audit covers the inspected TypeScript extension entry point, agent, RAG engine, webview host, provider manager, history store, and secret helper. It does not establish a complete dependency-level audit of every provider implementation, VS Code internals, native modules, or any future Python service. Any new direct filesystem/process API must be reviewed and added to this inventory. No static regression gate has been added yet.
+
+The live implementation is unchanged. In particular, this document does not claim that the Rust sidecar controls editor-context reads, RAG indexing, Git process creation, patch writes, or history export.
