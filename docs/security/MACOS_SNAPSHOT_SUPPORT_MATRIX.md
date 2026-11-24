@@ -1,6 +1,6 @@
 # macOS workspace snapshot adapter support matrix
 
-**Status:** conservative validation inventory, not a production support declaration. The only configuration with completed native evidence at the start of this follow-up is macOS 26.7.2 (build 25G332, arm64). This follow-up adds an explicit macOS 26 Intel CI leg; Intel remains unvalidated until that leg completes successfully.
+**Status:** conservative validation inventory, not a production support declaration. macOS 26 arm64 and Intel native CI legs have passed on the recorded runner builds. This follow-up adds explicit macOS 15 arm64 and Intel legs; those configurations remain unverified until exact-head CI completes successfully.
 
 ## Validated configuration
 
@@ -18,7 +18,8 @@
 | Sandbox capability loss | Denying the relevant `fcntl` command caused the sidecar to omit that capability; acquisition fails closed when required descriptor evidence is unavailable | Tested |
 
 Exact-head evidence for the opened-firmlink identity regression:
-- Rust Core Tests [run #45350706796](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706796), code head `7a86ae80a2b0147fc4c058792abd44c5751219b3): Ubuntu, Windows, and macOS passed; macOS 130 passed, 0 failed, 1 ignored.
+- Prior opened-handle regression: Rust Core Tests [run #45350706796](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706796), code head `7a86ae80a2b0147fc4c058792abd44c5751219b3`: Ubuntu, Windows, and macOS passed; macOS 130 passed, 0 failed, 1 ignored.
+- Explicit architecture matrix: Rust Core Tests [run #45351453924](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45351453924): Ubuntu, Windows, macOS 26 arm64 (26.7.2, build 25G332), and macOS 26 Intel (26.6.1, build 25G76) passed all jobs.
 - Contract Validation [run #45350706807](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706807): passed.
 
 ## Not yet validated
@@ -28,7 +29,6 @@ Exact-head evidence for the opened-firmlink identity regression:
 | macOS 15 arm64 and Intel | CI legs added using `macos-15` and `macos-15-intel`; unverified until exact-head CI passes |
 | Earlier macOS releases (14.x and older) | Unverified; no minimum supported version is declared |
 | Future macOS releases | Unverified until CI evidence is added |
-| Intel/x86_64 macOS 26 | `macos-26-intel` native probes and adapter CI passed on macOS 26.6.1 (build 25G76) |
 | Intel/x86_64 macOS 15 | CI coverage added using `macos-15-intel`; unverified until exact-head CI passes |
 | APFS configurations outside the hosted System/Data volume group | Unverified |
 | APFS snapshots, sealed-system variants, external APFS volumes, and unusual volume-group layouts | Unverified beyond the explicit nested-APFS mount rejection test |
