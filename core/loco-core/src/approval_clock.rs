@@ -47,6 +47,10 @@ impl ApprovalClock for SystemApprovalClock {
         let mut last_seen = state.lock().map_err(|_| ApprovalClockError::ClockStatePoisoned)?;
         enforce_non_decreasing(&mut last_seen, now)
     }
+
+    fn monotonic_now(&self) -> Result<Duration, ApprovalClockError> {
+        Ok(MONOTONIC_ORIGIN.get_or_init(Instant::now).elapsed())
+    }
 }
 
 #[cfg(test)]
