@@ -598,7 +598,7 @@ mod tests {
             "workspace-test", "src/lib.rs", "different-file-id", bytes,
         ).unwrap();
         let changed = CapturedWorkspaceSnapshot::new_at(
-            changed_contract, bytes.to_vec(), Duration::from_millis(1),
+            changed_contract, bytes.to_vec(), Duration::from_millis(0),
         ).unwrap();
         assert!(matches!(
             store.consume(&challenge.challenge_id, &action, &changed),
