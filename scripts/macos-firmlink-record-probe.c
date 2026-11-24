@@ -620,16 +620,20 @@ static void print_path_api_flags(int rootfd, const char *path) {
     // POSIX symlinks, so AT_SYMLINK_NOFOLLOW is diagnostic only, not a boundary.
     struct stat path_stat;
     if (fstatat(rootfd, path, &path_stat, AT_SYMLINK_NOFOLLOW) == 0) {
-        printf("fstatat_nofollow path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\n",
-               path, (unsigned int)path_stat.st_flags,
+        printf("fstatat_nofollow path=%s mode=0%o is_symlink=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\n",
+               path, (unsigned int)path_stat.st_mode,
+               S_ISLNK(path_stat.st_mode) ? "yes" : "no",
+               (unsigned int)path_stat.st_flags,
                (unsigned long long)path_stat.st_dev,
                (unsigned long long)path_stat.st_ino);
     } else {
         printf("fstatat_nofollow path=%s error=%d\n", path, errno);
     }
     if (fstatat(rootfd, path, &path_stat, 0) == 0) {
-        printf("fstatat_follow path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\n",
-               path, (unsigned int)path_stat.st_flags,
+        printf("fstatat_follow path=%s mode=0%o is_symlink=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\n",
+               path, (unsigned int)path_stat.st_mode,
+               S_ISLNK(path_stat.st_mode) ? "yes" : "no",
+               (unsigned int)path_stat.st_flags,
                (unsigned long long)path_stat.st_dev,
                (unsigned long long)path_stat.st_ino);
     } else {
@@ -1082,6 +1086,7 @@ int main(void) {
     print_path_api_flags(dirfd, "Users");
     print_path_api_flags(dirfd, "Applications");
     print_path_api_flags(dirfd, "Library");
+    print_path_api_flags(dirfd, "private");
 
     if (probe_renamed_open_directory() != 0 ||
         probe_concurrent_rename_paths() != 0) {
@@ -1102,7 +1107,8 @@ int main(void) {
         probe_extended_nofirmlink_path_at(dirfd, "Applications", "/System/Volumes/Data/Applications") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Library", "/System/Volumes/Data/Library") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "System", "/System") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr") != 0) {
+        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "private", "/System/Volumes/Data/private") != 0) {
         close(dirfd);
         return 5;
     }
