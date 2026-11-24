@@ -57,3 +57,27 @@ This closes the current diagnostic comparison of the available BSD `stat` and ge
 The BSD stat-surface probe did not expose `SF_FIRMLINK`, so a separate native diagnostic now compares `fcntl(F_GETPATH)` with `fcntl(F_GETPATH_NOFIRMLINK)` on the retained root descriptor and each opened mapped-directory descriptor. Apple's XNU public `sys/fcntl.h` defines `F_GETPATH_NOFIRMLINK` as command 102 with the comment “return the full path without firmlinks of the fd”: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/fcntl.h. An Apple Developer Forums discussion reports that, for an open descriptor reached via `/Users/<user>`, `F_GETPATH` returned `/Users/<user>` while `F_GETPATH_NOFIRMLINK` returned `/System/Volumes/Data/Users/<user>`: https://developer.apple.com/forums/thread/120665.
 
 This is a promising handle-associated diagnostic surface and is being tested on the actual hosted runner. It is not yet accepted as a security boundary: the public behavioral guarantees, sandbox behavior, path-length handling, rename/concurrency semantics, and whether its output can safely establish descendant containment still require authoritative confirmation and adversarial tests. Do not use a path-string comparison as production authorization. PR #102 is stacked on PR #100 and remains draft pending exact-head native results.
+
+
+### Exact-head descriptor-path result (PR #102, 2026-11-24)
+
+The exact-head macOS job in Rust Core Tests run [45335594962](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45335594962) successfully compiled the probe with `clang -Wall -Wextra -Werror` and executed it on macOS 26.7.2 (build 25G332, arm64). For the retained descriptors opened at the root entries, the observed values were:
+
+| Entry | `F_GETPATH` | `F_GETPATH_NOFIRMLINK` |
+|---|---|---|
+| `/` | `/` | `/` |
+| `/Users` | `/Users` | `/System/Volumes/Data/Users` |
+| `/Applications` | `/Applications` | `/System/Volumes/Data/Applications` |
+| `/Library` | `/Library` | `/System/Volumes/Data/Library` |
+
+This is direct evidence that the API exposes a non-firmlinked path for these opened firmlink directory descriptors on this runner, unlike the tested `st_flags` and getattrlist flag surfaces. Apple's macOS `fcntl(2)` manual describes `F_GETPATH_NOFIRMLINK` as returning the non-firmlinked path and requires a buffer of at least `MAXPATHLEN`: https://man.freebsd.org/cgi/man.cgi?manpath=macOS+26.7&query=fcntl&sektion=2. The XNU header defines command 102: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/fcntl.h.
+
+The Apple Developer Forums discussion that identified this command also notes that it only works on open files and that paths longer than `MAXPATHLEN` are a limitation; the author explicitly asks whether it works in a sandbox, without a confirmed answer in that discussion: https://developer.apple.com/forums/thread/120665. Therefore sandbox availability and error behavior remain open compatibility questions.
+
+**Security interpretation:** the descriptor-associated output is materially stronger diagnostic evidence than a path-based lookup, but the result is still a pathname string. It is not an atomic ancestry proof and must not replace handle-relative operations or mount identity checks. A string prefix comparison alone is not accepted for authorization.
+
+### Rename and replacement experiment
+
+The probe now also opens a temporary directory, records both descriptor paths, renames that directory while keeping the descriptor open, creates a replacement directory at the original name, and queries the original and replacement descriptors independently. It records whether the original descriptor retains its device/inode identity and whether the replacement has a distinct identity. This experiment is intended to establish whether the path strings track the opened vnode across rename/replacement; it does not claim concurrent-race safety.
+
+The rename experiment was added after run #45335594962, so it still requires a fresh exact-head macOS run. Keep PR #102 and issue #74 open until that evidence is reviewed and sandbox/compatibility and security semantics are resolved.
