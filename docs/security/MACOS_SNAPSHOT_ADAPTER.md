@@ -190,3 +190,18 @@ bulk_identity name=Users root_ino=2 entry_fileid=18483 entry_parentid=2 target_i
 The exact-head Rust Core Tests run [#45339440539](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45339440539) passed Ubuntu, Windows, and macOS. The probe therefore confirms that these two metadata APIs, with these attributes and no-follow options, do not expose a distinct pre-open firmlink entry identity on this runner.
 
 **Decision:** do not use `ATTR_CMN_FSID`, `ATTR_CMN_FILEID`, or `ATTR_CMN_PARENTID` from these calls as a pre-open firmlink signal. The `F_GETPATH_NOFIRMLINK` adapter check remains a post-open, pre-content supplementary containment signal only. Issue #74's requirement for a reliable signal read without traversing the target remains unresolved; seek authoritative Apple DTS guidance or another native entry-level API/fixture.
+
+
+### Legacy `getdirentriesattr` candidate — unsupported on hosted APFS (run #45339809143)
+
+The documented legacy directory enumeration API `getdirentriesattr(2)` is described by its manual as returning `SF_FIRMLINK` for a firmlink entry and entry attributes rather than target attributes. It is deprecated since macOS 10.10 and only supported by some volume implementations. Manual: https://keith.github.io/xcode-man-pages/getdirentriesattr.2.html
+
+The native probe attempted it on the hosted macOS root volume with `ATTR_CMN_NAME | ATTR_CMN_FLAGS`. It returned:
+
+```
+getdirentriesattr error=45 unsupported_on_volume
+```
+
+The exact-head Rust Core Tests run [#45339809143](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45339809143) passed on Ubuntu, Windows, and macOS. The API is therefore unavailable on the APFS runner used for the macOS acceptance tests and cannot be used as the supported APFS pre-open signal. The probe records the unsupported result without failing the build.
+
+**Decision:** do not use `getdirentriesattr` in the adapter. The pre-open firmlink-entry signal remains unresolved on the tested APFS environment.
