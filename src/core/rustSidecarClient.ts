@@ -245,6 +245,7 @@ export class RustSidecarClient implements vscodeDisposable {
     this.pending?.reject(error);
     this.pending = undefined;
     this.started = false;
+    this.serverCapabilities.clear();
   }
 
   private async terminate(): Promise<void> {
