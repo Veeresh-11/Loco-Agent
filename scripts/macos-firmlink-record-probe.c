@@ -203,6 +203,109 @@ static void print_path_api_flags(int rootfd, const char *path) {
     close(childfd);
 }
 
+static int probe_renamed_open_directory(void) {
+    char root[] = "/tmp/loco-fcntl-rename-XXXXXX";
+    if (mkdtemp(root) == NULL) {
+        printf("rename_probe setup_error=%d\\n", errno);
+        return 1;
+    }
+
+    char original[PATH_MAX];
+    char moved[PATH_MAX];
+    if (snprintf(original, sizeof(original), "%s/before", root) >= (int)sizeof(original) ||
+        snprintf(moved, sizeof(moved), "%s/after", root) >= (int)sizeof(moved)) {
+        printf("rename_probe path_overflow\\n");
+        rmdir(root);
+        return 1;
+    }
+    if (mkdir(original, 0700) != 0) {
+        printf("rename_probe mkdir_error=%d\\n", errno);
+        rmdir(root);
+        return 1;
+    }
+
+    int fd = open(original, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        printf("rename_probe open_error=%d\\n", errno);
+        rmdir(original);
+        rmdir(root);
+        return 1;
+    }
+
+    struct stat opened_before;
+    if (fstat(fd, &opened_before) != 0) {
+        printf("rename_probe fstat_before_error=%d\\n", errno);
+        close(fd);
+        rmdir(original);
+        rmdir(root);
+        return 1;
+    }
+
+    print_descriptor_paths(fd, "rename_before");
+
+    if (rename(original, moved) != 0) {
+        printf("rename_probe rename_error=%d\\n", errno);
+        close(fd);
+        rmdir(original);
+        rmdir(root);
+        return 1;
+    }
+    if (mkdir(original, 0700) != 0) {
+        printf("rename_probe replacement_mkdir_error=%d\\n", errno);
+        close(fd);
+        rmdir(moved);
+        rmdir(root);
+        return 1;
+    }
+
+    struct stat opened_after;
+    if (fstat(fd, &opened_after) != 0) {
+        printf("rename_probe fstat_after_error=%d\\n", errno);
+        close(fd);
+        rmdir(original);
+        rmdir(moved);
+        rmdir(root);
+        return 1;
+    }
+    printf("rename_probe retained_identity_same=%s\\n",
+           opened_before.st_dev == opened_after.st_dev &&
+           opened_before.st_ino == opened_after.st_ino ? "yes" : "no");
+    print_descriptor_paths(fd, "rename_after_replacement");
+
+    int replacement_fd = open(original, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (replacement_fd < 0) {
+        printf("rename_probe replacement_open_error=%d\\n", errno);
+        close(fd);
+        rmdir(original);
+        rmdir(moved);
+        rmdir(root);
+        return 1;
+    }
+    print_descriptor_paths(replacement_fd, "replacement_at_old_name");
+
+    struct stat replacement_stat;
+    if (fstat(replacement_fd, &replacement_stat) != 0) {
+        printf("rename_probe replacement_fstat_error=%d\\n", errno);
+        close(replacement_fd);
+        close(fd);
+        rmdir(original);
+        rmdir(moved);
+        rmdir(root);
+        return 1;
+    }
+    printf("rename_probe replacement_identity_distinct=%s\\n",
+           opened_after.st_dev != replacement_stat.st_dev ||
+           opened_after.st_ino != replacement_stat.st_ino ? "yes" : "no");
+
+    close(replacement_fd);
+    close(fd);
+    if (rmdir(original) != 0 || rmdir(moved) != 0 || rmdir(root) != 0) {
+        printf("rename_probe cleanup_error=%d\\n", errno);
+        return 1;
+    }
+    return 0;
+}
+
 int main(void) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
@@ -254,6 +357,11 @@ int main(void) {
     print_path_api_flags(dirfd, "Users");
     print_path_api_flags(dirfd, "Applications");
     print_path_api_flags(dirfd, "Library");
+
+    if (probe_renamed_open_directory() != 0) {
+        close(dirfd);
+        return 3;
+    }
 
     close(dirfd);
     return 0;
