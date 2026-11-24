@@ -87,6 +87,26 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 
 
 static void print_path_api_flags(int rootfd, const char *path) {
+    // Compare path-based stat flags with getattrlist results. Firmlinks are not
+    // POSIX symlinks, so AT_SYMLINK_NOFOLLOW is diagnostic only, not a boundary.
+    struct stat path_stat;
+    if (fstatat(rootfd, path, &path_stat, AT_SYMLINK_NOFOLLOW) == 0) {
+        printf("fstatat_nofollow path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\\n",
+               path, (unsigned int)path_stat.st_flags,
+               (unsigned long long)path_stat.st_dev,
+               (unsigned long long)path_stat.st_ino);
+    } else {
+        printf("fstatat_nofollow path=%s error=%d\\n", path, errno);
+    }
+    if (fstatat(rootfd, path, &path_stat, 0) == 0) {
+        printf("fstatat_follow path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\\n",
+               path, (unsigned int)path_stat.st_flags,
+               (unsigned long long)path_stat.st_dev,
+               (unsigned long long)path_stat.st_ino);
+    } else {
+        printf("fstatat_follow path=%s error=%d\\n", path, errno);
+    }
+
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
@@ -126,6 +146,16 @@ static void print_path_api_flags(int rootfd, const char *path) {
         printf("openat path=%s O_NOFOLLOW error=%d\n", path, errno);
         return;
     }
+    struct stat handle_stat;
+    if (fstat(childfd, &handle_stat) == 0) {
+        printf("fstat_handle path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\\n",
+               path, (unsigned int)handle_stat.st_flags,
+               (unsigned long long)handle_stat.st_dev,
+               (unsigned long long)handle_stat.st_ino);
+    } else {
+        printf("fstat_handle path=%s error=%d\\n", path, errno);
+    }
+
     memset(&attrs, 0, sizeof(attrs));
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
     attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FLAGS;
