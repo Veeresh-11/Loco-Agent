@@ -5,6 +5,7 @@ on:
     paths:
       - "core/loco-core/**"
       - "scripts/macos-*.c"
+      - "scripts/windows-*.c"
       - ".github/workflows/rust-core-tests.yml"
   push:
     branches:
