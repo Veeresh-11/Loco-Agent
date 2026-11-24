@@ -197,7 +197,7 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
  if name_range.start < minimum_name_start {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
- let name_bytes = &record[name_range];
+ let name_bytes = &record[name_range.clone()];
  if name_bytes.last() != Some(&0) || name_bytes[..name_bytes.len() - 1].contains(&0) {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
