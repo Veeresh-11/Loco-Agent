@@ -27,7 +27,7 @@ The SDK exposes `ATTR_CMNEXT_NOFIRMLINKPATH` as an extended common attribute. XN
 - [XNU vfs_cache.c — build_path and BUILDPATH_NO_FIRMLINK](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_cache.c#L700-L915)
 - [XNU sys/attr.h — ATTR_CMNEXT_NOFIRMLINKPATH and FSOPT_ATTR_CMN_EXTENDED](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/attr.h)
 
-The native C probe on macOS 26.7.2 (build 25G332, arm64) verified both `getattrlistbulk` and `getattrlistat` behavior. With `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH | FSOPT_ATTR_CMN_EXTENDED`, it returned:
+The native C probe on macOS 26.7.2 (build 25G332, arm64) verified both `getattrlistbulk` and `getattrlistat` behavior. The `getattrlistat` query used `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH | FSOPT_ATTR_CMN_EXTENDED`; the bulk enumerator used `FSOPT_ATTR_CMN_EXTENDED`. Both returned:
 
 | Entry | `ATTR_CMNEXT_NOFIRMLINKPATH` |
 |---|---|
