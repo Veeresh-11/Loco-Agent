@@ -90,22 +90,22 @@ static void print_descriptor_paths(int fd, const char *label) {
     char visible_path[PATH_MAX];
     memset(visible_path, 0, sizeof(visible_path));
     if (fcntl(fd, F_GETPATH, visible_path) == 0) {
-        printf("fcntl_getpath label=%s path=%s\\n", label, visible_path);
+        printf("fcntl_getpath label=%s path=%s\n", label, visible_path);
     } else {
-        printf("fcntl_getpath label=%s error=%d\\n", label, errno);
+        printf("fcntl_getpath label=%s error=%d\n", label, errno);
     }
 
 #if defined(F_GETPATH_NOFIRMLINK)
     char nofirmlink_path[PATH_MAX];
     memset(nofirmlink_path, 0, sizeof(nofirmlink_path));
     if (fcntl(fd, F_GETPATH_NOFIRMLINK, nofirmlink_path) == 0) {
-        printf("fcntl_getpath_nofirmlink label=%s path=%s\\n",
+        printf("fcntl_getpath_nofirmlink label=%s path=%s\n",
                label, nofirmlink_path);
     } else {
-        printf("fcntl_getpath_nofirmlink label=%s error=%d\\n", label, errno);
+        printf("fcntl_getpath_nofirmlink label=%s error=%d\n", label, errno);
     }
 #else
-    printf("fcntl_getpath_nofirmlink label=%s unavailable_in_sdk\\n", label);
+    printf("fcntl_getpath_nofirmlink label=%s unavailable_in_sdk\n", label);
 #endif
 }
 
