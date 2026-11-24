@@ -338,7 +338,8 @@ static void print_path_api_flags(int rootfd, const char *path) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
-    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FLAGS;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FSID | ATTR_CMN_FLAGS |
+                       ATTR_CMN_FILEID | ATTR_CMN_PARENTID;
 
     unsigned char buffer[256] __attribute__((aligned(8)));
     int result = getattrlistat(rootfd, path, &attrs, buffer, sizeof(buffer),
@@ -364,10 +365,44 @@ static void print_path_api_flags(int rootfd, const char *path) {
                path, returned.commonattr);
         return;
     }
+    size_t identity_offset = sizeof(length) + sizeof(returned);
+    fsid_t entry_fsid;
     uint32_t flags = 0;
-    memcpy(&flags, buffer + sizeof(length) + sizeof(returned), sizeof(flags));
+    uint64_t entry_fileid = 0;
+    uint64_t entry_parentid = 0;
+    if ((returned.commonattr & (ATTR_CMN_FSID | ATTR_CMN_FLAGS |
+                                ATTR_CMN_FILEID | ATTR_CMN_PARENTID)) !=
+        (ATTR_CMN_FSID | ATTR_CMN_FLAGS | ATTR_CMN_FILEID | ATTR_CMN_PARENTID) ||
+        length < identity_offset + sizeof(entry_fsid) + sizeof(flags) +
+                 sizeof(entry_fileid) + sizeof(entry_parentid)) {
+        printf("getattrlistat path=%s identity_attrs_missing returned=0x%08x length=%u\n",
+               path, returned.commonattr, length);
+        return;
+    }
+    memcpy(&entry_fsid, buffer + identity_offset, sizeof(entry_fsid));
+    identity_offset += sizeof(entry_fsid);
+    memcpy(&flags, buffer + identity_offset, sizeof(flags));
+    identity_offset += sizeof(flags);
+    memcpy(&entry_fileid, buffer + identity_offset, sizeof(entry_fileid));
+    identity_offset += sizeof(entry_fileid);
+    memcpy(&entry_parentid, buffer + identity_offset, sizeof(entry_parentid));
     printf("getattrlistat path=%s options=NOFOLLOW_ANY|RESOLVE_BENEATH flags=0x%08x returned=0x%08x\n",
            path, flags, returned.commonattr);
+
+    struct stat root_stat;
+    struct statfs root_fs;
+    if (fstat(rootfd, &root_stat) == 0 && fstatfs(rootfd, &root_fs) == 0) {
+        printf("getattrlistat_entry_metadata path=%s root_ino=%llu entry_fileid=%llu "
+               "entry_parentid=%llu flags=0x%08x ",
+               path, (unsigned long long)root_stat.st_ino,
+               (unsigned long long)entry_fileid,
+               (unsigned long long)entry_parentid, flags);
+        print_fsid("root_fsid", root_fs.f_fsid);
+        printf(" ");
+        print_fsid("entry_fsid", entry_fsid);
+        printf(" parent_matches_root=%s\n",
+               entry_parentid == (uint64_t)root_stat.st_ino ? "yes" : "no");
+    }
 
     int childfd = openat(rootfd, path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (childfd < 0) {
@@ -377,6 +412,14 @@ static void print_path_api_flags(int rootfd, const char *path) {
     print_descriptor_paths(childfd, path);
 
     struct stat handle_stat;
+    struct statfs child_fs;
+    if (fstat(childfd, &handle_stat) == 0 && fstatfs(childfd, &child_fs) == 0) {
+        printf("getattrlistat_target_metadata path=%s target_ino=%llu ",
+               path, (unsigned long long)handle_stat.st_ino);
+        print_fsid("target_fsid", child_fs.f_fsid);
+        printf(" entry_fsid_matches_target=%s\n",
+               same_fsid(entry_fsid, child_fs.f_fsid) ? "yes" : "no");
+    }
     if (fstat(childfd, &handle_stat) == 0) {
         printf("fstat_handle path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\n",
                path, (unsigned int)handle_stat.st_flags,
