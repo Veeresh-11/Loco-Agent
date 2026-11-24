@@ -133,6 +133,9 @@ fn windows_selection_to_volume_root(
         .ok_or(WorkspaceFactoryError::InvalidSelection)?;
     let mount_normalized = normalize_windows_drive_path(&mount)
         .ok_or(WorkspaceFactoryError::InvalidSelection)?;
+    if !mount_normalized.is_ascii() {
+        return Err(WorkspaceFactoryError::InvalidSelection);
+    }
     let mount_prefix = mount_normalized.trim_end_matches('\\');
     if selected_normalized.len() <= mount_prefix.len()
         || !selected_normalized[..mount_prefix.len()].eq_ignore_ascii_case(mount_prefix)
@@ -166,22 +169,27 @@ fn normalize_windows_drive_path(value: &str) -> Option<String> {
     let without_extended_prefix = replaced
         .strip_prefix(r"\\?\\")
         .unwrap_or(&replaced);
-    let bytes = without_extended_prefix.as_bytes();
+    let without_trailing_separator = if without_extended_prefix.len() > 3 {
+        without_extended_prefix.trim_end_matches('\\')
+    } else {
+        without_extended_prefix
+    };
+    let bytes = without_trailing_separator.as_bytes();
     if bytes.len() < 3
         || !bytes[0].is_ascii_alphabetic()
         || bytes[1] != b':'
         || bytes[2] != b'\\'
-        || without_extended_prefix.starts_with(r"\\")
+        || without_trailing_separator.starts_with(r"\\")
     {
         return None;
     }
-    if without_extended_prefix[3..]
+    if without_trailing_separator[3..]
         .split('\\')
-        .any(|part| part == "." || part == ".." || part.contains(':'))
+        .any(|part| part.is_empty() || part == "." || part == ".." || part.contains(':'))
     {
         return None;
     }
-    Some(without_extended_prefix.to_string())
+    Some(without_trailing_separator.to_string())
 }
 
 #[cfg(all(test, target_os = "windows"))]
@@ -191,20 +199,20 @@ mod windows_tests {
     #[test]
     fn windows_path_normalization_accepts_drive_paths_and_extended_prefix() {
         assert_eq!(
-            normalize_windows_drive_path(r"C:\\work\\repo").as_deref(),
-            Some(r"C:\\work\\repo")
+            normalize_windows_drive_path(r"C:\work\repo").as_deref(),
+            Some(r"C:\work\repo")
         );
         assert_eq!(
-            normalize_windows_drive_path(r"\\?\\C:\\work\\repo").as_deref(),
-            Some(r"C:\\work\\repo")
+            normalize_windows_drive_path(r"\\?\C:\work\repo").as_deref(),
+            Some(r"C:\work\repo")
         );
     }
 
     #[test]
     fn windows_path_normalization_rejects_unc_and_traversal() {
-        assert!(normalize_windows_drive_path(r"\\server\\share\\repo").is_none());
-        assert!(normalize_windows_drive_path(r"C:\\work\\..\\outside").is_none());
-        assert!(normalize_windows_drive_path(r"C:\\work\\.\\repo").is_none());
+        assert!(normalize_windows_drive_path(r"\\server\share\repo").is_none());
+        assert!(normalize_windows_drive_path(r"C:\work\..\outside").is_none());
+        assert!(normalize_windows_drive_path(r"C:\work\.\repo").is_none());
     }
 }
 
