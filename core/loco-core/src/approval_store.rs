@@ -18,6 +18,7 @@ pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
 #[derive(Debug)]
 pub enum StoreError {
     Sql(rusqlite::Error),
+    Entropy(getrandom::Error),
     InvalidChallenge,
     Binding(ApprovalError),
     Clock(ApprovalClockError),
@@ -26,6 +27,24 @@ pub enum StoreError {
 }
 impl From<rusqlite::Error> for StoreError {
     fn from(value: rusqlite::Error) -> Self { Self::Sql(value) }
+}
+
+fn generate_challenge_id() -> Result<String, getrandom::Error> {
+    let mut nonce = [0u8; 32];
+    getrandom::getrandom(&mut nonce)?;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(64);
+    for byte in nonce {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    Ok(encoded)
+}
+
+fn is_valid_challenge_id(challenge_id: &str) -> bool {
+    challenge_id.len() == 64
+        && challenge_id.is_ascii()
+        && challenge_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub struct ApprovalStore {
@@ -61,21 +80,17 @@ impl ApprovalStore {
         Ok(Self { conn, clock })
     }
 
-    /// Issue a challenge whose expiry is calculated by the Rust-owned clock.
-    /// IDs are supplied by the caller for now; unpredictable nonce generation
-    /// and authenticated platform assertions remain separate security gates.
+    /// Issue a challenge with a cryptographically random 256-bit identifier.
+    /// Expiry is calculated by the Rust-owned clock.
     pub fn issue(
         &mut self,
-        challenge_id: &str,
         action: &ProposedAction,
         ttl_seconds: u64,
     ) -> Result<ApprovalChallenge, StoreError> {
-        if challenge_id.trim().is_empty()
-            || challenge_id.len() > 128
-            || !(1..=MAX_APPROVAL_TTL_SECONDS).contains(&ttl_seconds)
-        {
+        if !(1..=MAX_APPROVAL_TTL_SECONDS).contains(&ttl_seconds) {
             return Err(StoreError::InvalidChallenge);
         }
+        let challenge_id = generate_challenge_id().map_err(StoreError::Entropy)?;
         let now = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let expires_at_unix = now.checked_add(ttl_seconds).ok_or(StoreError::InvalidChallenge)?;
         if expires_at_unix > i64::MAX as u64 {
@@ -83,7 +98,7 @@ impl ApprovalStore {
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
         let challenge = ApprovalChallenge {
-            challenge_id: challenge_id.to_string(),
+            challenge_id,
             action_digest: digest,
             expires_at_unix,
         };
@@ -102,7 +117,7 @@ impl ApprovalStore {
         challenge_id: &str,
         action: &ProposedAction,
     ) -> Result<(), StoreError> {
-        if challenge_id.trim().is_empty() || challenge_id.len() > 128 {
+        if !is_valid_challenge_id(challenge_id) {
             return Err(StoreError::InvalidChallenge);
         }
         let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
@@ -198,11 +213,11 @@ mod tests {
     fn store_issues_and_consumes_using_its_own_clock() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue("single-use", &action, 30).unwrap();
+        let challenge = store.issue(&action, 30).unwrap();
         assert_eq!(challenge.expires_at_unix, 130);
         clock.set(129);
-        store.consume("single-use", &action).unwrap();
-        assert!(store.is_consumed("single-use").unwrap());
+        store.consume(&challenge.challenge_id, &action).unwrap();
+        assert!(store.is_consumed(&challenge.challenge_id).unwrap());
         assert!(matches!(
             store.consume("single-use", &action),
             Err(StoreError::AlreadyConsumedOrExpired)
@@ -213,10 +228,10 @@ mod tests {
     fn expired_challenge_rejected_using_internal_time() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        store.issue("expired", &action, 10).unwrap();
+        store.issue(&action, 10).unwrap();
         clock.set(110);
         assert!(matches!(
-            store.consume("expired", &action),
+            store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
@@ -225,53 +240,60 @@ mod tests {
     fn action_mismatch_does_not_consume() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        store.issue("mismatch", &action, 30).unwrap();
+        store.issue(&action, 30).unwrap();
         let modified = ProposedAction::RunCommand {
             executable: "echo".into(), args: vec!["changed".into()],
             working_directory: Some(".".into()), timeout_ms: Some(1000),
         };
         assert!(matches!(
-            store.consume("mismatch", &modified),
+            store.consume(&challenge.challenge_id, &modified),
             Err(StoreError::Binding(ApprovalError::DigestMismatch))
         ));
-        assert!(!store.is_consumed("mismatch").unwrap());
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
     }
 
     #[test]
-    fn duplicate_id_rejected() {
+    fn issued_challenges_have_distinct_random_ids() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        store.issue("duplicate", &action, 30).unwrap();
-        assert!(matches!(store.issue("duplicate", &action, 30), Err(StoreError::Sql(_))));
+        let first = store.issue(&action, 30).unwrap();
+        let second = store.issue(&action, 30).unwrap();
+        assert_ne!(first.challenge_id, second.challenge_id);
     }
 
     #[test]
     fn unknown_challenge_rejected() {
         let (mut store, _) = test_store_at(100);
         assert!(matches!(
-            store.consume("missing", &sample_action()),
+            store.consume(&"0".repeat(64), &sample_action()),
             Err(StoreError::NotFound)
         ));
     }
 
     #[test]
-    fn issue_rejects_invalid_id_and_ttl() {
+    fn issue_rejects_invalid_ttl() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        assert!(matches!(store.issue(" ", &action, 10), Err(StoreError::InvalidChallenge)));
-        assert!(matches!(store.issue("x", &action, 0), Err(StoreError::InvalidChallenge)));
+        assert!(matches!(store.issue(&action, 0), Err(StoreError::InvalidChallenge)));
         assert!(matches!(
-            store.issue("x", &action, MAX_APPROVAL_TTL_SECONDS + 1),
+            store.issue(&action, MAX_APPROVAL_TTL_SECONDS + 1),
             Err(StoreError::InvalidChallenge)
         ));
-        assert!(matches!(store.issue(&"x".repeat(129), &action, 10), Err(StoreError::InvalidChallenge)));
+    }
+
+    #[test]
+    fn challenge_ids_are_256_bit_hex_values() {
+        let (mut store, _) = test_store_at(100);
+        let challenge = store.issue(&sample_action(), 30).unwrap();
+        assert!(is_valid_challenge_id(&challenge.challenge_id));
+        assert_eq!(challenge.challenge_id.len(), 64);
     }
 
     #[test]
     fn issue_rejects_expiry_outside_sqlite_integer_range() {
         let (mut store, _) = test_store_at(i64::MAX as u64);
         assert!(matches!(
-            store.issue("overflow", &sample_action(), 1),
+            store.issue(&sample_action(), 1),
             Err(StoreError::InvalidChallenge)
         ));
     }
@@ -280,13 +302,13 @@ mod tests {
     fn clock_failure_fails_closed_without_consuming() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        store.issue("clock-failure", &action, 30).unwrap();
+        let challenge = store.issue(&action, 30).unwrap();
         clock.fail_with(ApprovalClockError::ClockMovedBackward);
         assert!(matches!(
-            store.consume("clock-failure", &action),
+            store.consume(&challenge.challenge_id, &action),
             Err(StoreError::Clock(ApprovalClockError::ClockMovedBackward))
         ));
-        assert!(!store.is_consumed("clock-failure").unwrap());
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
     }
 
     #[test]
@@ -296,17 +318,18 @@ mod tests {
         let action = sample_action();
         let clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(499));
         let mut issuer = ApprovalStore::initialize(Connection::open(&database).unwrap(), clock.clone()).unwrap();
-        issuer.issue("concurrent", &action, 1).unwrap();
+        let challenge = issuer.issue(&action, 1).unwrap();
         let first = ApprovalStore::initialize(Connection::open(&database).unwrap(), clock.clone()).unwrap();
         let second = ApprovalStore::initialize(Connection::open(&database).unwrap(), clock).unwrap();
         let barrier = Arc::new(Barrier::new(3));
 
         let first_barrier = Arc::clone(&barrier);
+        let challenge_id = challenge.challenge_id.clone();
         let first_action = action.clone();
         let first_thread = std::thread::spawn(move || {
             let mut store = first;
             first_barrier.wait();
-            match store.consume("concurrent", &first_action) {
+            match store.consume(&challenge_id, &first_action) {
                 Ok(()) => true,
                 Err(StoreError::AlreadyConsumedOrExpired) => false,
                 Err(error) => panic!("unexpected first consumer error: {error:?}"),
@@ -314,10 +337,11 @@ mod tests {
         });
 
         let second_barrier = Arc::clone(&barrier);
+        let second_challenge_id = challenge_id.clone();
         let second_thread = std::thread::spawn(move || {
             let mut store = second;
             second_barrier.wait();
-            match store.consume("concurrent", &action) {
+            match store.consume(&second_challenge_id, &action) {
                 Ok(()) => true,
                 Err(StoreError::AlreadyConsumedOrExpired) => false,
                 Err(error) => panic!("unexpected second consumer error: {error:?}"),
@@ -328,6 +352,6 @@ mod tests {
         let first_succeeded = first_thread.join().unwrap();
         let second_succeeded = second_thread.join().unwrap();
         assert_ne!(first_succeeded, second_succeeded, "exactly one consumer must succeed");
-        assert!(issuer.is_consumed("concurrent").unwrap());
+        assert!(issuer.is_consumed(&challenge.challenge_id).unwrap());
     }
 }
