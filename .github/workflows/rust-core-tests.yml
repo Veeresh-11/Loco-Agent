@@ -152,6 +152,18 @@ jobs:
           sudo chmod 0644 "$workspace/root-sentinel.txt"
           mountpoint -q "$workspace"
           echo "LOCO_LINUX_TMPFS_ROOT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare bind-mounted workspace root fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-bind-root-workspace"
+          source="$RUNNER_TEMP/loco-linux-bind-root-source"
+          mkdir -p "$workspace" "$source"
+          printf 'bind-workspace-root-sentinel' > "$source/root-sentinel.txt"
+          sudo mount --bind "$source" "$workspace"
+          mountpoint -q "$workspace"
+          echo "LOCO_LINUX_BIND_ROOT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Inspect native macOS firmlink metadata
         if: runner.os == 'macOS'
         shell: bash
@@ -304,6 +316,9 @@ jobs:
       - name: Verify tmpfs workspace root capture
         if: runner.os == 'Linux'
         run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored captures_file_from_ci_prepared_tmpfs_workspace_root
+      - name: Verify bind-mounted workspace root capture
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored captures_file_from_ci_prepared_bind_mounted_workspace_root
       - name: Detach tmpfs mount fixture
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -333,6 +348,20 @@ jobs:
             exit 1
           fi
           rm -rf "$workspace"
+      - name: Detach bind-mounted workspace root fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-bind-root-workspace"
+          if mountpoint -q "$workspace"; then
+            sudo umount "$workspace"
+          fi
+          if mountpoint -q "$workspace"; then
+            echo "bind-mounted workspace root is still mounted; refusing to remove fixture" >&2
+            exit 1
+          fi
+          rm -rf "$workspace" "$RUNNER_TEMP/loco-linux-bind-root-source"
       - name: Detach distinct Linux filesystem mount fixture
         if: always() && runner.os == 'Linux'
         shell: bash
