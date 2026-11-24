@@ -143,3 +143,53 @@ This is a single-active-authority design: opening a second authority against the
 The follow-on approval-store change keeps a process-local monotonic deadline for each challenge issued by the current authority. Issuance records both the existing Unix expiry (for the persisted record and diagnostics) and a deadline derived from a monotonic elapsed-time source. Consumption requires both checks to pass. The monotonic deadline is held only in memory; a challenge without a matching in-memory deadline is rejected. The process epoch from PR #85 continues to invalidate all challenges across restart, so no monotonic clock value is persisted or compared across processes.
 
 This narrows reliance on wall-clock time during a process lifetime, but does not make the wall clock trusted against reboot/OS-level manipulation, does not protect SQLite against same-user tampering, and does not authenticate user approval. The challenge store remains a prototype and cannot authorize production writes or commands.
+
+
+## Platform authenticator capability review — 2026-11-24
+
+**Outcome: no cross-platform authenticator is selected.** The public platform APIs provide useful building blocks, but they do not yet establish one equivalent, portable transaction-approval contract for LOCO. Implementations remain blocked on the application identity/RP-ID strategy, transaction-display threat model, enrollment/recovery model, and adversarial same-user process analysis.
+
+### Windows
+
+Microsoft documents the Win32 WebAuthn API as supporting Windows Hello platform credentials and external FIDO2 security keys. The documented runtime floor is Windows 10 version 1903 and later. WebAuthNAuthenticatorGetAssertion is a native assertion ceremony with a window handle for system UI, RP ID, client data, and assertion options; the options include an explicit user-verification requirement. This is the strongest directly documented native-app assertion path in the reviewed set.
+
+Implementation gates:
+- Set user verification to required and reject assertions that do not satisfy the requested policy; verify the RP ID hash, client-data challenge, expected client-data origin/type, signature, credential identity, and signed UP/UV flags using a reviewed WebAuthn verifier.
+- Decide a stable RP ID and native-app client-data origin strategy. Do not use an arbitrary hostname or localhost without a standards and platform compatibility review.
+- Confirm the supported API version and Windows build behavior for the exact assertion fields and user-verification policy LOCO requires. Keep a runtime capability check and fail closed if unavailable.
+- Treat the OS prompt as presence/verification mediation, not proof that the OS authenticator independently displayed the full command or file diff. LOCO must render the canonical action separately and bind the signed client-data challenge to the Rust-generated nonce and action digest.
+
+### macOS
+
+Apple LocalAuthentication (LAContext) can evaluate biometric or device-passcode policies and returns success/failure to the app. Security framework access-control flags include userPresence, biometryCurrentSet, and privateKeyUsage; Apple documents combining access control with a Secure Enclave private key so signing occurs within the Secure Enclave and use can require biometric/passcode authorization.
+
+This is a promising native protected-key building block, but it is not a WebAuthn assertion API with an RP ID and standard authenticator-data UP/UV fields. LOCO would need a separately specified signed envelope containing at least the challenge nonce, canonical action digest, protocol version, and application identity. The enrolled public key and access-control policy must be managed by the native app; key access groups, code-signing identity, app updates, key replacement, biometric enrollment changes, passcode fallback, and recovery all need explicit treatment. The app-provided localizedReason is a system authentication prompt reason, not a trusted display of a complete transaction; do not claim transaction confirmation merely because LocalAuthentication succeeded.
+
+### Linux
+
+Yubico libfido2 supports FIDO U2F/FIDO2 communication with external devices over USB or NFC and provides assertion-signature verification. Its documented platform support includes Linux, macOS, and Windows, but that portability describes the library/device protocol, not a uniform built-in Linux platform authenticator. Linux packaging also has native dependencies (including libcbor, OpenSSL 3, zlib, and libudev) and may require device-access udev rules. The tooling exposes explicit user-presence and user-verification requests/checks.
+
+This provides a viable optional roaming-key adapter candidate. It does not guarantee that a Linux workstation has a compatible device, a uniform desktop-owned prompt, or a native biometric/TPM assertion service. No universal Linux platform-authenticator API is selected here. Missing device, denied device permissions, unsupported CTAP capabilities, absent UP/UV, or verifier failure must result in denial; never downgrade to a UI click, a Secret Service lookup, or a software key without an equivalent reviewed presence boundary.
+
+### Cross-platform protocol requirements
+
+The WebAuthn standard distinguishes user presence (UP) from user verification (UV). UP indicates an authenticator performed a presence test; UV indicates local authorization of the authenticator operation, potentially by PIN, password, or biometric. LOCO's privileged actions should require UV, and should require UP where the selected authenticator supports it. Rust must verify the signed authenticator data, RP ID hash, expected client-data challenge/type/origin, credential public key, and assertion signature; it must not trust a UI-supplied verified=true flag. WebAuthn UV is not a guarantee of a unique natural person's identity, and neither UP nor UV guarantees the authenticator displayed LOCO's full action summary.
+
+### Decision and next gate
+
+1. Define LOCO's supported OS/version matrix and whether external FIDO2 keys are a required Linux fallback or optional capability.
+2. Specify the exact action-approval envelope and desktop RP/application identity strategy before selecting WebAuthn versus a macOS protected-key envelope.
+3. Define enrollment, credential rotation/revocation, recovery, multiple local users, remote desktop, locked/headless session, and authenticator-unavailable behavior.
+4. Threat-model same-user malware that can call native APIs, control the extension/webview, or spoof app UI. Identify what each OS prompt and protected-key boundary actually prevents.
+5. Prototype each adapter independently with captured assertion fixtures and negative tests; no adapter may issue authorization directly. Rust performs all cryptographic verification and atomic challenge consumption.
+6. Until these gates are reviewed, all three platform paths remain design candidates only; the Rust authority must fail closed when authenticated evidence is unavailable.
+
+### Primary platform references
+
+- Microsoft, [WebAuthn API overview and runtime requirements](https://learn.microsoft.com/en-us/windows/win32/webauthn/-webauthn-portal) and [GetAssertion](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/nf-webauthn-webauthnauthenticatorgetassertion).
+- Microsoft, [GetAssertion options and user-verification requirement](https://learn.microsoft.com/en-us/windows/win32/api/webauthn/ns-webauthn-webauthn_authenticator_get_assertion_options).
+- Apple, [LocalAuthentication LAContext](https://developer.apple.com/documentation/localauthentication/lacontext), [Secure Enclave key protection](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave), and [SecAccessControl flags](https://developer.apple.com/documentation/security/secaccesscontrolcreateflags).
+- Yubico, [libfido2 capabilities, platform support, and dependencies](https://github.com/Yubico/libfido2) and [assertion UP/UV behavior](https://github.com/Yubico/libfido2/blob/main/examples/README.adoc).
+- W3C, [Web Authentication Level 3: UP, UV, RP ID, and assertion verification](https://www.w3.org/TR/webauthn-3/).
+
+This review is a capability survey, not a certification or security audit of any platform. Native OS versions, API behavior, entitlement/signing requirements, and hardware configurations must be tested on supported release targets before implementation.
