@@ -177,6 +177,7 @@ impl ApprovalStore {
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         tx.commit()?;
+        self.monotonic_deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         Ok(challenge)
     }
 
@@ -227,6 +228,7 @@ impl ApprovalStore {
         )?;
         if changed != 1 { return Err(StoreError::AlreadyConsumedOrExpired); }
         tx.commit()?;
+        self.monotonic_deadlines.remove(challenge_id);
         Ok(())
     }
 
