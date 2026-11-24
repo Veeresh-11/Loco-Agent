@@ -379,6 +379,32 @@ mod tests {
     }
 
     #[test]
+    fn reopening_store_invalidates_prior_process_challenges_and_stale_handles() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("restart.sqlite");
+        let action = sample_action();
+        let first_clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(1_000));
+        let mut first = ApprovalStore::initialize_with_epoch(
+            Connection::open(&database).unwrap(), first_clock, "process-one".into()
+        ).unwrap();
+        let challenge = first.issue(&action, 60).unwrap();
+
+        let second_clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(1_001));
+        let mut second = ApprovalStore::initialize_with_epoch(
+            Connection::open(&database).unwrap(), second_clock, "process-two".into()
+        ).unwrap();
+
+        assert!(matches!(
+            first.consume(&challenge.challenge_id, &action),
+            Err(StoreError::StaleRuntime)
+        ));
+        assert!(matches!(
+            second.consume(&challenge.challenge_id, &action),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+    }
+
+    #[test]
     fn concurrent_connections_can_consume_a_challenge_only_once() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("approvals.sqlite");
