@@ -183,8 +183,8 @@ static void print_path_api_flags(int rootfd, const char *path) {
     close(childfd);
 }
 
-static int probe_nested_firmlink(const char *entry_name, const char *expected_path) {
-    int dirfd = open("/System/Library", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+static int probe_nested_firmlink(const char *parent_path, const char *entry_name, const char *expected_path) {
+    int dirfd = open(parent_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirfd < 0) {
         printf("nested_firmlink name=%s open_error=%d\n", entry_name, errno);
         return 1;
@@ -221,7 +221,7 @@ static int probe_nested_firmlink(const char *entry_name, const char *expected_pa
             if (record_len < sizeof(uint32_t) + sizeof(returned) ||
                 record_len > sizeof(buffer) - cursor) {
                 printf("nested_firmlink name=%s invalid_record_length=%u\n",
-                       entry_name, record_len);
+                       parent_path, entry_name, record_len);
                 close(dirfd);
                 return 1;
             }
@@ -305,7 +305,7 @@ static int probe_nested_firmlink(const char *entry_name, const char *expected_pa
             const char *resolved_path = (const char *)(record + (size_t)path_start);
             if (strcmp(resolved_path, expected_path) != 0) {
                 printf("nested_firmlink name=%s flags=0x%08x path=%s expected=%s match=no\n",
-                       entry_name, flags, resolved_path, expected_path);
+                       parent_path, parent_path, entry_name, flags, resolved_path, expected_path);
                 close(dirfd);
                 return 1;
             }
@@ -336,18 +336,22 @@ static int probe_nested_system_library_firmlinks(void) {
     while (fgets(line, sizeof(line), map) != NULL) {
         if (sscanf(line, "%1023s %1023s", source, target) != 2) continue;
         if (strncmp(source, prefix, sizeof(prefix) - 1) != 0) continue;
-        const char *name = source + sizeof(prefix) - 1;
-        if (*name == '\0' || strchr(name, '/') != NULL) continue;
+        char *last_slash = strrchr(source, '/');
+        if (last_slash == NULL || last_slash == source || last_slash[1] == '\0') continue;
+        *last_slash = '\0';
+        const char *parent_path = source;
+        const char *name = last_slash + 1;
 
         char expected_path[PATH_MAX];
         int written = snprintf(expected_path, sizeof(expected_path),
                                "/System/Volumes/Data/%s", target);
         if (written < 0 || (size_t)written >= sizeof(expected_path)) {
-            printf("nested_firmlink name=%s expected_path_too_long\n", name);
+            printf("nested_firmlink parent=%s name=%s expected_path_too_long\n",
+                   parent_path, name);
             fclose(map);
             return 1;
         }
-        if (probe_nested_firmlink(name, expected_path) != 0) {
+        if (probe_nested_firmlink(parent_path, name, expected_path) != 0) {
             fclose(map);
             return 1;
         }
