@@ -46,18 +46,18 @@ export class RustSidecarClient implements vscodeDisposable {
 
   constructor(private readonly options: SidecarClientOptions) {}
 
-  async evaluate(proposal: JsonObject): Promise<SidecarDecision> {
+  async evaluate(proposal: JsonObject, signal?: AbortSignal): Promise<SidecarDecision> {
     if (this.busy) throw new Error('A sidecar request is already in progress.');
     this.busy = true;
     try {
-      await this.ensureStarted();
+      throwIfAborted(signal);\n      await this.ensureStarted(signal);
       const requestId = randomUUID();
       const response = await this.exchange({
         protocolVersion: PROTOCOL_VERSION,
         messageType: 'evaluate',
         requestId,
         proposal
-      }, this.options.requestTimeoutMs ?? 30_000);
+      }, this.options.requestTimeoutMs ?? 30_000, signal);
       if (response.messageType !== 'decision' || !isObject(response.decision)) {
         throw new Error('Unexpected sidecar response.');
       }
@@ -78,13 +78,13 @@ export class RustSidecarClient implements vscodeDisposable {
     }
   }
 
-  async start(): Promise<void> {
+  async start(signal?: AbortSignal): Promise<void> {
     if (this.closed) throw new Error('Sidecar client has been disposed.');
     if (this.started && this.child) return;
     if (this.starts >= MAX_STARTS) throw new Error('Sidecar restart budget exhausted.');
     if (this.starts > 0) await (this.options.sleep ?? delay)(250 * (2 ** (this.starts - 1)));
     this.starts += 1;
-    const executable = this.options.resolveExecutable();
+    throwIfAborted(signal);\n    const executable = this.options.resolveExecutable();
     if (!executable || executable.includes('\0')) throw new Error('Packaged sidecar executable is unavailable.');
     const spawnProcess = this.options.spawnProcess ?? ((path: string) =>
       cp.spawn(path, [], { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }) as cp.ChildProcessWithoutNullStreams);
@@ -106,7 +106,7 @@ export class RustSidecarClient implements vscodeDisposable {
       messageType: 'hello',
       requestId,
       client: { name: 'loco-vscode-extension', version: this.options.extensionVersion }
-    }, this.options.handshakeTimeoutMs ?? 5000);
+    }, this.options.handshakeTimeoutMs ?? 5000, signal);
     if (response.messageType !== 'hello' || !isObject(response.server) ||
         response.server.name !== 'loco-rust-authority' ||
         typeof response.server.version !== 'string' || response.server.version.length < 1 ||
@@ -147,7 +147,7 @@ export class RustSidecarClient implements vscodeDisposable {
     if (!this.started) await this.start();
   }
 
-  private exchange(message: JsonObject, timeoutMs: number): Promise<JsonObject> {
+  private exchange(message: JsonObject, timeoutMs: number, signal?: AbortSignal): Promise<JsonObject> {
     const child = this.child;
     if (!child || child.killed) return Promise.reject(new Error('Sidecar process is unavailable.'));
     if (this.pending) return Promise.reject(new Error('Sidecar protocol permits one outstanding request.'));
@@ -243,7 +243,7 @@ export class RustSidecarClient implements vscodeDisposable {
 
 interface vscodeDisposable { dispose(): void; }
 
-function isObject(value: unknown): value is JsonObject {
+function throwIfAborted(signal?: AbortSignal): void {\n  if (signal?.aborted) throw new Error('Sidecar request cancelled.');\n}\n\nfunction isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
