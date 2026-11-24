@@ -927,8 +927,6 @@ mod tests {
         object_attributes_flags: u32,
         directory: bool,
     ) -> (i32, Option<File>) {
-        use std::os::windows::ffi::OsStrExt;
-
         let mut name: Vec<u16> = relative_path.encode_utf16().collect();
         let byte_len = name.len().checked_mul(2).expect("UTF-16 byte length overflow");
         assert!(byte_len > 0 && byte_len <= u16::MAX as usize);
@@ -956,11 +954,12 @@ mod tests {
         } else {
             FILE_READ_DATA_VALUE | FILE_READ_ATTRIBUTES_VALUE | SYNCHRONIZE_VALUE
         };
-        let create_options = if directory {
+        const FILE_NON_DIRECTORY_FILE_VALUE: u32 = 0x0000_0040;
+        let create_options = (if directory {
             FILE_DIRECTORY_FILE
         } else {
-            0x0000_0040 // FILE_NON_DIRECTORY_FILE
-        } | FILE_SYNCHRONOUS_IO_NONALERT;
+            FILE_NON_DIRECTORY_FILE_VALUE
+        }) | FILE_SYNCHRONOUS_IO_NONALERT;
 
         // SAFETY: the UTF-16 name and all ABI structures remain live for the
         // synchronous call; RootDirectory is a retained directory handle.
