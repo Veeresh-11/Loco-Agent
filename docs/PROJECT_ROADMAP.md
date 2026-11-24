@@ -54,7 +54,23 @@ Relevant work: PRs #44–#72, especially #49–#61 and #62–#72.
 - #64–#68 cover Windows FFI layout, file identity, sharing conflicts, NTFS root admission, and macOS APFS root admission.
 - #69–#72 add real APFS, NTFS, Linux bind-mount, and distinct-filesystem mount fixtures.
 
-Remaining: review the actual platform implementation and supported OS/filesystem matrix end-to-end; explicitly document unsupported filesystems and kernel/API versions; verify handle-relative semantics, concurrent mutation, mount identity, metadata freshness, and cleanup behavior. CI success on a fixture is evidence for that fixture only, not every filesystem.
+### Implemented controls and hosted native evidence (2026-11-24)
+
+- Linux: PR #62 requires exact captured byte length; PR #63 applies `RESOLVE_NO_XDEV` to descendant `openat2` resolution while allowing the workspace root itself to reside on another mount. PR #71's same-device bind-mount rejection passed on Ubuntu (Rust #45187459253, contract #45187459247). PR #72's distinct ext4 loop-mount rejection passed (Rust #45188239997, contract #45188239539).
+- Windows: PR #64 adds x64 ABI layout assertions and explicitly excludes x86/ARM64. PR #65's incompatible pre-existing writer-handle test passed in Windows run #45181874421. PR #66 uses `FileIdInfo` (64-bit volume serial plus 128-bit file ID) with no legacy fallback; its Windows test passed in #45182566472. PR #67 admits NTFS only; #45182767243 passed. PR #70's real secondary NTFS VHDX mountpoint test passed in #45186946850 and reran in #45188239997.
+- macOS: PR #68 admits APFS only through `fstatfs`; PR #69's nested APFS sparse-image mount test passed in #45185300723 and reran in #45188239997.
+- Windows symlink/reparse coverage from PR #58 was exercised in the PR #65 Windows run; the directory-symlink, final-file-symlink, junction and post-open checks passed.
+- The latest pre-diagnostic PR #72 head `70b592b976def580fdcafcb0ff0d097a6311d2a9` passed the full Rust matrix #45188239997 and contract validation #45188239539. The PR #72 follow-up now records OS/kernel and workspace-filesystem details in CI; exact-head validation is running.
+
+### Narrow prototype support baseline
+
+| Platform | Admitted baseline | Enforced descendant boundary | Explicitly unsupported or unverified |
+|---|---|---|---|
+| Linux | Linux 5.6+ with `openat2`; hosted Ubuntu tests use ext4 | `RESOLVE_NO_XDEV` rejects descendant mounts and bind mounts; no pathname fallback | Other kernel versions/filesystems/mount namespaces |
+| macOS | APFS roots only | Component-wise `openat(O_NOFOLLOW)` and descendant device identity | HFS+, network/removable filesystems, other APFS arrangements; firmlink entry detection remains issue #74 |
+| Windows | x64; Windows 8 / Server 2012 or later for `FileIdInfo`; canonical fixed NTFS volume-GUID roots | `NtCreateFile` relative to retained handles, `OBJ_DONT_REPARSE`, post-open reparse checks, strict sharing and handle-derived identity | x86/ARM64, ReFS, FAT/exFAT, network/removable filesystems |
+
+Remaining: independent Windows SDK/FFI review; explicit OS/kernel build matrix beyond moving hosted-runner labels; decide whether additional Linux filesystems or mount namespaces are supported; preserve fail-closed behavior for all unsupported cases; and independent security review. The native CI tests validate only the named runner and fixture, not every filesystem or release. Priority 2 is materially advanced but remains partially complete until these gates are met.
 
 ## Priority 3 — approval bound to snapshot identity and freshness
 
