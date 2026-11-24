@@ -584,6 +584,37 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a bind-mounted workspace root prepared by the Linux CI workflow"]
+    fn captures_file_from_ci_prepared_bind_mounted_workspace_root() {
+        let workspace = std::path::PathBuf::from(
+            std::env::var("LOCO_LINUX_BIND_ROOT_WORKSPACE")
+                .expect("Linux bind-root fixture workflow must set LOCO_LINUX_BIND_ROOT_WORKSPACE"),
+        );
+        assert_eq!(
+            std::fs::read(workspace.join("root-sentinel.txt")).unwrap(),
+            b"bind-workspace-root-sentinel",
+            "fixture must expose the source directory's sentinel through the bind mount"
+        );
+
+        let canonical = std::fs::canonicalize(&workspace).unwrap();
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(
+            &canonical,
+            "linux-bind-mounted-workspace-root",
+        )
+        .expect("a bind-mounted directory should be accepted as a retained workspace root");
+        assert_eq!(adapter.root_path(), canonical.as_path());
+
+        let captured = adapter.capture(
+            &SnapshotCaptureRequest::new("root-sentinel.txt", 128).unwrap(),
+        ).expect("a file directly beneath the bind-mounted workspace root should be capturable");
+        assert_eq!(captured.bytes(), b"bind-workspace-root-sentinel");
+        assert_eq!(
+            crate::snapshot_payload::validate_snapshot_payload(captured.snapshot(), captured.bytes()),
+            Ok(())
+        );
+    }
+
+    #[test]
     #[ignore = "requires a tmpfs mounted by the Linux CI workflow"]
     fn rejects_ci_prepared_tmpfs_mount_crossing() {
         use std::os::unix::fs::MetadataExt;
