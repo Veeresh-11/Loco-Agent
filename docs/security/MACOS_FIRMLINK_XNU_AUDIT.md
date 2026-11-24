@@ -1,6 +1,6 @@
 # macOS firmlink XNU resolution and security-boundary audit
 
-**Status:** source audit; no production workspace-confinement guarantee is approved.
+**Status:** source and native audit; a narrow System/Data APFS firmlink boundary is evidenced on macOS 26.7.2, but production acceptance remains pending the supported-platform matrix and independent review.
 
 **Scope:** public XNU/VFS behavior relevant to `getattrlistbulk`, `ATTR_CMN_FLAGS`, `ATTR_CMNEXT_NOFIRMLINKPATH`, path reconstruction, and the adapter's separate preflight/open sequence. This is not an audit of private APFS implementation code or a guarantee for every macOS release.
 
@@ -66,6 +66,20 @@ The returned-attribute mask and raw record bytes were captured, and PR #107 corr
 
 The public VFS code helps explain the shape and purpose of a no-firmlink path. It does not show the private APFS code path that vends the observed `ATTR_CMN_FLAGS` value. No authoritative Apple statement found in this audit says that `SF_NOUNLINK` or `sunlnk` is an alias for `SF_FIRMLINK`; the implementation must not infer that equivalence.
 
+### 6. `O_RESOLVE_BENEATH` does not reject firmlinks
+
+PR #110 tested `openat(parent_fd, child_name, O_RESOLVE_BENEATH)` against the real mappings installed on macOS 26.7.2 (build 25G332, arm64). The control `openat(root_fd, "..", ...)` failed with `ENOTCAPABLE`, confirming the flag was active. Ordinary `/System` and `/usr` controls opened. All four root mappings (`/Users`, `/Applications`, `/Library`, `/private`) and all seven nested `/System/Library` mappings also opened successfully; each opened descriptor's `F_GETPATH_NOFIRMLINK` result pointed under `/System/Volumes/Data`.
+
+This is decisive empirical evidence that `O_RESOLVE_BENEATH` is not a firmlink-denial primitive on the tested OS. It enforces the documented lexical/namespace beneath rule but accepts these firmlink transitions. Do not add it as an authorization substitute.
+
+The same exact run recorded the System and Data volume identities:
+- `/System`: `f_fsid=(16777232,26)`, `st_dev=16777229`
+- `/System/Volumes/Data`: `f_fsid=(16777229,26)`, `st_dev=16777229`
+
+Thus `st_dev` is not discriminating on this runner, but descriptor-derived `f_fsid` is. The adapter compares `f_fsid` from every opened intermediate directory and final file to the retained root's `f_fsid` **before reading content**. Consequently, the bulk no-firmlink path is an early-denial observation, not the authorization authority: if an entry changes between preflight and `openat`, the actual opened vnode is still checked by its descriptor-associated filesystem identity before any bytes are acquired.
+
+PR #110 adds `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`, which deliberately bypasses preflight, opens the OS-provided firmlink entries relative to their parent descriptors, and asserts the parent handle has the System `f_fsid` while the opened target has the Data `f_fsid`. Exact-head CI for this new regression is pending.
+
 ## Security boundary and acceptance decision
 
 ### What the current adapter evidence supports
@@ -74,25 +88,27 @@ The public VFS code helps explain the shape and purpose of a no-firmlink path. I
 - A fresh directory file description per scan avoids sharing the bulk-enumeration offset between concurrent captures.
 - `O_NOFOLLOW` rejects symbolic-link final-component substitution; it does not independently reject firmlinks.
 - Post-open descriptor-path checks and filesystem identity checks provide independent evidence about the object actually opened.
-- Cross-volume `f_fsid` checks can reject the System-to-Data transition when the relevant volumes have distinct filesystem identities on the tested configuration.
+- The opened-handle `f_fsid` comparison is the authoritative System/Data boundary: the adapter checks every opened intermediate directory and final file against the retained root before reading. The hosted runner confirms System and Data have distinct `f_fsid` values even though `st_dev` is equal.
 
 ### What is not established
 
 - The no-firmlink path string is not an atomic capability, vnode handle, or proof that a subsequent name-based open addresses the exact entry observed.
 - The VFS name-cache lock used during path reconstruction does not span the userland preflight-to-open interval.
 - `SF_NOUNLINK`, `sunlnk`, path differences, and `/usr/share/firmlinks` membership are diagnostic evidence only; none may be promoted to an authorization signal.
-- A distinct-volume check does not prove confinement for every volume-group layout, supported macOS version, filesystem, sandbox profile, or future APFS behavior.
+- The tested `f_fsid` boundary does not prove confinement for every volume-group layout, supported macOS version, filesystem, sandbox profile, or future APFS behavior.
 - Public XNU sources do not explain the hosted runner's missing `SF_FIRMLINK` bit because the relevant APFS implementation is not available in this source audit.
 - The nested System/Data regression improves coverage of OS-provided mappings, but it does not prove atomicity against an adversarial concurrent namespace change or establish a same-volume firmlink case.
 
 ### Decision
 
-Keep the workspace-read capability **unverified for general firmlink confinement**. Preserve fail-closed behavior when any required metadata, path, descriptor, volume-identity, or revalidation check is unavailable or inconsistent. Do not claim production-grade firmlink confinement from the current hosted-runner evidence.
+The current design has a **narrow, test-backed System/Data APFS firmlink boundary** on macOS 26.7.2: the no-firmlink path observation rejects known mappings early, and the descriptor-derived `f_fsid` comparison rejects the actual opened Data-volume object before reading if preflight is bypassed or races. The authorization decision does not depend on `SF_FIRMLINK`, `SF_NOUNLINK`, `sunlnk`, or `O_RESOLVE_BENEATH`. The latter was experimentally shown to permit real firmlink traversal.
 
-Issue #74 remains open. PRs #104, #106, #107, and the nested-fixture PR #108 must remain draft until:
-1. Apple/XNU semantics for the observed flag discrepancy are authoritatively reconciled, or the implementation is redesigned so the disputed signal is not required;
-2. the supported macOS/filesystem/version matrix and race model are explicitly bounded;
-3. the complete stack receives independent security review; and
+This is not yet a general production guarantee. Keep fail-closed behavior whenever any required metadata, descriptor, filesystem-identity, containment, or revalidation check is unavailable or inconsistent. Do not generalize beyond the tested System/Data APFS model.
+
+Issue #74 remains open for supported-platform/version bounds and independent review. PRs #104, #106, #107, #108, #109, and #110 remain draft until:
+1. the supported macOS/filesystem/version matrix and precise threat/race model are explicitly bounded;
+2. the new opened-handle firmlink identity regression passes at exact head;
+3. the complete dependency stack receives independent security review; and
 4. exact-head validation passes for the reviewed stack.
 
-No PR in this stack should be merged solely because CI is green.
+The observed `SF_FIRMLINK` discrepancy is documented but is no longer a prerequisite for the adapter's authorization decision because the adapter uses descriptor-derived `f_fsid` as the boundary check. No PR in this stack should be merged solely because CI is green.
