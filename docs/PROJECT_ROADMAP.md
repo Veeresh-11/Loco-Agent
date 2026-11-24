@@ -23,7 +23,7 @@ This roadmap preserves the requested order. Work on a later priority may exist a
 
 **Tracking issue:** [#74](https://github.com/Veeresh-11/Loco-Agent/issues/74)
 
-Relevant PRs: #73, #75, #76, #77, #78, #100, #102. PR #102 probes descriptor-derived `F_GETPATH` versus `F_GETPATH_NOFIRMLINK` output and is pending exact-head macOS validation.
+Relevant PRs: #73, #75, #76, #77, #78, #100, #102. PR #102's exact-head macOS run #45335594962 confirmed distinct descriptor paths for `/Users`, `/Applications`, and `/Library`: `F_GETPATH` returned the visible firmlink path while `F_GETPATH_NOFIRMLINK` returned `/System/Volumes/Data/...`. The probe now adds a temporary-directory rename/replacement assertion to test whether both path forms follow the retained descriptor rather than a replacement at the old name; this latest assertion-bearing source head still needs fresh exact-head CI.
 
 ### Established evidence
 - The macOS 26.7.2 hosted runner (build 25G332, arm64) lists mappings such as `/Users`, `/Applications`, and `/Library` in the system firmlink map.
@@ -126,7 +126,7 @@ These legacy feature items should be reviewed as a separate release/consolidatio
 ## PR and merge policy
 
 - All reviewed security/migration PRs remain open and draft until their stated dependencies, exact-head CI, acceptance criteria, and independent review are complete.
-- PR #100's updated exact head `c212b45a15053482473fb8c2e34e6dc5ecb3b3b6` passed all three platforms in run #45335436957. PR #102's descriptor-path probe is currently awaiting exact-head CI.
+- PR #100's updated exact head `c212b45a15053482473fb8c2e34e6dc5ecb3b3b6` passed all three platforms in run #45335436957. PR #102's first exact-head run #45335594962 passed all three platforms and its macOS log confirmed the firmlink-path distinction. A subsequent rename/replacement regression fixture has been added; its latest source head still awaits exact-head CI.
 - Do not close a PR because a later PR supersedes it unless the code, tests, and dependency relationship have been reviewed and the superseding PR is confirmed to contain the required changes.
 - Do not merge a stacked PR out of dependency order. Merge only after the complete stack is validated and reviewed.
 - Keep issue #74 and issue #82 open until their acceptance criteria are satisfied.
