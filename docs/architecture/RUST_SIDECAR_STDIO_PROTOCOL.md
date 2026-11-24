@@ -101,3 +101,17 @@ The Rust binary target `loco-authority` now implements the child side of this v1
 Rust integration tests cover handshake/evaluate/shutdown, correlation, evaluate-before-handshake, unknown proposal fields, duplicate IDs, and oversized frames.
 
 The child process cannot enforce a handshake timeout while blocked on stdin; the parent must enforce handshake and request deadlines and terminate/reap the child. EOF exits cleanly. Malformed frames and fatal protocol violations exit nonzero with stderr-only diagnostics. The TypeScript process launcher, packaging of per-platform binaries, parent-side framing, restart budget, and end-to-end cancellation/crash tests are not implemented yet. Therefore this is not yet an integrated sidecar service and cannot be used to authorize privileged operations.
+
+
+## TypeScript parent-side client checkpoint
+
+The TypeScript extension now has an isolated `RustSidecarClient` prototype in `src/core/rustSidecarClient.ts`:
+
+- Spawns the resolved executable directly with `shell: false` and stdin/stdout/stderr pipes; the caller must resolve the executable from the extension's packaged resources, not workspace or provider input.
+- Requires the v1 hello handshake and checks server identity, version, and `proposal_evaluation` capability before evaluating proposals.
+- Serializes requests, permits one outstanding request, correlates responses by requestId, and rejects invalid UTF-8/JSON, invalid envelopes, unexpected IDs, blank frames, and frames over 12 MiB.
+- Enforces handshake, evaluation, and shutdown deadlines; terminates an unresponsive or failed child and uses a bounded three-start lifetime budget with exponential delay for later caller-initiated starts.
+- Retains only a 16 KiB stderr tail and never forwards child stderr to the UI or logs.
+- Does not replay a request after a timeout/crash. A returned `allow` remains a policy result only, not an execution or write capability.
+
+This checkpoint is transport code only. It is not yet wired into the production agent task path, and packaged per-platform binaries are not yet delivered. The legacy TypeScript extension remains the active path. The current prototype tests exercise handshake/correlation, wrong IDs, oversized frames, and single-request behavior; the full crash/cancellation/restart/packaging test matrix remains an exit criterion. The client must not be treated as an authorization boundary.
