@@ -63,6 +63,10 @@ mod tests {
     #[test]
     fn snapshot_binding_digest_is_stable_and_domain_separated() {
         let snapshot = sample();
+        assert_eq!(
+            canonical_snapshot_binding_digest(&snapshot),
+            "c6e199ec24e92ac85c5acd11d53e4c292eb997db492a7a550a4b6d969297ed98",
+        );
         assert_eq!(canonical_snapshot_binding_digest(&snapshot), canonical_snapshot_binding_digest(&snapshot));
         assert!(canonical_snapshot_binding_bytes(&snapshot).starts_with(PREFIX));
     }
@@ -75,6 +79,8 @@ mod tests {
         changed.workspace_id.push_str("-other");
         assert_ne!(original_digest, canonical_snapshot_binding_digest(&changed));
         changed = original.clone(); changed.relative_path = "src/other.rs".into();
+        assert_ne!(original_digest, canonical_snapshot_binding_digest(&changed));
+        changed = original.clone(); changed.file_kind = SnapshotFileKind::Directory;
         assert_ne!(original_digest, canonical_snapshot_binding_digest(&changed));
         changed = original.clone(); changed.byte_length += 1;
         assert_ne!(original_digest, canonical_snapshot_binding_digest(&changed));
