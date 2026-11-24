@@ -100,3 +100,16 @@ The prototype challenge format and SQLite store are not production approval evid
 7. End-to-end test proves UI display → OS-owned user interaction → Rust verification → atomic consumption → target freshness check.
 
 Until these criteria are met, the feature must remain explicitly labeled a prototype and must not authorize production privileged writes or command execution.
+
+
+## Initial platform API survey — 2026-11-24 (research, not a selection)
+
+Public platform documentation supports investigating a FIDO2/WebAuthn assertion flow, but does not yet establish a common implementation:
+
+- **Windows:** Microsoft's native Win32 WebAuthn API documents Windows Hello platform authentication and external FIDO2 security keys, with a minimum of Windows 10 version 1903. This is a viable candidate for a Rust-native adapter, subject to API version, RP identity, user-verification flags, assertion parsing, and packaging review. Sources: [Microsoft WebAuthn API](https://learn.microsoft.com/en-us/windows/win32/webauthn/-webauthn-portal), [WebAuthn API reference](https://learn.microsoft.com/en-us/windows/win32/api/_webauthn/).
+- **macOS:** Apple's LocalAuthentication framework provides OS-mediated biometric/passcode evaluation and can gate Keychain item access. The documented API's high-level result is a pass/fail authentication result; that alone is not a portable, signed assertion binding an exact LOCO action digest. A keychain item protected by user presence may be a building block, but a separate cryptographic operation and application/action binding must be demonstrated. Sources: [Local Authentication](https://developer.apple.com/documentation/localauthentication), [Accessing Keychain items with Face ID or Touch ID](https://developer.apple.com/documentation/localauthentication/accessing-keychain-items-with-face-id-or-touch-id).
+- **Linux:** The Credentials for Linux `libwebauthn` project describes WebAuthn/FIDO2 support over pluggable transports and a D-Bus portal direction, but its published feature table marks TPM 2.0 platform authentication as planned. This is not evidence of a universally installed OS-owned platform authenticator. Availability, portal support, distribution packaging, and user-presence semantics need independent validation. Source: [Credentials for Linux libwebauthn](https://github.com/linux-credentials/libwebauthn).
+
+**Research conclusion:** WebAuthn/FIDO2 is a promising protocol candidate because it can bind a fresh challenge to a relying-party identity and return a verifiable assertion. It is not yet approved as LOCO's cross-platform authenticator. Native platform API parity, origin/RP identity strategy for a local desktop application, user-verification policy, transaction-display limitations, and Linux availability remain open. A generic FIDO assertion generally proves authenticator participation for an RP challenge; it does not necessarily display or cryptographically attest the full human-readable command/file diff. LOCO must display the exact action in its own trusted UI boundary and must not overstate what the authenticator attests.
+
+No dependency, native API, key enrollment flow, or production code is selected by this survey.
