@@ -11,6 +11,7 @@ on:
       - main
     paths:
       - "core/loco-core/**"
+      - "scripts/macos-*.c"
       - ".github/workflows/rust-core-tests.yml"
 
 permissions:
