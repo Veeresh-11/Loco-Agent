@@ -441,7 +441,7 @@ mod tests {
         consume(&mut store, &challenge.challenge_id, &action).unwrap();
         assert!(store.is_consumed(&challenge.challenge_id).unwrap());
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
@@ -568,7 +568,7 @@ mod tests {
     fn action_mismatch_does_not_consume() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 30).unwrap();
+        let challenge = issue(&mut store,&action, 30).unwrap();
         let modified = ProposedAction::ReadFile { path: "src/lib.rs".into(), max_bytes: Some(2048) };
         assert!(matches!(
             consume(&mut store, &challenge.challenge_id, &modified),
