@@ -168,3 +168,8 @@ See [Approval Trust Boundary](../security/APPROVAL_TRUST_BOUNDARY.md). The exist
 Do not select or ship a generic signing key as proof of user intent. Platform authenticator selection must first establish the same-user attacker model, OS-owned user-presence prompt, application binding, enrollment/recovery/revocation, and fail-closed behavior independently for Windows, macOS, and Linux. Rust-owned time must replace caller-supplied production timestamps; rollback across machine restart remains a residual risk until a platform-backed source is selected.
 
 Implementation is gated on the ADR's exit criteria. In particular, no production privileged write or command execution may rely on the current unsigned challenge DTO.
+
+
+## TypeScript operation inventory checkpoint — 2026-11-24
+
+See [TypeScript Privileged-Operation Inventory](../security/TYPESCRIPT_PRIVILEGED_OPERATION_INVENTORY.md). The current extension still performs workspace reads, RAG acquisition, Git metadata subprocess calls, and patch writes in TypeScript. The sidecar currently evaluates proposals only and is not integrated into these paths. The inventory defines the action classes and gates required before moving read or write operations behind Rust. No runtime behavior changed in this documentation checkpoint.
