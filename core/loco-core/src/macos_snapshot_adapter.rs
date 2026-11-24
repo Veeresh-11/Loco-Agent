@@ -9,13 +9,13 @@ use crate::snapshot_payload::{build_snapshot_contract,CapturedWorkspaceSnapshot,
 pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
-fn filesystem_id(file:&File)->Result<[i32;2],MacOsSnapshotAdapterError>{
+fn filesystem_id(file:&File)->Result<libc::fsid_t,MacOsSnapshotAdapterError>{
  use std::os::fd::AsRawFd;
  let mut stat:libc::statfs=unsafe{std::mem::zeroed()};
  if unsafe{libc::fstatfs(file.as_raw_fd(),&mut stat)}!=0 {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
- Ok(stat.f_fsid.val)
+ Ok(stat.f_fsid)
 }
 
 #[cfg(target_os="macos")]
@@ -78,6 +78,9 @@ impl MacOsWorkspaceSnapshotAdapter {
   }
   let meta=current.metadata().map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
   let root_filesystem_id=filesystem_id(&current)?;
+  if root_filesystem_id == unsafe{std::mem::zeroed()} {
+   return Err(MacOsSnapshotAdapterError::InvalidRoot);
+  }
   Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root:canonical})
  }
  pub fn root_path(&self)->&Path{&self.canonical_root}
@@ -200,7 +203,7 @@ mod tests {
    workspace_id:"system-root-test".into(),
    canonical_root:PathBuf::from("/"),
   };
-  assert_eq!(adapter.capture(&SnapshotCaptureRequest::new(relative,128).unwrap()),
+  assert_eq!(adapter.capture(&SnapshotCaptureRequest::new(&relative,128).unwrap()),
    Err(SnapshotPayloadError::AcquisitionFailed),
    "capture must reject the System-to-Data firmlink before acquiring content");
  }
