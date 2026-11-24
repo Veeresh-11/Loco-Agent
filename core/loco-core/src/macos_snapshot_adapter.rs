@@ -208,6 +208,18 @@ mod tests {
  }
 
  #[test]
+ fn captures_workspace_root_through_users_firmlink() {
+  let home=PathBuf::from(std::env::var("HOME").expect("macOS CI home directory"));
+  assert!(home.starts_with("/Users/"));
+  let d=tempfile::tempdir_in(&home).unwrap();
+  std::fs::write(d.path().join("inside.txt"),b"inside-users-firmlink").unwrap();
+  let adapter=MacOsWorkspaceSnapshotAdapter::new(d.path(),"users-workspace").unwrap();
+  assert!(adapter.root_path().starts_with("/System/Volumes/Data/Users"));
+  let captured=adapter.capture(&SnapshotCaptureRequest::new("inside.txt",64).unwrap()).unwrap();
+  assert_eq!(captured.bytes(),b"inside-users-firmlink");
+ }
+
+ #[test]
  fn root_and_descendant_use_nofirmlink_descriptor_paths() {
   let d=tempfile::tempdir().unwrap();
   std::fs::create_dir(d.path().join("nested")).unwrap();
