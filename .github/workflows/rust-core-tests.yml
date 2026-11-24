@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v sandbox-exec
+          test -x /usr/bin/sandbox-exec
           workspace="$RUNNER_TEMP/loco-sandbox-workspace"
           mkdir -p "$workspace"
           clang -Wall -Wextra -Werror scripts/macos-fcntl-sandbox-probe.c -o "$RUNNER_TEMP/loco-fcntl-sandbox-probe"
@@ -96,7 +96,7 @@ jobs:
           (allow system-fcntl (fcntl-command F_GETPATH))
           PROFILE
           )"
-          sandbox-exec -p "$profile" "$RUNNER_TEMP/loco-fcntl-sandbox-probe" "$workspace"
+          /usr/bin/sandbox-exec -p "$profile" "$RUNNER_TEMP/loco-fcntl-sandbox-probe" "$workspace"
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash
