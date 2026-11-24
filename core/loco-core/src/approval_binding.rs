@@ -25,6 +25,7 @@ pub enum ApprovalError {
     DigestMismatch,
     SnapshotDigestMismatch,
     SnapshotInvalid,
+    SnapshotStale,
     ActionSnapshotMismatch,
     UnsupportedAction,
     Expired,
