@@ -96,44 +96,151 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
 }
 
 #[cfg(target_os="macos")]
-fn entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
- use std::ffi::CString;
+fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
  use std::os::fd::AsRawFd;
- use std::os::unix::ffi::OsStrExt;
+ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
- let name = CString::new(name.as_bytes()).map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
- let mut attrs: libc::attrlist = unsafe { std::mem::zeroed() };
- attrs.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
- attrs.commonattr = libc::ATTR_CMN_RETURNED_ATTRS;
- attrs.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
-
- let mut buffer = vec![0u8; libc::PATH_MAX as usize + 64];
- let options = (libc::FSOPT_NOFOLLOW_ANY as libc::c_ulong)
-  | (libc::FSOPT_ATTR_CMN_EXTENDED as libc::c_ulong)
-  | FSOPT_RESOLVE_BENEATH;
- let result = unsafe {
-  libc::getattrlistat(
-   parent.as_raw_fd(),
-   name.as_ptr(),
-   (&mut attrs as *mut libc::attrlist).cast(),
-   buffer.as_mut_ptr().cast(),
-   buffer.len(),
-   options,
-  )
- };
- if result != 0 {
+ let wanted = name.as_bytes();
+ if wanted.is_empty() || wanted.contains(&0) || wanted.contains(&b'/') {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
- parse_nofirmlink_path_record(&buffer)
-}
 
+ // Each scan needs a new open file description. try_clone/dup would share
+ // getattrlistbulk's directory offset across concurrent captures.
+ let scan_fd = openat(
+  parent, ".",
+  OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+  Mode::empty()
+ ).map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
+ let scan_dir = File::from(scan_fd);
+
+ let mut attrs: libc::attrlist = unsafe { std::mem::zeroed() };
+ attrs.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
+ attrs.commonattr = libc::ATTR_CMN_RETURNED_ATTRS
+  | libc::ATTR_CMN_NAME
+  | libc::ATTR_CMN_FLAGS
+  | libc::ATTR_CMN_ERROR;
+ attrs.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
+
+ let mut buffer = vec![0u8; 64 * 1024];
+ let mut scanned = 0usize;
+ const MAX_DIRECTORY_ENTRIES: usize = 16 * 1024;
+
+ loop {
+  let count = unsafe {
+   libc::getattrlistbulk(
+    scan_dir.as_raw_fd(),
+    (&mut attrs as *mut libc::attrlist).cast(),
+    buffer.as_mut_ptr().cast(),
+    buffer.len(),
+    libc::FSOPT_ATTR_CMN_EXTENDED as u64,
+   )
+  };
+  if count < 0 {
+   return Err(MacOsSnapshotAdapterError::InvalidRoot);
+  }
+  if count == 0 {
+   return Err(MacOsSnapshotAdapterError::InvalidRoot);
+  }
+
+  let mut cursor = 0usize;
+  for _ in 0..count as usize {
+   scanned = scanned.checked_add(1).ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+   if scanned > MAX_DIRECTORY_ENTRIES {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+   let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+   if cursor > buffer.len() || buffer.len() - cursor < header_size {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+   let record_len = u32::from_ne_bytes(
+    buffer[cursor..cursor + 4].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
+   ) as usize;
+   if record_len < header_size || record_len > buffer.len() - cursor {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+   let record = &buffer[cursor..cursor + record_len];
+   let returned = unsafe {
+    std::ptr::read_unaligned(record.as_ptr().add(4).cast::<libc::attribute_set_t>())
+   };
+   if returned.commonattr & libc::ATTR_CMN_NAME == 0 {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+
+   let mut offset = header_size;
+   let mut entry_error = 0u32;
+   if returned.commonattr & libc::ATTR_CMN_ERROR != 0 {
+    if offset.checked_add(4).filter(|end| *end <= record_len).is_none() {
+     return Err(MacOsSnapshotAdapterError::InvalidRoot);
+    }
+    entry_error = u32::from_ne_bytes(
+     record[offset..offset + 4].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
+    );
+    offset += 4;
+   }
+
+   let reference_size = std::mem::size_of::<libc::attrreference_t>();
+   if offset.checked_add(reference_size).filter(|end| *end <= record_len).is_none() {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+   let name_ref = unsafe {
+    std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
+   };
+   let name_start = (offset as isize)
+    .checked_add(name_ref.attr_dataoffset as isize)
+    .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+   let name_len = name_ref.attr_length as usize;
+   if name_start < 0 || name_len < 1 ||
+      (name_start as usize).checked_add(name_len).filter(|end| *end <= record_len).is_none() {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+   let name_bytes = &record[name_start as usize..name_start as usize + name_len];
+   if name_bytes.last() != Some(&0) || name_bytes[..name_len - 1].contains(&0) {
+    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   }
+   offset += reference_size;
+
+   if &name_bytes[..name_len - 1] == wanted {
+    if entry_error != 0
+       || returned.commonattr & libc::ATTR_CMN_FLAGS == 0
+       || returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0
+       || offset.checked_add(4 + reference_size).filter(|end| *end <= record_len).is_none() {
+     return Err(MacOsSnapshotAdapterError::InvalidRoot);
+    }
+    offset += 4; // ATTR_CMN_FLAGS
+    let path_ref = unsafe {
+     std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
+    };
+    let path_start = (offset as isize)
+     .checked_add(path_ref.attr_dataoffset as isize)
+     .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+    let path_len = path_ref.attr_length as usize;
+    if path_start < 0 || path_len < 2 || path_len > libc::PATH_MAX as usize ||
+       (path_start as usize).checked_add(path_len).filter(|end| *end <= record_len).is_none() {
+     return Err(MacOsSnapshotAdapterError::InvalidRoot);
+    }
+    let path_bytes = &record[path_start as usize..path_start as usize + path_len];
+    if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
+     return Err(MacOsSnapshotAdapterError::InvalidRoot);
+    }
+    let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
+    if !path.is_absolute() {
+     return Err(MacOsSnapshotAdapterError::InvalidRoot);
+    }
+    return Ok(path);
+   }
+
+   cursor += record_len;
+  }
+ }
+}
 #[cfg(target_os="macos")]
 fn preflight_entry_path(parent: &File, name: &str) -> Result<PathBuf, SnapshotPayloadError> {
  use std::ffi::OsStr;
 
  let parent_path = descriptor_path_no_firmlink(parent)
   .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
- let entry_path = entry_path_no_firmlink(parent, OsStr::new(name))
+ let entry_path = bulk_entry_path_no_firmlink(parent, OsStr::new(name))
   .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
  let expected_path = parent_path.join(name);
  if entry_path != expected_path {
@@ -145,10 +252,10 @@ fn preflight_entry_path(parent: &File, name: &str) -> Result<PathBuf, SnapshotPa
 #[cfg(target_os="macos")]
 pub fn attr_cmnex_nofirmlinkpath_available() -> bool {
  use std::ffi::OsStr;
- File::open(".")
+ File::open("/")
   .ok()
-  .and_then(|directory| entry_path_no_firmlink(&directory, OsStr::new(".")).ok())
-  .is_some()
+  .and_then(|directory| bulk_entry_path_no_firmlink(&directory, OsStr::new("System")).ok())
+  .is_some_and(|path| path == Path::new("/System"))
 }
 
 #[cfg(target_os="macos")]
@@ -448,6 +555,40 @@ mod tests {
   for worker in workers {
    worker.join().unwrap();
   }
+ }
+
+ #[test]
+ fn bulk_preflight_preserves_symlink_alias_and_openat_rejects_it() {
+  let d=tempfile::tempdir().unwrap();
+  std::fs::create_dir(d.path().join("target")).unwrap();
+  symlink("target",d.path().join("alias")).unwrap();
+  let root=File::open(d.path()).unwrap();
+  let expected=descriptor_path_no_firmlink(&root).unwrap().join("alias");
+  assert_eq!(preflight_entry_path(&root,"alias").unwrap(),expected);
+  assert!(open_dir(&root,"alias").is_err());
+ }
+
+ #[test]
+ fn concurrent_bulk_preflights_use_independent_directory_offsets() {
+  let d=tempfile::tempdir().unwrap();
+  for index in 0..12 {
+   std::fs::write(d.path().join(format!("entry-{index:02}")),b"x").unwrap();
+  }
+  let root=File::open(d.path()).unwrap();
+  std::thread::scope(|scope| {
+   let mut workers=Vec::new();
+   for worker in 0..4 {
+    let root=&root;
+    workers.push(scope.spawn(move || {
+     for index in 0..12 {
+      let name=format!("entry-{:02}",(index+worker)%12);
+      let expected=descriptor_path_no_firmlink(root).unwrap().join(&name);
+      assert_eq!(preflight_entry_path(root,&name).unwrap(),expected);
+     }
+    }));
+   }
+   for worker in workers { worker.join().unwrap(); }
+  });
  }
 
  #[test]
