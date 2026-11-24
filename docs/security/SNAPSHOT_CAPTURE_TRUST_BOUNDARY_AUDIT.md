@@ -26,7 +26,7 @@ However, `snapshot_payload.rs` states explicitly that:
 - `validate_snapshot_payload` checks contract validity, length and SHA-256 consistency;
 - the `WorkspaceSnapshotAdapter` trait describes the intended boundary but says the trait alone does not make an implementation secure.
 
-The repository's PR #125 diff changes the generic snapshot payload and approval modules but does not itself add a concrete platform adapter implementation or a call-site integration from an adapter into `ApprovalStore::issue/consume`. The existing platform adapter work appears in the separate native filesystem feature stack and remains subject to its own open security gates.
+The PR #125 feature-branch tree contains concrete Linux, macOS and Windows adapter modules. The Linux and macOS adapters implement `WorkspaceSnapshotAdapter` and call `CapturedWorkspaceSnapshot::new` only after their bounded read and metadata/path checks; the Windows adapter similarly constructs the capture after its handle-relative read checks. PR #125 itself changes the generic payload and approval modules, not those adapter files. Crucially, the inspected production authority/sidecar path still does not call the adapters or `ApprovalStore::issue/consume`: the approval-store calls found in `approval_store.rs` are test helpers/tests, and the sidecar protocol/authority remains proposal-evaluation only. The protocol explicitly says an `allow` decision is not an execution capability. Thus the acquisition modules exist, but the end-to-end trust path from IPC request → adapter capture → snapshot-bound approval has not been integrated.
 
 ## Findings
 
@@ -34,7 +34,7 @@ The repository's PR #125 diff changes the generic snapshot payload and approval 
 
 **Severity:** High for any future authorization use; prototype-only code remains non-production.
 
-A caller within the Rust crate can invoke crate-private constructors. The timestamp is trusted only to the extent that every call site creating a `CapturedWorkspaceSnapshot` occurs after the actual secure acquisition completed and no untrusted or weak acquisition path can create one.
+A caller within the Rust crate can invoke crate-private constructors. The timestamp is currently assigned by the concrete adapters at their final `CapturedWorkspaceSnapshot::new(...)` call, after their acquisition checks. The issue is API authority: `new` is `pub(crate)`, so any future module in the crate can construct a capture from caller-supplied bytes/metadata using the public metadata builder. The capture type itself does not encode provenance proving that a platform adapter created it.
 
 **Required control:** Keep constructors private to the acquisition module or use a sealed/private capability type created only by the concrete adapter. Ensure the timestamp is assigned after the adapter has completed its bounded read and post-read identity/mutation checks. Audit every constructor call site.
 
@@ -60,13 +60,14 @@ The snapshot digest binds workspace ID, relative path, file kind, byte length, c
 
 ## Acceptance work before treating PR #125 as integrated
 
-1. Enumerate all `CapturedWorkspaceSnapshot::new/new_at` call sites and prove production construction is limited to trusted adapter code.
-2. Enumerate all `ApprovalStore::issue/consume` call sites and prove no caller-supplied DTO, path-only helper, TypeScript, or Python layer can bypass capture.
+1. Restrict `CapturedWorkspaceSnapshot` construction to a private acquisition module or sealed adapter-issued capability; keep test constructors behind test-only visibility.
+2. Integrate the concrete platform adapter into the Rust authority request path and make `ApprovalStore::issue/consume` reachable only through that trusted capture path. Today, the inspected `.issue()` / `.consume()` references are test-only; the production sidecar remains proposal-evaluation only.
+3. Ensure no caller-supplied DTO, path-only helper, TypeScript, or Python layer can bypass capture.
 3. Unify the monotonic clock origin used for capture stamps and store comparisons; make fake-clock injection test-only or share a single injected clock source.
 4. Add tests for clone/reuse not refreshing age, fresh recapture, clock-origin mismatch, and capture completion time.
 5. Demonstrate the concrete platform adapter returns this exact type only after bounded handle-relative acquisition, stable identity checks, and post-read mutation checks.
 6. Maintain the current fail-closed behavior for unsupported actions and do not enable writes or command execution.
-7. Obtain independent security review of the complete integrated call path, native acquisition matrix and platform API assumptions.
+7. Resolve the existing native-platform release gates (including the macOS firmlink signal discrepancy and Windows `OBJ_DONT_REPARSE` contract caveat), then obtain independent security review of the complete integrated call path, native acquisition matrix and platform API assumptions.
 
 ## Merge and release decision
 
