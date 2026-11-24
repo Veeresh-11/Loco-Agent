@@ -237,13 +237,14 @@ The native bulk probe now checks three mapped entries and two stable ordinary-di
 bulk_extended name=usr flags=0x00088000 nofirmlink_path=/usr expected=/usr match=yes
 bulk_extended name=Library flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Library expected=/System/Volumes/Data/Library match=yes
 bulk_extended name=System flags=0x00080000 nofirmlink_path=/System expected=/System match=yes
+bulk_extended name=private flags=0x00108000 nofirmlink_path=/System/Volumes/Data/private expected=/System/Volumes/Data/private match=yes
 bulk_extended name=Users flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Users expected=/System/Volumes/Data/Users match=yes
 bulk_extended name=Applications flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Applications expected=/System/Volumes/Data/Applications match=yes
-bulk_extended mapped_entries_found=3 normal_entries_found=2
+bulk_extended mapped_entries_found=4 normal_entries_found=2
 ```
 
-The `/private` entry was deliberately excluded as an ordinary-directory control because it is a symlink alias to `/System/Volumes/Data/private`, not a plain directory. The `/System` and `/usr` controls return their expected unchanged paths; the mapped entries return their Data-volume no-firmlink paths. The corresponding `getattrlistat` extended-path results match those same paths.
+The `/private` entry is itself listed in `/usr/share/firmlinks` as `/private\tprivate`; it is a directory, not a POSIX symlink (`fstatat(AT_SYMLINK_NOFOLLOW)` reports mode `040755` and `S_ISLNK=no`). A follow-up `getattrlistat` request with `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH` still returns the firmlink directory, and `ATTR_CMNEXT_NOFIRMLINKPATH` reports `/System/Volumes/Data/private`. This confirms that `FSOPT_NOFOLLOW_ANY` prevents symbolic-link traversal but does not block firmlinks. The `/System` and `/usr` controls return their expected unchanged paths; all four mapped entries return their Data-volume no-firmlink paths.
 
 This gives a reproducible *pre-application-open path observation* during directory enumeration, but the returned value remains a path for the vnode produced by the filesystem's bulk operation. Public XNU source documents the intended `SF_FIRMLINK` entry flag and firmlink-entry metadata behavior, while the hosted APFS runner still reports target FSIDs/file IDs and `SF_NOUNLINK`. Without APFS implementation source or an Apple-provided same-volume fixture, we cannot prove that the bulk call observes the firmlink entry without internally traversing to its target. Do not promote the path comparison to the authorization boundary.
 
-The exact head [197be79](https://github.com/Veeresh-11/Loco-Agent/commit/197be79fb66db571af5c48ecc0b5d466b4473a64) passed Ubuntu, Windows, and macOS in [run #45340686612](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45340686612). macOS recorded 96 unit tests passed and one ignored nested-volume fixture.
+The exact head [5c56d25](https://github.com/Veeresh-11/Loco-Agent/commit/5c56d25557c0c0ddf160a4466e4554191a46741c) passed Ubuntu, Windows, and macOS in [run #45341558203](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45341558203). macOS recorded 96 unit tests passed and one ignored nested-volume fixture.
