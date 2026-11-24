@@ -45,10 +45,61 @@ fn descriptor_path_no_firmlink(file: &File) -> Result<PathBuf, MacOsSnapshotAdap
 const FSOPT_RESOLVE_BENEATH: libc::c_ulong = 0x1000;
 
 #[cfg(target_os="macos")]
+fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotAdapterError> {
+ use std::ffi::OsString;
+ use std::os::unix::ffi::OsStringExt;
+
+ if buffer.len() < 4 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let record_len = u32::from_ne_bytes(buffer[..4].try_into().unwrap()) as usize;
+ let minimum_len = 4 + std::mem::size_of::<libc::attribute_set_t>() +
+                   std::mem::size_of::<libc::attrreference_t>();
+ if record_len > buffer.len() || record_len < minimum_len {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let returned = unsafe {
+  std::ptr::read_unaligned(buffer.as_ptr().add(4).cast::<libc::attribute_set_t>())
+ };
+ if returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+
+ let reference_offset = 4 + std::mem::size_of::<libc::attribute_set_t>();
+ let reference = unsafe {
+  std::ptr::read_unaligned(
+   buffer.as_ptr().add(reference_offset).cast::<libc::attrreference_t>()
+  )
+ };
+ let path_start = reference_offset as isize + reference.attr_dataoffset as isize;
+ let path_len = reference.attr_length as usize;
+ let minimum_path_start = reference_offset + std::mem::size_of::<libc::attrreference_t>();
+ let path_start = usize::try_from(path_start)
+  .map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
+ let path_end = path_start.checked_add(path_len)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ if path_start < minimum_path_start || path_len < 2 ||
+    path_end > record_len || path_len > libc::PATH_MAX as usize + 64 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let path_bytes = &buffer[path_start..path_end];
+ if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
+ if !path.is_absolute() || path.components().any(|part|
+  matches!(part, std::path::Component::CurDir | std::path::Component::ParentDir)
+ ) {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok(path)
+}
+
+#[cfg(target_os="macos")]
 fn entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
- use std::ffi::{CString, OsString};
+ use std::ffi::CString;
  use std::os::fd::AsRawFd;
- use std::os::unix::ffi::{OsStrExt, OsStringExt};
+ use std::os::unix::ffi::OsStrExt;
 
  let name = CString::new(name.as_bytes()).map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
  let mut attrs: libc::attrlist = unsafe { std::mem::zeroed() };
@@ -73,42 +124,7 @@ fn entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathB
  if result != 0 {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
-
- let record_len = u32::from_ne_bytes(buffer[..4].try_into().unwrap()) as usize;
- if record_len > buffer.len() ||
-    record_len < 4 + std::mem::size_of::<libc::attribute_set_t>() +
-                 std::mem::size_of::<libc::attrreference_t>() {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
- let returned = unsafe {
-  std::ptr::read_unaligned(buffer.as_ptr().add(4).cast::<libc::attribute_set_t>())
- };
- if returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0 {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
-
- let reference_offset = 4 + std::mem::size_of::<libc::attribute_set_t>();
- let reference = unsafe {
-  std::ptr::read_unaligned(
-   buffer.as_ptr().add(reference_offset).cast::<libc::attrreference_t>()
-  )
- };
- let path_start = reference_offset as isize + reference.attr_dataoffset as isize;
- let path_len = reference.attr_length as usize;
- if path_start < 0 || path_len < 2 ||
-    path_start as usize + path_len > record_len ||
-    path_len > libc::PATH_MAX as usize + 64 {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
- let path_bytes = &buffer[path_start as usize..path_start as usize + path_len];
- if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
- let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
- if !path.is_absolute() {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
- Ok(path)
+ parse_nofirmlink_path_record(&buffer)
 }
 
 #[cfg(target_os="macos")]
