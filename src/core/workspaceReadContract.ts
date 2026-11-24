@@ -34,7 +34,7 @@ export function validateWorkspaceReadRequest(value: unknown): value is Workspace
     request.workspaceId.length >= 1 && request.workspaceId.length <= 128 &&
     /^[A-Za-z0-9._:-]+$/.test(request.workspaceId) &&
     typeof request.relativePath === 'string' &&
-    request.relativePath.length <= 4096 &&
+    Buffer.byteLength(request.relativePath, 'utf8') <= 4096 &&
     isSafePortableRelativePath(request.relativePath) &&
     typeof request.maxBytes === 'number' &&
     Number.isSafeInteger(request.maxBytes) &&
