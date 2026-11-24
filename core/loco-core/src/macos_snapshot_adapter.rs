@@ -9,6 +9,7 @@ use crate::snapshot_payload::{build_snapshot_contract,CapturedWorkspaceSnapshot,
 pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
+// Keep fsid_t opaque: compare the OS-provided volume identifier without decoding its private layout.
 fn filesystem_id(file:&File)->Result<libc::fsid_t,MacOsSnapshotAdapterError>{
  use std::os::fd::AsRawFd;
  let mut stat:libc::statfs=unsafe{std::mem::zeroed()};
