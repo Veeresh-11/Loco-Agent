@@ -27,7 +27,6 @@ Exact-head evidence for the opened-firmlink identity regression:
 
 | Dimension | Status |
 |---|---|
-| macOS 15 arm64 and Intel | Validated in CI on macOS 15.8.2 arm64 (24H232) and macOS 15.7.9 Intel (24G830); no broader patch-level or APFS-layout guarantee |
 | Earlier macOS releases (14.x and older) | Unverified; no minimum supported version is declared |
 | Future macOS releases | Unverified until CI evidence is added |
 | macOS 15 native SDK variations | Tested only on the recorded 15.7.9 Intel and 15.8.2 arm64 runner builds; other SDK/runtime combinations remain unverified |
