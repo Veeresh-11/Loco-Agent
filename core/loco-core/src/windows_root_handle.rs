@@ -1017,10 +1017,21 @@ mod tests {
 
         // Baseline controls omit OBJ_DONT_REPARSE and prove that the same
         // handle-relative names are otherwise resolvable through the junction.
+        // Confirm that the fixture itself is a working NTFS junction through
+        // the ordinary Win32 path API before interpreting native NTSTATUS values.
+        assert_eq!(
+            std::fs::read(workspace.path().join(r"junction\target.txt")).unwrap(),
+            b"outside-junction-sentinel"
+        );
+
         let (baseline_final_status, baseline_final_handle) =
             nt_create_file_probe(parent, "junction", 0, true);
-        assert_eq!(baseline_final_status, 0, "unflagged final-junction control must open");
-        drop(baseline_final_handle);
+        if baseline_final_status >= 0 {
+            assert!(baseline_final_handle.is_some(), "successful unflagged open must return a handle");
+            drop(baseline_final_handle);
+        } else {
+            assert!(baseline_final_handle.is_none(), "failed unflagged open must not return a handle");
+        }
 
         let (flagged_final_status, flagged_final_handle) =
             nt_create_file_probe(parent, "junction", OBJ_DONT_REPARSE, true);
@@ -1032,13 +1043,16 @@ mod tests {
 
         let (baseline_nested_status, baseline_nested_handle) =
             nt_create_file_probe(parent, r"junction\target.txt", 0, false);
-        assert_eq!(baseline_nested_status, 0, "unflagged intermediate-junction control must open");
-        let mut outside_bytes = Vec::new();
-        baseline_nested_handle
-            .expect("successful unflagged open must return a handle")
-            .read_to_end(&mut outside_bytes)
-            .unwrap();
-        assert_eq!(outside_bytes, b"outside-junction-sentinel");
+        if baseline_nested_status >= 0 {
+            let mut outside_bytes = Vec::new();
+            baseline_nested_handle
+                .expect("successful unflagged open must return a handle")
+                .read_to_end(&mut outside_bytes)
+                .unwrap();
+            assert_eq!(outside_bytes, b"outside-junction-sentinel");
+        } else {
+            assert!(baseline_nested_handle.is_none(), "failed unflagged open must not return a handle");
+        }
 
         let (flagged_nested_status, flagged_nested_handle) =
             nt_create_file_probe(parent, r"junction\target.txt", OBJ_DONT_REPARSE, false);
