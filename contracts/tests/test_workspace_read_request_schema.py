@@ -4,7 +4,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator, FormatChecker
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_workspace_read_request_schema_accepts_shared_fixture():
