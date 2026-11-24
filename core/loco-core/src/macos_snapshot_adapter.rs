@@ -83,10 +83,10 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
  let path_bytes = &buffer[path_start..path_end];
- if path_bytes.last() != Some(&0) || path_bytes[..path_bytes.len() - 1].contains(&0) {
+ if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
- let path = PathBuf::from(OsString::from_vec(path_bytes[..path_bytes.len() - 1].to_vec()));
+ let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
  if !path.is_absolute() || path.components().any(|part|
   matches!(part, std::path::Component::CurDir | std::path::Component::ParentDir)
  ) {
@@ -98,42 +98,141 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
 #[cfg(target_os="macos")]
 const ATTR_CMN_ERROR: u32 = 0x2000_0000;
 #[cfg(target_os="macos")]
-const MAX_ENTRY_NAME_BYTES: usize = 3 * 255 + 1;
+const ATTR_CMN_FLAGS_SF_FIRMLINK: u32 = 0x0080_0000;
+#[cfg(target_os="macos")]
+const MAX_DIRECTORY_ENTRIES: usize = 16 * 1024;
+#[cfg(target_os="macos")]
+const MAX_BULK_RECORD_BYTES: usize = 64 * 1024;
 
 #[cfg(target_os="macos")]
-fn attr_reference_range(
- record_len: usize,
- reference_offset: usize,
- reference: libc::attrreference_t,
- minimum_payload_len: usize,
- maximum_payload_len: usize,
-) -> Result<std::ops::Range<usize>, MacOsSnapshotAdapterError> {
- let reference_end = reference_offset
-  .checked_add(std::mem::size_of::<libc::attrreference_t>())
-  .filter(|end| *end <= record_len)
-  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
- let payload_start = (reference_offset as isize)
-  .checked_add(reference.attr_dataoffset as isize)
-  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
- let payload_start = usize::try_from(payload_start)
-  .map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
- let payload_len = reference.attr_length as usize;
- let payload_end = payload_start.checked_add(payload_len)
-  .filter(|end| *end <= record_len)
-  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
- if payload_start < reference_end
-    || payload_len < minimum_payload_len
-    || payload_len > maximum_payload_len {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BulkEntryRecord {
+ name: Vec<u8>,
+ flags: u32,
+ no_firmlink_path: PathBuf,
+}
+
+/// Parses exactly one getattrlistbulk record. Attribute payloads must begin
+/// after their own attrreference structures and remain inside record_len.
+/// ATTR_CMN_FLAGS is preserved as diagnostic evidence; it is not interpreted
+/// as a firmlink authorization signal until native runner evidence agrees
+/// with the documented SF_FIRMLINK semantics.
+#[cfg(target_os="macos")]
+fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapshotAdapterError> {
+ use std::ffi::OsString;
+ use std::os::unix::ffi::OsStringExt;
+
+ let invalid = || MacOsSnapshotAdapterError::InvalidRoot;
+ let header_size = 4usize
+  .checked_add(std::mem::size_of::<libc::attribute_set_t>())
+  .ok_or_else(invalid)?;
+ if record.len() < header_size {
+  return Err(invalid());
  }
- Ok(payload_start..payload_end)
+ let record_len = u32::from_ne_bytes(record[..4].try_into().map_err(|_| invalid())?) as usize;
+ if record_len != record.len() || record_len > MAX_BULK_RECORD_BYTES {
+  return Err(invalid());
+ }
+ let returned = unsafe {
+  std::ptr::read_unaligned(record.as_ptr().add(4).cast::<libc::attribute_set_t>())
+ };
+ if returned.commonattr & libc::ATTR_CMN_NAME == 0
+  || returned.commonattr & libc::ATTR_CMN_FLAGS == 0
+  || returned.commonattr & ATTR_CMN_ERROR == 0
+  || returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0
+ {
+  return Err(invalid());
+ }
+
+ let mut offset = header_size;
+ let entry_error_end = offset.checked_add(4).ok_or_else(invalid)?;
+ if entry_error_end > record_len {
+  return Err(invalid());
+ }
+ let entry_error = u32::from_ne_bytes(
+  record[offset..entry_error_end].try_into().map_err(|_| invalid())?
+ );
+ if entry_error != 0 {
+  return Err(invalid());
+ }
+ offset = entry_error_end;
+
+ let reference_size = std::mem::size_of::<libc::attrreference_t>();
+ let name_ref_end = offset.checked_add(reference_size).ok_or_else(invalid)?;
+ if name_ref_end > record_len {
+  return Err(invalid());
+ }
+ let name_ref = unsafe {
+  std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
+ };
+ let name_start_signed = (offset as isize)
+  .checked_add(name_ref.attr_dataoffset as isize)
+  .ok_or_else(invalid)?;
+ let name_start = usize::try_from(name_start_signed).map_err(|_| invalid())?;
+ let name_len = name_ref.attr_length as usize;
+ let minimum_name_start = name_ref_end;
+ let name_end = name_start.checked_add(name_len).ok_or_else(invalid)?;
+ if name_start < minimum_name_start || name_len < 2 || name_len > 256
+  || name_end > record_len
+ {
+  return Err(invalid());
+ }
+ let name_bytes = &record[name_start..name_end];
+ if name_bytes.last() != Some(&0) || name_bytes[..name_len - 1].contains(&0) {
+  return Err(invalid());
+ }
+ offset = name_ref_end;
+
+ let flags_end = offset.checked_add(4).ok_or_else(invalid)?;
+ if flags_end > record_len || name_start < flags_end {
+  return Err(invalid());
+ }
+ let flags = u32::from_ne_bytes(record[offset..flags_end].try_into().map_err(|_| invalid())?);
+ offset = flags_end;
+
+ let path_ref_end = offset.checked_add(reference_size).ok_or_else(invalid)?;
+ if path_ref_end > record_len {
+  return Err(invalid());
+ }
+ let path_ref = unsafe {
+  std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
+ };
+ let path_start_signed = (offset as isize)
+  .checked_add(path_ref.attr_dataoffset as isize)
+  .ok_or_else(invalid)?;
+ let path_start = usize::try_from(path_start_signed).map_err(|_| invalid())?;
+ let path_len = path_ref.attr_length as usize;
+ let path_end = path_start.checked_add(path_len).ok_or_else(invalid)?;
+ if path_start < path_ref_end || path_len < 2
+  || path_len > libc::PATH_MAX as usize
+  || path_end > record_len
+ {
+  return Err(invalid());
+ }
+ let path_bytes = &record[path_start..path_end];
+ if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
+  return Err(invalid());
+ }
+ let no_firmlink_path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
+ if !no_firmlink_path.is_absolute()
+  || no_firmlink_path.components().any(|part|
+   matches!(part, std::path::Component::CurDir | std::path::Component::ParentDir)
+  )
+ {
+  return Err(invalid());
+ }
+
+ Ok(BulkEntryRecord {
+  name: name_bytes[..name_len - 1].to_vec(),
+  flags,
+  no_firmlink_path,
+ })
 }
 
 #[cfg(target_os="macos")]
 fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
  use std::os::fd::AsRawFd;
- use std::ffi::OsString;
- use std::os::unix::ffi::{OsStrExt, OsStringExt};
+ use std::os::unix::ffi::OsStrExt;
 
  let wanted = name.as_bytes();
  if wanted.is_empty() || wanted.contains(&0) || wanted.contains(&b'/') {
@@ -157,9 +256,8 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
   | ATTR_CMN_ERROR;
  attrs.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
 
- let mut buffer = vec![0u8; 64 * 1024];
+ let mut buffer = vec![0u8; MAX_BULK_RECORD_BYTES];
  let mut scanned = 0usize;
- const MAX_DIRECTORY_ENTRIES: usize = 16 * 1024;
 
  loop {
   let count = unsafe {
@@ -171,10 +269,7 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
     libc::FSOPT_ATTR_CMN_EXTENDED as u64,
    )
   };
-  if count < 0 {
-   return Err(MacOsSnapshotAdapterError::InvalidRoot);
-  }
-  if count == 0 {
+  if count <= 0 {
    return Err(MacOsSnapshotAdapterError::InvalidRoot);
   }
 
@@ -184,78 +279,30 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
    if scanned > MAX_DIRECTORY_ENTRIES {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
    }
-   let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
-   if cursor > buffer.len() || buffer.len() - cursor < header_size {
+   if cursor > buffer.len() || buffer.len() - cursor < 4 {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
    }
    let record_len = u32::from_ne_bytes(
     buffer[cursor..cursor + 4].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
    ) as usize;
-   if record_len < header_size || record_len > buffer.len() - cursor {
+   let record_end = cursor.checked_add(record_len).ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+   if record_len < 4 + std::mem::size_of::<libc::attribute_set_t>()
+    || record_end > buffer.len()
+   {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
    }
-   let record = &buffer[cursor..cursor + record_len];
-   let returned = unsafe {
-    std::ptr::read_unaligned(record.as_ptr().add(4).cast::<libc::attribute_set_t>())
-   };
-   if returned.commonattr & libc::ATTR_CMN_NAME == 0 {
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
+   let parsed = parse_bulk_entry_record(&buffer[cursor..record_end])?;
+   if parsed.name == wanted {
+    // Preserve the observed flags for exact-head diagnostics. Do not equate
+    // SF_NOUNLINK or any other marker with SF_FIRMLINK.
+    let _observed_entry_flags = parsed.flags;
+    return Ok(parsed.no_firmlink_path);
    }
-
-   let mut offset = header_size;
-   let mut entry_error = 0u32;
-   if returned.commonattr & ATTR_CMN_ERROR != 0 {
-    if offset.checked_add(4).filter(|end| *end <= record_len).is_none() {
-     return Err(MacOsSnapshotAdapterError::InvalidRoot);
-    }
-    entry_error = u32::from_ne_bytes(
-     record[offset..offset + 4].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
-    );
-    offset += 4;
-   }
-   let reference_size = std::mem::size_of::<libc::attrreference_t>();
-   if offset.checked_add(reference_size).filter(|end| *end <= record_len).is_none() {
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let name_ref = unsafe {
-    std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
-   };
-   let name_range = attr_reference_range(record_len, offset, name_ref, 1, 256)?;
-   let name_bytes = &record[name_range];
-   if name_bytes.last() != Some(&0) || name_bytes[..name_bytes.len() - 1].contains(&0) {
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   offset += reference_size;
-
-   if &name_bytes[..name_bytes.len() - 1] == wanted {
-    if entry_error != 0
-       || returned.commonattr & libc::ATTR_CMN_FLAGS == 0
-       || returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0
-       || offset.checked_add(4 + reference_size).filter(|end| *end <= record_len).is_none() {
-     return Err(MacOsSnapshotAdapterError::InvalidRoot);
-    }
-    offset += 4; // ATTR_CMN_FLAGS
-    let path_ref = unsafe {
-     std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
-    };
-    let path_range = attr_reference_range(
-     record_len, offset, path_ref, 2, libc::PATH_MAX as usize
-    )?;
-    let path_bytes = &record[path_range];
-    if path_bytes.last() != Some(&0) || path_bytes[..path_bytes.len() - 1].contains(&0) {
-     return Err(MacOsSnapshotAdapterError::InvalidRoot);
-    }
-    let path = PathBuf::from(OsString::from_vec(path_bytes[..path_bytes.len() - 1].to_vec()));
-    if !path.is_absolute() {
-     return Err(MacOsSnapshotAdapterError::InvalidRoot);
-    }
-    return Ok(path);
-   }
-
-   cursor += record_len;
+   cursor = record_end;
   }
  }
 }
+
 #[cfg(target_os="macos")]
 fn preflight_entry_path(parent: &File, name: &str) -> Result<PathBuf, SnapshotPayloadError> {
  use std::ffi::OsStr;
@@ -435,30 +482,68 @@ mod tests {
  use crate::snapshot_payload::SnapshotCaptureRequest;
  use std::os::unix::fs::symlink;
 
- fn synthetic_nofirmlink_record(path: &[u8]) -> Vec<u8> {
-  let returned_offset = 4;
-  let reference_offset = returned_offset + std::mem::size_of::<libc::attribute_set_t>();
-  let path_offset = reference_offset + std::mem::size_of::<libc::attrreference_t>();
+ fn synthetic_bulk_entry_record(
+  name: &[u8],
+  path: &[u8],
+  flags: u32,
+  entry_error: u32,
+) -> Vec<u8> {
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4; // ATTR_CMN_ERROR precedes ATTR_CMN_NAME.
+  let name_ref_end = name_ref_offset + std::mem::size_of::<libc::attrreference_t>();
+  let flags_offset = name_ref_end;
+  let path_ref_offset = flags_offset + 4;
+  let path_ref_end = path_ref_offset + std::mem::size_of::<libc::attrreference_t>();
+  let name_offset = path_ref_end;
+  let path_offset = name_offset + name.len();
   let record_len = path_offset + path.len();
-  let mut buffer = vec![0u8; record_len];
-  buffer[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
+  let mut record = vec![0u8; record_len];
+  record[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
+
   let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
+  returned.commonattr = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
   returned.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
   unsafe {
    std::ptr::write_unaligned(
-    buffer.as_mut_ptr().add(returned_offset).cast::<libc::attribute_set_t>(),
+    record.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
     returned,
    );
    std::ptr::write_unaligned(
-    buffer.as_mut_ptr().add(reference_offset).cast::<libc::attrreference_t>(),
+    record.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
     libc::attrreference_t {
-     attr_dataoffset: std::mem::size_of::<libc::attrreference_t>() as i32,
+     attr_dataoffset: (name_offset - name_ref_offset) as i32,
+     attr_length: name.len() as u32,
+    },
+   );
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(path_ref_offset).cast::<libc::attrreference_t>(),
+    libc::attrreference_t {
+     attr_dataoffset: (path_offset - path_ref_offset) as i32,
      attr_length: path.len() as u32,
     },
    );
   }
-  buffer[path_offset..].copy_from_slice(path);
-  buffer
+  record[header_size..header_size + 4].copy_from_slice(&entry_error.to_ne_bytes());
+  record[flags_offset..flags_offset + 4].copy_from_slice(&flags.to_ne_bytes());
+  record[name_offset..name_offset + name.len()].copy_from_slice(name);
+  record[path_offset..path_offset + path.len()].copy_from_slice(path);
+  record
+ }
+
+ fn set_returned_attributes(
+  record: &mut [u8],
+  commonattr: u32,
+  forkattr: u32,
+ ) {
+  let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
+  returned.commonattr = commonattr;
+  returned.forkattr = forkattr;
+  unsafe {
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+  }
  }
  #[test]
  fn macos_workspace_root_is_on_apfs(){
@@ -520,61 +605,128 @@ mod tests {
  }
 
  #[test]
- fn bulk_attrreference_ranges_reject_overlaps_and_out_of_bounds_payloads() {
-  let valid = libc::attrreference_t { attr_dataoffset: 8, attr_length: 4 };
-  assert_eq!(
-   attr_reference_range(64, 24, valid, 2, 32).unwrap(),
-   32..36
+ fn bulk_entry_record_parser_accepts_well_formed_record_and_preserves_flags() {
+  let record = synthetic_bulk_entry_record(
+   b"Users\0",
+   b"/System/Volumes/Data/Users\0",
+   0x0010_8000,
+   0,
   );
-
-  for malformed in [
-   libc::attrreference_t { attr_dataoffset: -8, attr_length: 4 },
-   libc::attrreference_t { attr_dataoffset: 0, attr_length: 4 },
-   libc::attrreference_t { attr_dataoffset: i32::MAX, attr_length: 4 },
-   libc::attrreference_t { attr_dataoffset: 8, attr_length: 0 },
-   libc::attrreference_t { attr_dataoffset: 8, attr_length: 33 },
-  ] {
-   assert!(attr_reference_range(64, 24, malformed, 1, 32).is_err());
-  }
-
-  assert!(attr_reference_range(
-   32, 28, libc::attrreference_t { attr_dataoffset: 8, attr_length: 4 }, 1, 32
-  ).is_err());
+  let parsed = parse_bulk_entry_record(&record).unwrap();
+  assert_eq!(parsed.name, b"Users");
+  assert_eq!(parsed.flags, 0x0010_8000);
+  assert_eq!(parsed.no_firmlink_path, PathBuf::from("/System/Volumes/Data/Users"));
  }
 
  #[test]
- fn nofirmlink_path_record_parser_fails_closed_on_malformed_records() {
-  let valid=synthetic_nofirmlink_record(b"/System/Volumes/Data/Users\0");
-  assert_eq!(
-   parse_nofirmlink_path_record(&valid).unwrap(),
-   PathBuf::from("/System/Volumes/Data/Users")
-  );
+ fn bulk_entry_record_parser_rejects_truncated_header_and_record_overrun() {
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  assert!(parse_bulk_entry_record(&valid[..3]).is_err());
 
-  let mut truncated=valid.clone();
-  truncated.truncate(truncated.len()-1);
-  assert!(parse_nofirmlink_path_record(&truncated).is_err());
+  let mut truncated_header = valid.clone();
+  truncated_header.truncate(4 + std::mem::size_of::<libc::attribute_set_t>() - 1);
+  let truncated_len = truncated_header.len() as u32;
+  truncated_header[..4].copy_from_slice(&truncated_len.to_ne_bytes());
+  assert!(parse_bulk_entry_record(&truncated_header).is_err());
 
-  let mut missing_attr=valid.clone();
-  let mut returned=unsafe {
+  let mut overrun = valid.clone();
+  let declared = (overrun.len() as u32).saturating_add(1);
+  overrun[..4].copy_from_slice(&declared.to_ne_bytes());
+  assert!(parse_bulk_entry_record(&overrun).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_negative_and_overlapping_name_offsets() {
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4;
+
+  let mut negative = valid.clone();
+  let mut name_ref = unsafe {
    std::ptr::read_unaligned(
-    missing_attr.as_ptr().add(4).cast::<libc::attribute_set_t>()
+    negative.as_ptr().add(name_ref_offset).cast::<libc::attrreference_t>()
    )
   };
-  returned.forkattr=0;
+  name_ref.attr_dataoffset = -1;
   unsafe {
    std::ptr::write_unaligned(
-    missing_attr.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
-    returned,
+    negative.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    name_ref,
    );
   }
-  assert!(parse_nofirmlink_path_record(&missing_attr).is_err());
+  assert!(parse_bulk_entry_record(&negative).is_err());
 
-  let relative=synthetic_nofirmlink_record(b"relative/path\0");
-  assert!(parse_nofirmlink_path_record(&relative).is_err());
-
-  let unterminated=synthetic_nofirmlink_record(b"/tmp");
-  assert!(parse_nofirmlink_path_record(&unterminated).is_err());
+  let mut overlapping = valid;
+  name_ref.attr_dataoffset = 0; // Payload points into its own attrreference header.
+  unsafe {
+   std::ptr::write_unaligned(
+    overlapping.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    name_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&overlapping).is_err());
  }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_missing_terminators_and_bad_paths() {
+  let mut unterminated_name = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let name_start = 4 + std::mem::size_of::<libc::attribute_set_t>() + 4
+   + std::mem::size_of::<libc::attrreference_t>() + 4
+   + std::mem::size_of::<libc::attrreference_t>();
+  let name_len = b"System\0".len();
+  unterminated_name[name_start + name_len - 1] = b'X';
+  assert!(parse_bulk_entry_record(&unterminated_name).is_err());
+
+  let mut unterminated_path = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let path_start = name_start + name_len;
+  unterminated_path[path_start + b"/System\0".len() - 1] = b'X';
+  assert!(parse_bulk_entry_record(&unterminated_path).is_err());
+
+  let relative_path = synthetic_bulk_entry_record(b"System\0", b"System\0", 0, 0);
+  assert!(parse_bulk_entry_record(&relative_path).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_requires_every_requested_attribute_and_zero_entry_error() {
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+
+  for (commonattr, forkattr) in [
+   (libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (libc::ATTR_CMN_NAME | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, 0),
+  ] {
+   let mut missing = valid.clone();
+   set_returned_attributes(&mut missing, commonattr, forkattr);
+   assert!(parse_bulk_entry_record(&missing).is_err());
+  }
+
+  let mut nonzero_error = valid;
+  nonzero_error[header_size..header_size + 4].copy_from_slice(&5u32.to_ne_bytes());
+  assert!(parse_bulk_entry_record(&nonzero_error).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_malformed_path_reference() {
+  let mut malformed = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let path_ref_offset = header_size + 4 + std::mem::size_of::<libc::attrreference_t>() + 4;
+  let mut path_ref = unsafe {
+   std::ptr::read_unaligned(
+    malformed.as_ptr().add(path_ref_offset).cast::<libc::attrreference_t>()
+   )
+  };
+  path_ref.attr_dataoffset = 0; // Payload points into its own attrreference header.
+  unsafe {
+   std::ptr::write_unaligned(
+    malformed.as_mut_ptr().add(path_ref_offset).cast::<libc::attrreference_t>(),
+    path_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&malformed).is_err());
+ }
+
 
  #[test]
  fn concurrent_preflight_path_queries_do_not_share_directory_offsets() {
@@ -823,7 +975,7 @@ mod tests {
       Ok(())
      );
     },
-    Err(SnapshotPayloadError::AcquisitionFailed | SnapshotPayloadError::FirmlinkBoundary)=>{},
+    Err(SnapshotPayloadError::AcquisitionFailed)=>{},
     Err(other)=>panic!("unexpected capture error during path swap: {other:?}"),
    }
   }
