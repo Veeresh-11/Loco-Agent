@@ -11,6 +11,7 @@ class FakeChild extends EventEmitter {
   signalCode: NodeJS.Signals | null = null;
   killed = false;
   mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' = 'normal';
+  capabilities = ['proposal_evaluation'];
 
   constructor() {
     super();
@@ -22,7 +23,7 @@ class FakeChild extends EventEmitter {
       if (request.messageType === 'hello') {
         response = {
           protocolVersion: '1.0', messageType: 'hello', requestId: request.requestId,
-          server: { name: 'loco-rust-authority', version: '0.1.0', capabilities: ['proposal_evaluation'] }
+          server: { name: 'loco-rust-authority', version: '0.1.0', capabilities: this.capabilities }
         };
       } else if (request.messageType === 'evaluate') {
         response = {
@@ -69,6 +70,22 @@ describe('RustSidecarClient', () => {
     const decision = await client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' });
     expect(decision.decision).toBe('allow');
     expect(decision.proposalId).toBe('p-1');
+  });
+
+  it('exposes optional runtime capabilities and clears them on shutdown', async () => {
+    child.capabilities.push('macos_fcntl_getpath_nofirmlink');
+    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
+    await client.start();
+    expect(client.hasCapability('proposal_evaluation')).toBe(true);
+    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(true);
+    expect(client.hasCapability('unknown_capability')).toBe(false);
+    await client.shutdown();
+    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
+  });
+
+  it('fails closed when the sidecar advertises malformed capabilities', async () => {
+    child.capabilities = ['proposal_evaluation', 'bad-capability'];
+    await expect(client.start()).rejects.toThrow(/handshake/i);
   });
 
   it('fails closed on a mismatched response ID', async () => {
