@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
+#include <sched.h>
 
 static void dump_record(const unsigned char *record, size_t record_len) {
     uint32_t declared_len = 0;
@@ -93,24 +95,24 @@ static int capture_descriptor_paths(int fd, const char *label,
     memset(visible_path, 0, MAXPATHLEN);
     if (fcntl(fd, F_GETPATH, visible_path) != 0 ||
         memchr(visible_path, '\0', MAXPATHLEN) == NULL) {
-        printf("fcntl_getpath label=%s error=%d\n", label, errno);
+        if (label != NULL) printf("fcntl_getpath label=%s error=%d\n", label, errno);
         return 1;
     }
-    printf("fcntl_getpath label=%s path=%s\n", label, visible_path);
+    if (label != NULL) printf("fcntl_getpath label=%s path=%s\n", label, visible_path);
 
 #if defined(F_GETPATH_NOFIRMLINK)
     memset(nofirmlink_path, 0, MAXPATHLEN);
     if (fcntl(fd, F_GETPATH_NOFIRMLINK, nofirmlink_path) != 0 ||
         memchr(nofirmlink_path, '\0', MAXPATHLEN) == NULL) {
-        printf("fcntl_getpath_nofirmlink label=%s error=%d\n", label, errno);
+        if (label != NULL) printf("fcntl_getpath_nofirmlink label=%s error=%d\n", label, errno);
         return 1;
     }
-    printf("fcntl_getpath_nofirmlink label=%s path=%s\n",
-           label, nofirmlink_path);
+    if (label != NULL) printf("fcntl_getpath_nofirmlink label=%s path=%s\n",
+                              label, nofirmlink_path);
     return 0;
 #else
     (void)nofirmlink_path;
-    printf("fcntl_getpath_nofirmlink label=%s unavailable_in_sdk\n", label);
+    if (label != NULL) printf("fcntl_getpath_nofirmlink label=%s unavailable_in_sdk\n", label);
     return 2;
 #endif
 }
@@ -220,6 +222,126 @@ static void print_path_api_flags(int rootfd, const char *path) {
         }
     }
     close(childfd);
+}
+
+struct rename_race_context {
+    char left[MAXPATHLEN];
+    char right[MAXPATHLEN];
+    int iterations;
+    int writer_error;
+    int writer_errno;
+};
+
+static void *rename_race_writer(void *opaque) {
+    struct rename_race_context *context = opaque;
+    for (int i = 0; i < context->iterations; ++i) {
+        if (rename(context->left, context->right) != 0) {
+            context->writer_error = 1;
+            context->writer_errno = errno;
+            return NULL;
+        }
+        sched_yield();
+        if (rename(context->right, context->left) != 0) {
+            context->writer_error = 1;
+            context->writer_errno = errno;
+            return NULL;
+        }
+        sched_yield();
+    }
+    return NULL;
+}
+
+static int has_either_suffix(const char *value, const char *left_suffix,
+                             const char *right_suffix) {
+    return has_suffix(value, left_suffix) || has_suffix(value, right_suffix);
+}
+
+static int probe_concurrent_rename_paths(void) {
+    struct rename_race_context context;
+    memset(&context, 0, sizeof(context));
+    context.iterations = 2000;
+
+    char root[] = "/tmp/loco-fcntl-race-XXXXXX";
+    if (mkdtemp(root) == NULL) {
+        printf("rename_race setup_error=%d\n", errno);
+        return 1;
+    }
+    if (snprintf(context.left, sizeof(context.left), "%s/left", root) >=
+            (int)sizeof(context.left) ||
+        snprintf(context.right, sizeof(context.right), "%s/right", root) >=
+            (int)sizeof(context.right)) {
+        printf("rename_race path_overflow\n");
+        rmdir(root);
+        return 1;
+    }
+    if (mkdir(context.left, 0700) != 0) {
+        printf("rename_race mkdir_error=%d\n", errno);
+        rmdir(root);
+        return 1;
+    }
+
+    int fd = open(context.left, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        printf("rename_race open_error=%d\n", errno);
+        rmdir(context.left);
+        rmdir(root);
+        return 1;
+    }
+
+    struct stat before;
+    if (fstat(fd, &before) != 0) {
+        printf("rename_race fstat_before_error=%d\n", errno);
+        close(fd);
+        rmdir(context.left);
+        rmdir(root);
+        return 1;
+    }
+
+    pthread_t writer;
+    int thread_error = pthread_create(&writer, NULL, rename_race_writer, &context);
+    if (thread_error != 0) {
+        printf("rename_race pthread_create_error=%d\n", thread_error);
+        close(fd);
+        rmdir(context.left);
+        rmdir(root);
+        return 1;
+    }
+
+    int path_errors = 0;
+    int unexpected_paths = 0;
+    char visible_path[MAXPATHLEN];
+    char nofirmlink_path[MAXPATHLEN];
+    for (int i = 0; i < context.iterations * 2; ++i) {
+        if (capture_descriptor_paths(fd, NULL, visible_path, nofirmlink_path) != 0) {
+            ++path_errors;
+        } else if (!has_either_suffix(visible_path, "/left", "/right") ||
+                   !has_either_suffix(nofirmlink_path, "/left", "/right")) {
+            ++unexpected_paths;
+        }
+        sched_yield();
+    }
+
+    int join_error = pthread_join(writer, NULL);
+    struct stat after;
+    int fstat_error = fstat(fd, &after);
+    int identity_same = fstat_error == 0 &&
+                        before.st_dev == after.st_dev &&
+                        before.st_ino == after.st_ino;
+    printf("rename_race iterations=%d path_errors=%d unexpected_paths=%d "
+           "writer_error=%d writer_errno=%d join_error=%d identity_same=%s\n",
+           context.iterations * 2, path_errors, unexpected_paths,
+           context.writer_error, context.writer_errno, join_error,
+           identity_same ? "yes" : "no");
+
+    close(fd);
+    int cleanup_error = 0;
+    if (rmdir(context.left) != 0 && errno != ENOENT) cleanup_error = errno;
+    if (rmdir(context.right) != 0 && errno != ENOENT && cleanup_error == 0) cleanup_error = errno;
+    if (rmdir(root) != 0 && cleanup_error == 0) cleanup_error = errno;
+
+    return path_errors == 0 && unexpected_paths == 0 &&
+           context.writer_error == 0 && join_error == 0 &&
+           identity_same && cleanup_error == 0 ? 0 : 1;
 }
 
 static int probe_renamed_open_directory(void) {
@@ -422,7 +544,8 @@ int main(void) {
     print_path_api_flags(dirfd, "Applications");
     print_path_api_flags(dirfd, "Library");
 
-    if (probe_renamed_open_directory() != 0) {
+    if (probe_renamed_open_directory() != 0 ||
+        probe_concurrent_rename_paths() != 0) {
         close(dirfd);
         return 3;
     }
