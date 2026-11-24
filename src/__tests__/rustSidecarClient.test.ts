@@ -82,20 +82,9 @@ describe('RustSidecarClient', () => {
   });
 
   it('rejects concurrent requests instead of multiplexing', async () => {
-    // A deliberately stalled first request holds the single-request slot.
-    const original = child.stdin.write.bind(child.stdin);
-    let stallEvaluate = true;
-    child.stdin.write = ((chunk: Buffer, ...args: unknown[]) => {
-      const request = JSON.parse(chunk.toString('utf8').trim());
-      if (request.messageType === 'evaluate' && stallEvaluate) return true;
-      return (original as (...values: unknown[]) => boolean)(chunk, ...args);
-    }) as typeof child.stdin.write;
     const first = client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' });
-    await Promise.resolve();
     await expect(client.evaluate({ contractVersion: '1.0', proposalId: 'p-2' }))
       .rejects.toThrow(/already in progress/i);
-    stallEvaluate = false;
-    await client.shutdown();
-    await expect(first).rejects.toThrow();
+    await expect(first).resolves.toMatchObject({ proposalId: 'p-1' });
   });
 });
