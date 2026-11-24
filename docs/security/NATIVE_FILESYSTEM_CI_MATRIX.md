@@ -28,6 +28,7 @@ The Linux `findmnt` filesystem type (`ext4`) is the specific mount type. The `st
 |---|---|---|
 | Ubuntu 22.04/24.04/26.04 | Bind-mounted directory placed beneath a workspace, with a sentinel outside the workspace | Setup, boundary verification, and cleanup passed on all three explicit runners in run #45354964372 |
 | Ubuntu 22.04/24.04/26.04 | 128 MiB ext4 filesystem image loop-mounted beneath a workspace, with a sentinel on the mounted filesystem | Setup, distinct-filesystem boundary verification, and cleanup passed on all three explicit runners in run #45354964372 |
+| Ubuntu 22.04/24.04/26.04 | 16 MiB tmpfs mounted beneath the ext4 workspace, with a sentinel on the tmpfs mount | Setup, `RESOLVE_NO_XDEV` rejection, and cleanup passed on all three runners in Rust Core Tests run #45356622561 |
 | Windows Server 2022 and 2025 | Secondary NTFS VHDX volume mounted at a directory beneath a workspace | Setup, volume-boundary verification, and cleanup passed on both explicit runner labels in run #45354176701 |
 | macOS 15 and 26, arm64 and Intel | Native bulk firmlink metadata and `O_RESOLVE_BENEATH` probes | Passed on all four listed runner builds |
 | macOS 15 and 26, arm64 and Intel | Separate APFS volume mounted beneath a workspace | Setup, nested-volume boundary verification, and detach passed on all four runners |
@@ -36,7 +37,7 @@ The Linux `findmnt` filesystem type (`ext4`) is the specific mount type. The `st
 ## Interpretation and limits
 
 - These runs prove the workflow diagnostics and listed fixtures execute successfully on these exact hosted runner images. Linux now uses explicit `ubuntu-22.04`, `ubuntu-24.04`, and `ubuntu-26.04` labels; Windows uses explicit `windows-2022` and `windows-2025` labels. Do not infer an immutable OS support promise beyond the recorded builds.
-- Linux's three hosted images reported kernels 6.8.0-1070-azure, 7.0.0-1014-aws, and 7.0.0-1020-azure respectively; Ubuntu 22.04's runner did not use the distribution's 5.15 GA kernel. The loop-mounted ext4 fixture is a separate filesystem boundary test. This is not a broad matrix of Linux filesystem types, kernel versions, mount options, or namespace configurations.
+- Linux's three hosted images reported kernels 6.8.0-1070-azure, 7.0.0-1014-aws, and 7.0.0-1020-azure respectively; Ubuntu 22.04's runner did not use the distribution's 5.15 GA kernel. The loop-mounted ext4 and tmpfs fixtures both verify that `RESOLVE_NO_XDEV` rejects mount crossings beneath the workspace. This does not establish root-workspace support for every filesystem or cover all kernel versions, mount options, or namespace configurations.
 - Windows validation covers Windows Server 2022 build 20348 and Windows Server 2025 build 26100, both x64 with NTFS VHDX mountpoint fixtures. ReFS, FAT variants, network filesystems, other Windows builds, and other architectures remain untested here.
 - macOS evidence is limited to the exact OS builds and architectures listed above. The System/Data firmlink conclusions remain scoped as stated in [the macOS support matrix](MACOS_SNAPSHOT_SUPPORT_MATRIX.md); this document does not broaden those security claims.
 - Passing CI is not independent security review and does not authorize production enablement or merging the security stack.
