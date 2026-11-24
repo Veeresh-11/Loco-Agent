@@ -183,9 +183,11 @@ fn normalize_windows_drive_path(value: &str) -> Option<String> {
     {
         return None;
     }
-    if without_trailing_separator[3..]
-        .split('\\')
-        .any(|part| part.is_empty() || part == "." || part == ".." || part.contains(':'))
+    let components = &without_trailing_separator[3..];
+    if !components.is_empty()
+        && components
+            .split('\\')
+            .any(|part| part.is_empty() || part == "." || part == ".." || part.contains(':'))
     {
         return None;
     }
@@ -198,6 +200,7 @@ mod windows_tests {
 
     #[test]
     fn windows_path_normalization_accepts_drive_paths_and_extended_prefix() {
+        assert_eq!(normalize_windows_drive_path(r"C:\\").as_deref(), Some(r"C:\\"));
         assert_eq!(
             normalize_windows_drive_path(r"C:\work\repo").as_deref(),
             Some(r"C:\work\repo")
