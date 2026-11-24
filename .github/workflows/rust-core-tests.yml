@@ -70,6 +70,9 @@ jobs:
           if [ -f /usr/share/firmlinks ]; then
             cat /usr/share/firmlinks
           fi
+          sw_vers
+          clang -Wall -Wextra -Werror scripts/macos-firmlink-record-probe.c -o "$RUNNER_TEMP/loco-firmlink-record-probe"
+          "$RUNNER_TEMP/loco-firmlink-record-probe"
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash
