@@ -4,7 +4,7 @@
 //! process is alive. It cannot detect rollback across process or machine restart.
 
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalClockError {
@@ -16,12 +16,15 @@ pub enum ApprovalClockError {
 
 pub trait ApprovalClock: Send + Sync {
     fn now_unix_seconds(&self) -> Result<u64, ApprovalClockError>;
+    /// Monotonic elapsed time from an arbitrary process-local origin.
+    fn monotonic_now(&self) -> Result<Duration, ApprovalClockError>;
 }
 
 #[derive(Debug, Default)]
 pub struct SystemApprovalClock;
 
 static LAST_SEEN_UNIX: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
+static MONOTONIC_ORIGIN: OnceLock<Instant> = OnceLock::new();
 
 fn enforce_non_decreasing(
     last_seen: &mut Option<u64>,
@@ -43,6 +46,10 @@ impl ApprovalClock for SystemApprovalClock {
         let state = LAST_SEEN_UNIX.get_or_init(|| Mutex::new(None));
         let mut last_seen = state.lock().map_err(|_| ApprovalClockError::ClockStatePoisoned)?;
         enforce_non_decreasing(&mut last_seen, now)
+    }
+
+    fn monotonic_now(&self) -> Result<Duration, ApprovalClockError> {
+        Ok(MONOTONIC_ORIGIN.get_or_init(Instant::now).elapsed())
     }
 }
 

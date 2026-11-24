@@ -5,8 +5,9 @@
 //! separate, unresolved requirement.
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::approval_binding::{action_digest, verify_approval_binding, ApprovalChallenge, ApprovalError};
@@ -50,6 +51,7 @@ fn is_valid_challenge_id(challenge_id: &str) -> bool {
 }
 
 static PROCESS_EPOCH: OnceLock<Result<String, String>> = OnceLock::new();
+static MONOTONIC_DEADLINES: OnceLock<Mutex<HashMap<String, Duration>>> = OnceLock::new();
 
 fn process_epoch() -> Result<&'static str, StoreError> {
     match PROCESS_EPOCH.get_or_init(|| generate_challenge_id().map_err(|error| error.to_string())) {
@@ -155,6 +157,8 @@ impl ApprovalStore {
         }
         let challenge_id = generate_challenge_id().map_err(StoreError::Entropy)?;
         let now = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
+        let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
+        let monotonic_deadline = monotonic_now.checked_add(Duration::from_secs(ttl_seconds)).ok_or(StoreError::InvalidChallenge)?;
         let expires_at_unix = now.checked_add(ttl_seconds).ok_or(StoreError::InvalidChallenge)?;
         if expires_at_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
@@ -173,6 +177,9 @@ impl ApprovalStore {
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         tx.commit()?;
+        MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .insert(challenge.challenge_id.clone(), monotonic_deadline);
         Ok(challenge)
     }
 
@@ -187,6 +194,7 @@ impl ApprovalStore {
             return Err(StoreError::InvalidChallenge);
         }
         let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
+        let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
         if now_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
@@ -202,6 +210,12 @@ impl ApprovalStore {
         ).optional()?;
         let (digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
         if challenge_epoch != self.process_epoch { return Err(StoreError::AlreadyConsumedOrExpired); }
+        let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;
+        if monotonic_now >= monotonic_deadline {
+            return Err(StoreError::AlreadyConsumedOrExpired);
+        }
         if consumed_at.is_some() || now_unix >= expires_at {
             return Err(StoreError::AlreadyConsumedOrExpired);
         }
@@ -218,6 +232,9 @@ impl ApprovalStore {
         )?;
         if changed != 1 { return Err(StoreError::AlreadyConsumedOrExpired); }
         tx.commit()?;
+        MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .remove(challenge_id);
         Ok(())
     }
 
@@ -244,13 +261,15 @@ mod tests {
 
     struct TestClock {
         now: AtomicU64,
+        monotonic_millis: AtomicU64,
         fail: Mutex<Option<ApprovalClockError>>,
     }
     impl TestClock {
         fn new(now: u64) -> Self {
-            Self { now: AtomicU64::new(now), fail: Mutex::new(None) }
+            Self { now: AtomicU64::new(now), monotonic_millis: AtomicU64::new(0), fail: Mutex::new(None) }
         }
         fn set(&self, now: u64) { self.now.store(now, Ordering::SeqCst); }
+        fn advance_monotonic(&self, millis: u64) { self.monotonic_millis.fetch_add(millis, Ordering::SeqCst); }
         fn fail_with(&self, error: ApprovalClockError) {
             *self.fail.lock().unwrap() = Some(error);
         }
@@ -259,6 +278,9 @@ mod tests {
         fn now_unix_seconds(&self) -> Result<u64, ApprovalClockError> {
             if let Some(error) = self.fail.lock().unwrap().clone() { return Err(error); }
             Ok(self.now.load(Ordering::SeqCst))
+        }
+        fn monotonic_now(&self) -> Result<Duration, ApprovalClockError> {
+            Ok(Duration::from_millis(self.monotonic_millis.load(Ordering::SeqCst)))
         }
     }
 
@@ -284,6 +306,7 @@ mod tests {
         let challenge = store.issue(&action, 30).unwrap();
         assert_eq!(challenge.expires_at_unix, 130);
         clock.set(129);
+        clock.advance_monotonic(29_000);
         store.consume(&challenge.challenge_id, &action).unwrap();
         assert!(store.is_consumed(&challenge.challenge_id).unwrap());
         assert!(matches!(
@@ -298,10 +321,24 @@ mod tests {
         let action = sample_action();
         let challenge = store.issue(&action, 10).unwrap();
         clock.set(110);
+        clock.advance_monotonic(10_000);
         assert!(matches!(
             store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
+    }
+
+    #[test]
+    fn monotonic_deadline_expires_even_when_wall_clock_does_not_advance() {
+        let (mut store, clock) = test_store_at(100);
+        let action = sample_action();
+        let challenge = store.issue(&action, 5).unwrap();
+        clock.advance_monotonic(5_000);
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
     }
 
     #[test]
