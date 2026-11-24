@@ -10,6 +10,7 @@ use crate::portable_path::is_safe_portable_relative_path;
 pub const WORKSPACE_READ_CONTRACT_VERSION: &str = "1.0";
 pub const MAX_WORKSPACE_READ_REQUEST_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_WORKSPACE_ID_BYTES: usize = 128;
+pub const MAX_WORKSPACE_RELATIVE_PATH_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -44,7 +45,9 @@ impl WorkspaceReadRequest {
         {
             return Err(WorkspaceReadRequestError::InvalidWorkspaceId);
         }
-        if !is_safe_portable_relative_path(&self.relative_path) {
+        if self.relative_path.len() > MAX_WORKSPACE_RELATIVE_PATH_BYTES
+            || !is_safe_portable_relative_path(&self.relative_path)
+        {
             return Err(WorkspaceReadRequestError::InvalidRelativePath);
         }
         if self.max_bytes == 0 || self.max_bytes > MAX_WORKSPACE_READ_REQUEST_BYTES {
@@ -102,6 +105,13 @@ mod tests {
             request.relative_path = path.into();
             assert_eq!(request.validate_contract(), Err(WorkspaceReadRequestError::InvalidRelativePath));
         }
+    }
+
+    #[test]
+    fn rejects_paths_over_the_byte_limit() {
+        let mut request = valid();
+        request.relative_path = format!("{}", "a".repeat(MAX_WORKSPACE_RELATIVE_PATH_BYTES + 1));
+        assert_eq!(request.validate_contract(), Err(WorkspaceReadRequestError::InvalidRelativePath));
     }
 
     #[test]
