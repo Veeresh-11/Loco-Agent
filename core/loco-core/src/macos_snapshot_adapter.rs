@@ -305,6 +305,32 @@ mod tests {
  use super::*;
  use crate::snapshot_payload::SnapshotCaptureRequest;
  use std::os::unix::fs::symlink;
+
+ fn synthetic_nofirmlink_record(path: &[u8]) -> Vec<u8> {
+  let returned_offset = 4;
+  let reference_offset = returned_offset + std::mem::size_of::<libc::attribute_set_t>();
+  let path_offset = reference_offset + std::mem::size_of::<libc::attrreference_t>();
+  let record_len = path_offset + path.len();
+  let mut buffer = vec![0u8; record_len];
+  buffer[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
+  let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
+  returned.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
+  unsafe {
+   std::ptr::write_unaligned(
+    buffer.as_mut_ptr().add(returned_offset).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+   std::ptr::write_unaligned(
+    buffer.as_mut_ptr().add(reference_offset).cast::<libc::attrreference_t>(),
+    libc::attrreference_t {
+     attr_dataoffset: std::mem::size_of::<libc::attrreference_t>() as i32,
+     attr_length: path.len() as u32,
+    },
+   );
+  }
+  buffer[path_offset..].copy_from_slice(path);
+  buffer
+ }
  #[test]
  fn macos_workspace_root_is_on_apfs(){
   let d=tempfile::tempdir().unwrap();
@@ -358,6 +384,66 @@ mod tests {
    preflight_entry_path(&root,"usr").unwrap(),
    PathBuf::from("/usr")
   );
+ }
+
+ #[test]
+ fn nofirmlink_path_record_parser_fails_closed_on_malformed_records() {
+  let valid=synthetic_nofirmlink_record(b"/System/Volumes/Data/Users\0");
+  assert_eq!(
+   parse_nofirmlink_path_record(&valid).unwrap(),
+   PathBuf::from("/System/Volumes/Data/Users")
+  );
+
+  let mut truncated=valid.clone();
+  truncated.truncate(truncated.len()-1);
+  assert!(parse_nofirmlink_path_record(&truncated).is_err());
+
+  let mut missing_attr=valid.clone();
+  let mut returned=unsafe {
+   std::ptr::read_unaligned(
+    missing_attr.as_ptr().add(4).cast::<libc::attribute_set_t>()
+   )
+  };
+  returned.forkattr=0;
+  unsafe {
+   std::ptr::write_unaligned(
+    missing_attr.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+  }
+  assert!(parse_nofirmlink_path_record(&missing_attr).is_err());
+
+  let relative=synthetic_nofirmlink_record(b"relative/path\0");
+  assert!(parse_nofirmlink_path_record(&relative).is_err());
+
+  let unterminated=synthetic_nofirmlink_record(b"/tmp");
+  assert!(parse_nofirmlink_path_record(&unterminated).is_err());
+ }
+
+ #[test]
+ fn concurrent_preflight_path_queries_do_not_share_directory_offsets() {
+  use std::sync::Arc;
+  use std::thread;
+
+  let root=Arc::new(File::open("/").unwrap());
+  let workers=(0..6).map(|_| {
+   let root=Arc::clone(&root);
+   thread::spawn(move || {
+    for _ in 0..20 {
+     assert_eq!(
+      preflight_entry_path(&root,"System").unwrap(),
+      PathBuf::from("/System")
+     );
+     assert_eq!(
+      preflight_entry_path(&root,"Users"),
+      Err(SnapshotPayloadError::FirmlinkBoundary)
+     );
+    }
+   })
+  }).collect::<Vec<_>>();
+  for worker in workers {
+   worker.join().unwrap();
+  }
  }
 
  #[test]
