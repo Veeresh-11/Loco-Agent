@@ -61,7 +61,7 @@ static void dump_record(const unsigned char *record, size_t record_len) {
     size_t flags_offset = offset;
     if (has_flags) {
         if (offset + sizeof(flags) > record_len) {
-            fprintf(stderr, "truncated ATTR_CMN_FLAGS\\n");
+            fprintf(stderr, "truncated ATTR_CMN_FLAGS\n");
             exit(2);
         }
         memcpy(&flags, record + offset, sizeof(flags));
@@ -69,13 +69,13 @@ static void dump_record(const unsigned char *record, size_t record_len) {
     }
 
     char nofirmlink_path[PATH_MAX + 1];
-    nofirmlink_path[0] = '\\0';
+    nofirmlink_path[0] = '\0';
     int has_nofirmlink_path =
         (returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH) != 0;
     if (has_nofirmlink_path) {
         attrreference_t path_ref;
         if (offset + sizeof(path_ref) > record_len) {
-            fprintf(stderr, "truncated ATTR_CMNEXT_NOFIRMLINKPATH reference\\n");
+            fprintf(stderr, "truncated ATTR_CMNEXT_NOFIRMLINKPATH reference\n");
             exit(2);
         }
         memcpy(&path_ref, record + offset, sizeof(path_ref));
@@ -83,14 +83,14 @@ static void dump_record(const unsigned char *record, size_t record_len) {
         if (path_start < 0 || path_ref.attr_length < 2 ||
             path_ref.attr_length > sizeof(nofirmlink_path) ||
             (uint64_t)path_start + path_ref.attr_length > record_len) {
-            fprintf(stderr, "invalid nofirmlink path reference: offset=%lld length=%u record=%zu\\n",
+            fprintf(stderr, "invalid nofirmlink path reference: offset=%lld length=%u record=%zu\n",
                     (long long)path_start, path_ref.attr_length, record_len);
             exit(2);
         }
         const unsigned char *path_bytes = record + (size_t)path_start;
-        if (path_bytes[path_ref.attr_length - 1] != '\\0' ||
-            memchr(path_bytes, '\\0', path_ref.attr_length - 1) != NULL) {
-            fprintf(stderr, "nofirmlink path is not exactly NUL terminated\\n");
+        if (path_bytes[path_ref.attr_length - 1] != '\0' ||
+            memchr(path_bytes, '\0', path_ref.attr_length - 1) != NULL) {
+            fprintf(stderr, "nofirmlink path is not exactly NUL terminated\n");
             exit(2);
         }
         memcpy(nofirmlink_path, path_bytes, path_ref.attr_length);
