@@ -81,7 +81,8 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
   for part in &parts[..parts.len()-1]{
    let fd=openat(&parent,*part,OFlags::RDONLY|OFlags::DIRECTORY|OFlags::CLOEXEC|OFlags::NOFOLLOW,Mode::empty())
     .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
-   let child=File::from(fd); let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+   let child=File::from(fd);
+   let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    if !m.is_dir()||m.dev()!=self.root_device{return Err(SnapshotPayloadError::AcquisitionFailed)}
    parent=child;
   }
@@ -147,6 +148,11 @@ mod tests {
    "capture must reject traversal into a separately mounted APFS volume"
   );
  }
+
+ // Firmlink containment is intentionally not claimed by this adapter yet.
+ // The hosted runner exposes firmlink paths in /usr/share/firmlinks but its
+ // ATTR_CMN_FLAGS output did not provide SF_FIRMLINK for those entries.
+ // Track native detection and a deterministic acceptance test in issue #74.
 
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();

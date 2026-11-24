@@ -144,3 +144,10 @@ The test covers the hosted runner's NTFS behavior only. It does not expand the a
 - **macOS nested APFS volume:** rerun in PR #72's matrix; the APFS sparse-image fixture and dedicated mount-boundary test passed.
 
 These are exact hosted CI environment results, not universal platform guarantees. Linux's bind-mount test proves a case that `st_dev` alone cannot distinguish; `RESOLVE_NO_XDEV` is the enforcement tested. The ext4 loop mount tests a different-device crossing. The Windows result is limited to NTFS and the macOS result to APFS. Firmlinks, HFS+, ReFS, FAT/exFAT, network/removable filesystems, and broader native OS/storage combinations remain outside this evidence.
+
+
+## Follow-up test — macOS /Users firmlink boundary (2026-11-23)
+
+PR #73 adds a native macOS test that uses the hosted runner's `/Users` firmlink into the APFS Data volume. The first run showed `/` and `$HOME` share the same `st_dev`, and `fstat` on the opened `/Users` handle did not expose the firmlink flag. The adapter now uses `getattrlistbulk` on the retained parent directory to inspect the `ATTR_CMN_FLAGS` field for `SF_FIRMLINK` before opening each descendant component. The test requires descriptor-relative capture through a discovered firmlink entry to fail closed.
+
+The test constructs an adapter directly from the root handle only inside the test module; this is not a production constructor change, and normal workspace admission continues to reject `/`. The exact-head macOS job must confirm that `getattrlistbulk` returns `SF_FIRMLINK` in the parent directory's entry metadata and that the adapter rejects the entry. Apple's XNU header defines `SF_FIRMLINK` as `0x00800000`; Apple's FileFlags documentation describes firmlinks as transparent links between the read-only System and writable Data volumes. Apple's `getattrlistbulk` documentation specifically identifies firmlink entries by this flag in `ATTR_CMN_FLAGS`. This does not cover all firmlink paths, OS releases, or APFS layouts.

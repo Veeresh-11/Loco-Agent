@@ -347,3 +347,10 @@ PR #71 implementation head `dc5f51419261011d4971076693457bcec7562e17` passed Rus
 PR #72 implementation head `b6d17385bedc767dd940f5a4347b62151a29f7b9` passed Rust Core Tests run `45187940996` on Ubuntu, Windows, and macOS and Contract Validation run `45187941018`. The Ubuntu runner created both a same-device bind mount and a distinct-device ext4 loop mount. Both dedicated boundary tests passed and both fixtures were detached. The matrix also reran the Windows NTFS and macOS APFS mount tests successfully.
 
 These results establish hosted-runner coverage for the specific NTFS, APFS, Linux bind-mount, and Linux ext4 loop-mount fixtures. They do not generalize to every filesystem, OS release, mount namespace, storage driver, firmlink, or network/removable volume.
+
+
+## Follow-up update — 2026-11-23: macOS firmlink boundary test
+
+PR #73 adds a macOS-native test for the hosted runner's `/Users` firmlink into the APFS Data volume. The first run showed `/` and the runner's home directory share the same `st_dev`, and `fstat` on the opened `/Users` handle did not expose the firmlink flag. The adapter now inspects the parent directory's entries with `getattrlistbulk`, requesting `ATTR_CMN_NAME` and `ATTR_CMN_FLAGS`, and rejects a child entry carrying Apple's `SF_FIRMLINK` bit before opening it. The test uses a test-only adapter rooted at `/` to require capture through a discovered firmlink entry to fail closed.
+
+The test-only root construction does not change production root admission: the adapter's public constructor still rejects `/` as a workspace root. This exercises the host's actual firmlink directory-entry metadata; exact-head macOS CI must confirm that `getattrlistbulk` returns the expected `SF_FIRMLINK` flag and that capture rejects the entry. It does not establish behavior for every firmlink, OS release, or APFS volume arrangement.
