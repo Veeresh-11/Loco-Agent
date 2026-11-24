@@ -510,6 +510,167 @@ mod tests {
   buffer[path_offset..].copy_from_slice(path);
   buffer
  }
+ fn synthetic_bulk_entry_record(
+  name: &[u8],
+  path: &[u8],
+  flags: u32,
+  entry_error: u32,
+ ) -> Vec<u8> {
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4;
+  let name_ref_end = name_ref_offset + std::mem::size_of::<libc::attrreference_t>();
+  let flags_offset = name_ref_end;
+  let path_ref_offset = flags_offset + 4;
+  let path_ref_end = path_ref_offset + std::mem::size_of::<libc::attrreference_t>();
+  let name_offset = path_ref_end;
+  let path_offset = name_offset + name.len();
+  let record_len = path_offset + path.len();
+  let mut record = vec![0u8; record_len];
+  record[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
+
+  let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
+  returned.commonattr = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
+  returned.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
+  unsafe {
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    libc::attrreference_t {
+     attr_dataoffset: (name_offset - name_ref_offset) as i32,
+     attr_length: name.len() as u32,
+    },
+   );
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(path_ref_offset).cast::<libc::attrreference_t>(),
+    libc::attrreference_t {
+     attr_dataoffset: (path_offset - path_ref_offset) as i32,
+     attr_length: path.len() as u32,
+    },
+   );
+  }
+  record[header_size..header_size + 4].copy_from_slice(&entry_error.to_ne_bytes());
+  record[flags_offset..flags_offset + 4].copy_from_slice(&flags.to_ne_bytes());
+  record[name_offset..name_offset + name.len()].copy_from_slice(name);
+  record[path_offset..path_offset + path.len()].copy_from_slice(path);
+  record
+ }
+
+ fn set_bulk_returned_attributes(record: &mut [u8], commonattr: u32, forkattr: u32) {
+  let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
+  returned.commonattr = commonattr;
+  returned.forkattr = forkattr;
+  unsafe {
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+  }
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_accepts_valid_entry_and_preserves_raw_flags() {
+  let record = synthetic_bulk_entry_record(
+   b"Users\0", b"/System/Volumes/Data/Users\0", 0x0010_0000, 0,
+  );
+  let parsed = parse_bulk_entry_record(&record).unwrap();
+  assert_eq!(parsed.name, b"Users");
+  assert_eq!(parsed.flags, 0x0010_0000);
+  assert_eq!(parsed.no_firmlink_path, PathBuf::from("/System/Volumes/Data/Users"));
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_truncated_or_oversized_records() {
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  assert!(parse_bulk_entry_record(&valid[..3]).is_err());
+
+  let mut truncated = valid.clone();
+  truncated.truncate(4 + std::mem::size_of::<libc::attribute_set_t>() - 1);
+  let len = truncated.len() as u32;
+  truncated[..4].copy_from_slice(&len.to_ne_bytes());
+  assert!(parse_bulk_entry_record(&truncated).is_err());
+
+  let mut oversized = valid.clone();
+  oversized[..4].copy_from_slice(&((MAX_BULK_RECORD_BYTES as u32) + 1).to_ne_bytes());
+  assert!(parse_bulk_entry_record(&oversized).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_malformed_name_and_path_references() {
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4;
+  let mut malformed_name = valid.clone();
+  let mut name_ref = unsafe {
+   std::ptr::read_unaligned(
+    malformed_name.as_ptr().add(name_ref_offset).cast::<libc::attrreference_t>()
+   )
+  };
+  name_ref.attr_dataoffset = -1;
+  unsafe {
+   std::ptr::write_unaligned(
+    malformed_name.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    name_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&malformed_name).is_err());
+
+  let path_ref_offset = name_ref_offset + std::mem::size_of::<libc::attrreference_t>() + 4;
+  let mut malformed_path = valid;
+  let mut path_ref = unsafe {
+   std::ptr::read_unaligned(
+    malformed_path.as_ptr().add(path_ref_offset).cast::<libc::attrreference_t>()
+   )
+  };
+  path_ref.attr_dataoffset = 0;
+  unsafe {
+   std::ptr::write_unaligned(
+    malformed_path.as_mut_ptr().add(path_ref_offset).cast::<libc::attrreference_t>(),
+    path_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&malformed_path).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_requires_terminators_absolute_paths_and_zero_entry_error() {
+  let mut bad_name = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4;
+  let name_ref = unsafe {
+   std::ptr::read_unaligned(
+    bad_name.as_ptr().add(name_ref_offset).cast::<libc::attrreference_t>()
+   )
+  };
+  let name_start = (name_ref_offset as isize + name_ref.attr_dataoffset as isize) as usize;
+  bad_name[name_start + name_ref.attr_length as usize - 1] = b'X';
+  assert!(parse_bulk_entry_record(&bad_name).is_err());
+
+  let relative = synthetic_bulk_entry_record(b"System\0", b"System\0", 0, 0);
+  assert!(parse_bulk_entry_record(&relative).is_err());
+
+  let nonzero_error = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 5);
+  assert!(parse_bulk_entry_record(&nonzero_error).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_missing_requested_attributes() {
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let common = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
+  for (commonattr, forkattr) in [
+   (libc::ATTR_CMN_NAME | ATTR_CMN_FLAGS, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (common, 0),
+   (libc::ATTR_CMN_NAME | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+  ] {
+   let mut missing = valid.clone();
+   set_bulk_returned_attributes(&mut missing, commonattr, forkattr);
+   assert!(parse_bulk_entry_record(&missing).is_err());
+  }
+ }
+
  #[test]
  fn macos_workspace_root_is_on_apfs(){
   let d=tempfile::tempdir().unwrap();
