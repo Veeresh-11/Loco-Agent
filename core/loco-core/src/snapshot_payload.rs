@@ -16,6 +16,7 @@ pub enum SnapshotPayloadError {
     LengthMismatch,
     DigestMismatch,
     AcquisitionFailed,
+    FirmlinkBoundary,
     InvalidFileType,
     HardLinkNotAllowed,
 }
