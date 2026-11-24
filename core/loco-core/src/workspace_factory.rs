@@ -226,7 +226,7 @@ mod unix_tests {
 
     #[test]
     fn factory_retains_a_selected_directory_and_rejects_symlink_roots() {
-        let parent = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
         let selected = parent.path().join("selected");
         std::fs::create_dir(&selected).unwrap();
         std::fs::write(selected.join("probe.txt"), b"factory-probe").unwrap();
@@ -247,7 +247,7 @@ mod unix_tests {
 
     #[test]
     fn factory_rejects_empty_workspace_identity() {
-        let parent = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
         assert_eq!(
             create_workspace_adapter(parent.path(), "  ").err(),
             Some(WorkspaceFactoryError::InvalidSelection)
