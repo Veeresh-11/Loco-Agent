@@ -194,7 +194,7 @@ impl ApprovalStore {
         // Acquire the write reservation before reading challenge state. This
         // serializes concurrent consumers across independent SQLite connections.
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        self.ensure_active_epoch(&tx)?;
+        Self::ensure_active_epoch(&tx, &self.process_epoch)?;
         let record: Option<(String, u64, Option<u64>, String)> = tx.query_row(
             "SELECT action_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
             params![challenge_id],
