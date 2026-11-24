@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loco-agent.dev/contracts/sidecar-stdio.schema.json",
+  "title": "LOCO Rust Sidecar stdio protocol",
+  "description": "Versioned control protocol for a parent-spawned Rust authority. Messages are untrusted and this schema grants no OS-operation authorization.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/helloRequest"
+    },
+    {
+      "$ref": "#/$defs/evaluateRequest"
+    },
+    {
+      "$ref": "#/$defs/shutdownRequest"
+    },
+    {
+      "$ref": "#/$defs/helloResponse"
+    },
+    {
+      "$ref": "#/$defs/decisionResponse"
+    },
+    {
+      "$ref": "#/$defs/errorResponse"
+    },
+    {
+      "$ref": "#/$defs/shutdownResponse"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "helloRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId",
+        "client"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "hello"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "client": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "const": "loco-vscode-extension"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          }
+        }
+      }
+    },
+    "evaluateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId",
+        "proposal"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "evaluate"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "proposal": {
+          "$ref": "action-proposal.schema.json"
+        }
+      }
+    },
+    "shutdownRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "shutdown"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "helloResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId",
+        "server"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "hello"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "server": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version",
+            "capabilities"
+          ],
+          "properties": {
+            "name": {
+              "const": "loco-rust-authority"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "capabilities": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "proposal_evaluation"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "decisionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId",
+        "decision"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "decision"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "decision": {
+          "$ref": "security-decision.schema.json"
+        }
+      }
+    },
+    "errorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId",
+        "error"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "error"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "MALFORMED_MESSAGE",
+                "UNSUPPORTED_PROTOCOL",
+                "HANDSHAKE_REQUIRED",
+                "DUPLICATE_REQUEST_ID",
+                "REQUEST_LIMIT_EXCEEDED",
+                "PROPOSAL_REJECTED",
+                "INTERNAL_ERROR",
+                "SHUTTING_DOWN"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "shutdownResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "messageType",
+        "requestId",
+        "accepted"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "1.0"
+        },
+        "messageType": {
+          "const": "shutdown"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "accepted": {
+          "const": true
+        }
+      }
+    }
+  }
+}
