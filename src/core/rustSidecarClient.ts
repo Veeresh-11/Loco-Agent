@@ -154,18 +154,31 @@ export class RustSidecarClient implements vscodeDisposable {
     if (!child || child.killed) return Promise.reject(new Error('Sidecar process is unavailable.'));
     if (this.pending) return Promise.reject(new Error('Sidecar protocol permits one outstanding request.'));
     const requestId = String(message.requestId);
+    if (signal?.aborted) return Promise.reject(new Error('Sidecar request cancelled.'));
     return new Promise<JsonObject>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        if (this.pending?.requestId !== requestId) return;
+        this.pending = undefined;
+        cleanup();
+        reject(new Error('Sidecar request cancelled.'));
+        void this.terminate();
+      };
       const timer = setTimeout(() => {
-        if (this.pending?.requestId === requestId) {
-          this.pending = undefined;
-          reject(new Error('Sidecar request timed out.'));
-          void this.terminate();
-        }
+        if (this.pending?.requestId !== requestId) return;
+        this.pending = undefined;
+        cleanup();
+        reject(new Error('Sidecar request timed out.'));
+        void this.terminate();
       }, timeoutMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
       this.pending = {
         requestId,
-        resolve: value => { clearTimeout(timer); this.pending = undefined; resolve(value); },
-        reject: error => { clearTimeout(timer); this.pending = undefined; reject(error); }
+        resolve: value => { cleanup(); this.pending = undefined; resolve(value); },
+        reject: error => { cleanup(); this.pending = undefined; reject(error); }
       };
       const frame = Buffer.from(JSON.stringify(message) + '\n', 'utf8');
       if (frame.length > MAX_FRAME_BYTES) {
