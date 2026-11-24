@@ -1,5 +1,6 @@
 #include <sys/attr.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <limits.h>
@@ -86,27 +87,45 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 }
 
 
-static void print_descriptor_paths(int fd, const char *label) {
-    char visible_path[PATH_MAX];
-    memset(visible_path, 0, sizeof(visible_path));
-    if (fcntl(fd, F_GETPATH, visible_path) == 0) {
-        printf("fcntl_getpath label=%s path=%s\n", label, visible_path);
-    } else {
+static int capture_descriptor_paths(int fd, const char *label,
+                                      char visible_path[MAXPATHLEN],
+                                      char nofirmlink_path[MAXPATHLEN]) {
+    memset(visible_path, 0, MAXPATHLEN);
+    if (fcntl(fd, F_GETPATH, visible_path) != 0 ||
+        memchr(visible_path, '\0', MAXPATHLEN) == NULL) {
         printf("fcntl_getpath label=%s error=%d\n", label, errno);
+        return 1;
     }
+    printf("fcntl_getpath label=%s path=%s\n", label, visible_path);
 
 #if defined(F_GETPATH_NOFIRMLINK)
-    char nofirmlink_path[PATH_MAX];
-    memset(nofirmlink_path, 0, sizeof(nofirmlink_path));
-    if (fcntl(fd, F_GETPATH_NOFIRMLINK, nofirmlink_path) == 0) {
-        printf("fcntl_getpath_nofirmlink label=%s path=%s\n",
-               label, nofirmlink_path);
-    } else {
+    memset(nofirmlink_path, 0, MAXPATHLEN);
+    if (fcntl(fd, F_GETPATH_NOFIRMLINK, nofirmlink_path) != 0 ||
+        memchr(nofirmlink_path, '\0', MAXPATHLEN) == NULL) {
         printf("fcntl_getpath_nofirmlink label=%s error=%d\n", label, errno);
+        return 1;
     }
+    printf("fcntl_getpath_nofirmlink label=%s path=%s\n",
+           label, nofirmlink_path);
+    return 0;
 #else
+    (void)nofirmlink_path;
     printf("fcntl_getpath_nofirmlink label=%s unavailable_in_sdk\n", label);
+    return 2;
 #endif
+}
+
+static void print_descriptor_paths(int fd, const char *label) {
+    char visible_path[MAXPATHLEN];
+    char nofirmlink_path[MAXPATHLEN];
+    (void)capture_descriptor_paths(fd, label, visible_path, nofirmlink_path);
+}
+
+static int has_suffix(const char *value, const char *suffix) {
+    size_t value_len = strlen(value);
+    size_t suffix_len = strlen(suffix);
+    return value_len >= suffix_len &&
+           strcmp(value + value_len - suffix_len, suffix) == 0;
 }
 
 static void print_path_api_flags(int rootfd, const char *path) {
@@ -241,7 +260,18 @@ static int probe_renamed_open_directory(void) {
         return 1;
     }
 
-    print_descriptor_paths(fd, "rename_before");
+    char visible_path[MAXPATHLEN];
+    char nofirmlink_path[MAXPATHLEN];
+    if (capture_descriptor_paths(fd, "rename_before", visible_path,
+                                 nofirmlink_path) != 0 ||
+        !has_suffix(visible_path, "/before") ||
+        !has_suffix(nofirmlink_path, "/before")) {
+        printf("rename_probe initial_path_mismatch\n");
+        close(fd);
+        rmdir(original);
+        rmdir(root);
+        return 1;
+    }
 
     if (rename(original, moved) != 0) {
         printf("rename_probe rename_error=%d\\n", errno);
@@ -281,7 +311,18 @@ static int probe_renamed_open_directory(void) {
         rmdir(root);
         return 1;
     }
-    print_descriptor_paths(replacement_fd, "replacement_at_old_name");
+    if (capture_descriptor_paths(replacement_fd, "replacement_at_old_name",
+                                 visible_path, nofirmlink_path) != 0 ||
+        !has_suffix(visible_path, "/before") ||
+        !has_suffix(nofirmlink_path, "/before")) {
+        printf("rename_probe replacement_path_mismatch\n");
+        close(replacement_fd);
+        close(fd);
+        rmdir(original);
+        rmdir(moved);
+        rmdir(root);
+        return 1;
+    }
 
     struct stat replacement_stat;
     if (fstat(replacement_fd, &replacement_stat) != 0) {
