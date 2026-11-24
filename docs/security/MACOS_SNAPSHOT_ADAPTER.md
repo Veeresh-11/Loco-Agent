@@ -205,3 +205,25 @@ getdirentriesattr error=45 unsupported_on_volume
 The exact-head Rust Core Tests run [#45339809143](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45339809143) passed on Ubuntu, Windows, and macOS. The API is therefore unavailable on the APFS runner used for the macOS acceptance tests and cannot be used as the supported APFS pre-open signal. The probe records the unsupported result without failing the build.
 
 **Decision:** do not use `getdirentriesattr` in the adapter. The pre-open firmlink-entry signal remains unresolved on the tested APFS environment.
+
+
+### Extended common no-firmlink path attribute probe (run #45340410986)
+
+XNU defines `ATTR_CMNEXT_NOFIRMLINKPATH` in the extended common-attribute bitmap (`attrlist.forkattr` with `FSOPT_ATTR_CMN_EXTENDED`). The XNU implementation computes it from the vnode with `attrlist_build_path(..., BUILDPATH_NO_FIRMLINK)`; the manual describes it as the path of the filesystem object with firmlinks removed. It is not a boolean firmlink-entry flag.
+
+The native probe requested this attribute through both `getattrlistat` and `getattrlistbulk`. On macOS 26.7.2 (build 25G332, arm64), both returned the Data-volume target path for all three root entries:
+
+```
+bulk_extended name=Library flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Library
+bulk_extended name=Users flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Users
+bulk_extended name=Applications flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Applications
+extended_nofirmlink path=Users flags=0x00100000 resolved_path=/System/Volumes/Data/Users
+extended_nofirmlink path=Applications flags=0x00100000 resolved_path=/System/Volumes/Data/Applications
+extended_nofirmlink path=Library flags=0x00100000 resolved_path=/System/Volumes/Data/Library
+```
+
+The same bulk records still report `SF_NOUNLINK`, not `SF_FIRMLINK`; the separate identity probe shows their FSID/file ID match the opened Data-volume targets. The extended path therefore confirms the canonical no-firmlink path of the returned vnode, but does not expose a distinct entry identity or a documented pre-traversal signal. It must not be treated as proof that APFS returned the firmlink placeholder rather than the target vnode.
+
+The XNU `getattrlistbulk(2)` manual says a firmlink directory entry should have `SF_FIRMLINK` and that bulk attributes should describe the firmlink rather than its target. The hosted runner's observed target identity/path remains inconsistent with that documented behavior. `getdirentriesattr(2)` is not a fallback: the volume returns `ENOTSUP` (45), which the manual explicitly documents for unsupported volumes.
+
+**Decision:** keep `ATTR_CMNEXT_NOFIRMLINKPATH` as diagnostic evidence only. It is a path of the vnode returned by the API, not a pre-open entry-level firmlink bit. The acceptance requirement for a reliable signal read without traversing the target remains unresolved. Exact-head Rust Core Tests [#45340410986](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45340410986) passed Ubuntu, Windows, and macOS.
