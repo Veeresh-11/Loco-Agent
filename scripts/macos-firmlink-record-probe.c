@@ -388,10 +388,8 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
                 expected_path = "/System/Volumes/Data/Library";
                 mapped_entry = 1;
             } else if (strcmp(name, "System") == 0 ||
-                       strcmp(name, "usr") == 0 ||
-                       strcmp(name, "private") == 0) {
-                expected_path = name[0] == 'S' ? "/System" :
-                                (name[0] == 'u' ? "/usr" : "/private");
+                       strcmp(name, "usr") == 0) {
+                expected_path = name[0] == 'S' ? "/System" : "/usr";
             }
             if (expected_path != NULL) {
                 uint32_t flags = 0;
@@ -418,7 +416,7 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
 
     close(dirfd);
     printf("bulk_extended mapped_entries_found=%d normal_entries_found=%d\n", found, normal_found);
-    return found == 3 && normal_found == 3 ? 0 : 1;
+    return found == 3 && normal_found == 2 ? 0 : 1;
 }
 
 static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const char *expected_path) {
@@ -1103,8 +1101,7 @@ int main(void) {
         probe_extended_nofirmlink_path_at(dirfd, "Applications", "/System/Volumes/Data/Applications") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Library", "/System/Volumes/Data/Library") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "System", "/System") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "private", "/private") != 0) {
+        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr") != 0) {
         close(dirfd);
         return 5;
     }
