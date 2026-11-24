@@ -324,12 +324,13 @@ mod tests {
         let barrier = Arc::new(Barrier::new(3));
 
         let first_barrier = Arc::clone(&barrier);
-        let challenge_id = challenge.challenge_id.clone();
+        let first_challenge_id = challenge.challenge_id.clone();
+        let second_challenge_id = challenge.challenge_id.clone();
         let first_action = action.clone();
         let first_thread = std::thread::spawn(move || {
             let mut store = first;
             first_barrier.wait();
-            match store.consume(&challenge_id, &first_action) {
+            match store.consume(&first_challenge_id, &first_action) {
                 Ok(()) => true,
                 Err(StoreError::AlreadyConsumedOrExpired) => false,
                 Err(error) => panic!("unexpected first consumer error: {error:?}"),
@@ -337,7 +338,6 @@ mod tests {
         });
 
         let second_barrier = Arc::clone(&barrier);
-        let second_challenge_id = challenge_id.clone();
         let second_thread = std::thread::spawn(move || {
             let mut store = second;
             second_barrier.wait();
