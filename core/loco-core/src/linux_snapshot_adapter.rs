@@ -544,4 +544,37 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "requires a tmpfs mounted by the Linux CI workflow"]
+    fn rejects_ci_prepared_tmpfs_mount_crossing() {
+        use std::os::unix::fs::MetadataExt;
+
+        let workspace = std::path::PathBuf::from(
+            std::env::var("LOCO_LINUX_TMPFS_MOUNT_WORKSPACE")
+                .expect("Linux tmpfs fixture workflow must set LOCO_LINUX_TMPFS_MOUNT_WORKSPACE"),
+        );
+        let mountpoint = workspace.join("mounted");
+        assert_ne!(
+            std::fs::metadata(&workspace).unwrap().dev(),
+            std::fs::metadata(&mountpoint).unwrap().dev(),
+            "tmpfs mount must expose a distinct device identity"
+        );
+        assert_eq!(
+            std::fs::read(mountpoint.join("secret.txt")).unwrap(),
+            b"tmpfs-mount-sentinel",
+            "fixture must contain the tmpfs sentinel"
+        );
+
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(
+            std::fs::canonicalize(&workspace).unwrap(),
+            "linux-tmpfs-mount-workspace",
+        )
+        .unwrap();
+        assert_eq!(
+            adapter.capture(&SnapshotCaptureRequest::new("mounted/secret.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed),
+            "RESOLVE_NO_XDEV must reject traversal into a tmpfs mount"
+        );
+    }
+
 }
