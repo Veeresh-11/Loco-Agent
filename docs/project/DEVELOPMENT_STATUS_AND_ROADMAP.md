@@ -372,3 +372,12 @@ The approval feature must remain prototype-only. Do not authorize production pri
 PR #83 changes `ApprovalStore` so challenge expiry is derived from a Rust-owned clock and challenge consumption no longer accepts caller-supplied `now_unix`. Issuance accepts a bounded TTL of 1–300 seconds. A process-wide guard rejects backward wall-clock movement while the process is running. Deterministic tests cover expiry, invalid TTL/ID, signed SQLite range overflow, clock failure, and concurrent single-use consumption.
 
 Residual limitations remain: persisted Unix expiry cannot detect wall-clock rollback across process/machine restart; challenge IDs are still caller supplied and are not guaranteed unpredictable; approval is still not authenticated; database ACL/tamper protection and target freshness are not implemented. Exact-head CI for PR #83 is pending. No production privileged operation may rely on this prototype.
+
+
+## Follow-up update — 2026-11-24: local storage and IPC security design
+
+PR #91 adds `docs/security/LOCAL_STORAGE_AND_IPC_SECURITY_BOUNDARY.md`. It records that the current SQLite main-database page cap is not an aggregate quota for DB/WAL/SHM/temp/backup files, and that the WAL size setting is only a retention target when checkpoint/reset can complete. A portable per-application hard quota is not assumed; the design requires an OS-enforced quota or dedicated bounded volume before claiming an aggregate cap.
+
+The same design prefers a parent-spawned Rust sidecar over a discoverable listener. If independent local clients are required, it records candidate Linux Unix-domain socket peer credentials, macOS getpeereid/optional LOCAL_PEERPID or XPC review, and Windows named-pipe DACL, remote-client rejection, and token inspection. Kernel peer credentials do not establish executable integrity or human approval; same-user malware remains a distinct threat.
+
+This is documentation/research only. No storage ACL, OS quota, IPC transport, authenticator, or production authorization path has been implemented or selected. Next implementation is blocked on the supported OS/version matrix, process topology, same-user attacker model, and exact SQLite VFS/storage-directory behavior. Preserve the existing TypeScript baseline and keep the dependent PR stack unmerged until security review, controlled-write implementation, end-to-end integration, packaging, and rollback gates are complete.
