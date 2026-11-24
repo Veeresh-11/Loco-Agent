@@ -98,9 +98,6 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
 #[cfg(target_os="macos")]
 const ATTR_CMN_ERROR: u32 = 0x2000_0000;
 #[cfg(target_os="macos")]
-const MAX_ENTRY_NAME_BYTES: usize = 3 * 255 + 1;
-
-#[cfg(target_os="macos")]
 fn attr_reference_range(
  record_len: usize,
  reference_offset: usize,
