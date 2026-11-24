@@ -16,6 +16,8 @@ use crate::ProposedAction;
 
 pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
 pub const MAX_OUTSTANDING_APPROVAL_CHALLENGES: usize = 1024;
+pub const MAX_PERSISTED_APPROVAL_CHALLENGES: u64 = 4096;
+pub const APPROVAL_RETENTION_BATCH_SIZE: u64 = 256;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -25,6 +27,7 @@ pub enum StoreError {
     StaleRuntime,
     InvalidChallenge,
     CapacityExceeded,
+    PersistentCapacityExceeded,
     Binding(ApprovalError),
     Clock(ApprovalClockError),
     AlreadyConsumedOrExpired,
@@ -71,6 +74,30 @@ fn prune_and_check_capacity(
         return Err(StoreError::CapacityExceeded);
     }
     Ok(())
+}
+
+fn prune_persistent_challenges(
+    tx: &rusqlite::Transaction<'_>,
+    now_unix: u64,
+    active_epoch: &str,
+) -> Result<usize, StoreError> {
+    let deleted = tx.execute(
+        "DELETE FROM approval_challenges WHERE rowid IN (
+            SELECT rowid FROM approval_challenges
+            WHERE consumed_at IS NOT NULL OR expires_at <= ?1 OR process_epoch != ?2
+            ORDER BY expires_at ASC LIMIT ?3
+         )",
+        params![now_unix as i64, active_epoch, APPROVAL_RETENTION_BATCH_SIZE],
+    )?;
+    Ok(deleted)
+}
+
+fn persisted_challenge_count(tx: &rusqlite::Transaction<'_>) -> Result<u64, StoreError> {
+    Ok(tx.query_row("SELECT COUNT(*) FROM approval_challenges", [], |row| row.get(0))?)
+}
+
+fn persistent_capacity_reached(tx: &rusqlite::Transaction<'_>) -> Result<bool, StoreError> {
+    Ok(persisted_challenge_count(tx)? >= MAX_PERSISTED_APPROVAL_CHALLENGES)
 }
 
 pub struct ApprovalStore {
@@ -177,23 +204,35 @@ impl ApprovalStore {
             return Err(StoreError::InvalidChallenge);
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
-        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
-            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
-        prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
             expires_at_unix,
         };
-        let tx = self.conn.unchecked_transaction()?;
+        // Always acquire SQLite's write reservation before the shared deadline
+        // mutex. consume follows the same lock order, preventing lock inversion.
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Self::ensure_active_epoch(&tx, &self.process_epoch)?;
+        prune_persistent_challenges(&tx, now, &self.process_epoch)?;
+        if persistent_capacity_reached(&tx)? {
+            // Commit bounded cleanup even when admission is denied, allowing
+            // subsequent requests to make progress through old rows.
+            tx.commit()?;
+            return Err(StoreError::PersistentCapacityExceeded);
+        }
+        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
+        prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         tx.execute(
             "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
              VALUES (?1, ?2, ?3, NULL, ?4)",
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
-        tx.commit()?;
         deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
+        if let Err(error) = tx.commit() {
+            deadlines.remove(&challenge.challenge_id);
+            return Err(StoreError::Sql(error));
+        }
         Ok(challenge)
     }
 
@@ -340,6 +379,38 @@ mod tests {
             store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
+    }
+
+    #[test]
+    fn persistent_retention_deletes_only_one_bounded_batch() {
+        let (mut store, _) = test_store_at(100);
+        for index in 0..(APPROVAL_RETENTION_BATCH_SIZE + 44) {
+            store.conn.execute(
+                "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
+                 VALUES (?1, ?2, 1, NULL, 'old-epoch')",
+                params![format!("{index:064x}"), "0".repeat(64)],
+            ).unwrap();
+        }
+        let tx = store.conn.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+        let deleted = prune_persistent_challenges(&tx, 100, &store.process_epoch).unwrap();
+        assert_eq!(deleted as u64, APPROVAL_RETENTION_BATCH_SIZE);
+        assert_eq!(persisted_challenge_count(&tx).unwrap(), 44);
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn persistent_challenge_count_is_hard_capped() {
+        let (mut store, _) = test_store_at(100);
+        for index in 0..MAX_PERSISTED_APPROVAL_CHALLENGES {
+            store.conn.execute(
+                "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
+                 VALUES (?1, ?2, 1000, NULL, ?3)",
+                params![format!("{index:064x}"), "0".repeat(64), store.process_epoch],
+            ).unwrap();
+        }
+        let tx = store.conn.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
+        assert!(persistent_capacity_reached(&tx).unwrap());
+        tx.rollback().unwrap();
     }
 
     #[test]
