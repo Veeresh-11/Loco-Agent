@@ -46,7 +46,7 @@ fn open_dir(parent:&File,name:&str)->Result<File,MacOsSnapshotAdapterError>{
  Ok(file)
 }
 
-pub struct MacOsWorkspaceSnapshotAdapter { root:File, root_device:u64, root_filesystem_id:[i32;2], workspace_id:String, canonical_root:PathBuf }
+pub struct MacOsWorkspaceSnapshotAdapter { root:File, root_device:u64, root_filesystem_id:libc::fsid_t, workspace_id:String, canonical_root:PathBuf }
 impl MacOsWorkspaceSnapshotAdapter {
  /// Opens an absolute workspace path from /, one component at a time.
  /// O_NOFOLLOW rejects symlinks; the retained final descriptor is the capability.
