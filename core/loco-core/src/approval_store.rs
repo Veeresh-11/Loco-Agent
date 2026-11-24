@@ -15,6 +15,7 @@ use crate::approval_clock::{ApprovalClock, ApprovalClockError, SystemApprovalClo
 use crate::ProposedAction;
 
 pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
+pub const MAX_OUTSTANDING_APPROVAL_CHALLENGES: usize = 1024;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -23,6 +24,7 @@ pub enum StoreError {
     RuntimeEpochUnavailable,
     StaleRuntime,
     InvalidChallenge,
+    CapacityExceeded,
     Binding(ApprovalError),
     Clock(ApprovalClockError),
     AlreadyConsumedOrExpired,
@@ -58,6 +60,17 @@ fn process_epoch() -> Result<&'static str, StoreError> {
         Ok(epoch) => Ok(epoch.as_str()),
         Err(_) => Err(StoreError::RuntimeEpochUnavailable),
     }
+}
+
+fn prune_and_check_capacity(
+    deadlines: &mut HashMap<String, Duration>,
+    now: Duration,
+) -> Result<(), StoreError> {
+    deadlines.retain(|_, deadline| *deadline > now);
+    if deadlines.len() >= MAX_OUTSTANDING_APPROVAL_CHALLENGES {
+        return Err(StoreError::CapacityExceeded);
+    }
+    Ok(())
 }
 
 pub struct ApprovalStore {
@@ -164,6 +177,9 @@ impl ApprovalStore {
             return Err(StoreError::InvalidChallenge);
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
+        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
+        prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
@@ -177,9 +193,7 @@ impl ApprovalStore {
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         tx.commit()?;
-        MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
-            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
-            .insert(challenge.challenge_id.clone(), monotonic_deadline);
+        deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         Ok(challenge)
     }
 
@@ -326,6 +340,21 @@ mod tests {
             store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
+    }
+
+    #[test]
+    fn outstanding_challenge_cache_is_bounded_and_prunes_expired_entries() {
+        let mut deadlines = HashMap::new();
+        for index in 0..MAX_OUTSTANDING_APPROVAL_CHALLENGES {
+            deadlines.insert(index.to_string(), Duration::from_secs(30));
+        }
+        assert!(matches!(
+            prune_and_check_capacity(&mut deadlines, Duration::from_secs(0)),
+            Err(StoreError::CapacityExceeded)
+        ));
+        assert_eq!(deadlines.len(), MAX_OUTSTANDING_APPROVAL_CHALLENGES);
+        assert!(prune_and_check_capacity(&mut deadlines, Duration::from_secs(30)).is_ok());
+        assert!(deadlines.is_empty());
     }
 
     #[test]
