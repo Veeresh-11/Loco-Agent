@@ -323,7 +323,7 @@ fn preflight_entry_path(parent: &File, name: &str) -> Result<PathBuf, SnapshotPa
   .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
  let expected_path = parent_path.join(name);
  if entry_path != expected_path {
-  return Err(MacOsSnapshotAdapterError::FirmlinkBoundary);
+  return Err(SnapshotPayloadError::FirmlinkBoundary);
  }
  Ok(entry_path)
 }
@@ -763,19 +763,19 @@ mod tests {
   let root=File::open("/").unwrap();
   assert_eq!(
    preflight_entry_path(&root,"Users"),
-   Err(MacOsSnapshotAdapterError::FirmlinkBoundary)
+   Err(SnapshotPayloadError::FirmlinkBoundary)
   );
   assert_eq!(
    preflight_entry_path(&root,"Applications"),
-   Err(MacOsSnapshotAdapterError::FirmlinkBoundary)
+   Err(SnapshotPayloadError::FirmlinkBoundary)
   );
   assert_eq!(
    preflight_entry_path(&root,"Library"),
-   Err(MacOsSnapshotAdapterError::FirmlinkBoundary)
+   Err(SnapshotPayloadError::FirmlinkBoundary)
   );
   assert_eq!(
    preflight_entry_path(&root,"private"),
-   Err(MacOsSnapshotAdapterError::FirmlinkBoundary)
+   Err(SnapshotPayloadError::FirmlinkBoundary)
   );
   assert_eq!(
    preflight_entry_path(&root,"System").unwrap(),
@@ -815,7 +815,7 @@ mod tests {
   for name in nested_names {
    assert_eq!(
     preflight_entry_path(&parent, &name),
-    Err(MacOsSnapshotAdapterError::FirmlinkBoundary),
+    Err(SnapshotPayloadError::FirmlinkBoundary),
     "nested system/data firmlink must be rejected before open: {name}"
    );
   }
@@ -894,7 +894,7 @@ mod tests {
      );
      assert_eq!(
       preflight_entry_path(&root,"Users"),
-      Err(MacOsSnapshotAdapterError::FirmlinkBoundary)
+      Err(SnapshotPayloadError::FirmlinkBoundary)
      );
     }
    })
@@ -1030,7 +1030,7 @@ mod tests {
    canonical_root:PathBuf::from("/"),
   };
   assert_eq!(adapter.capture(&SnapshotCaptureRequest::new(&relative,128).unwrap()),
-   Err(MacOsSnapshotAdapterError::FirmlinkBoundary),
+   Err(SnapshotPayloadError::FirmlinkBoundary),
    "capture must reject the System-to-Data firmlink before opening its target");
  }
 
