@@ -387,6 +387,9 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
             } else if (strcmp(name, "Library") == 0) {
                 expected_path = "/System/Volumes/Data/Library";
                 mapped_entry = 1;
+            } else if (strcmp(name, "private") == 0) {
+                expected_path = "/System/Volumes/Data/private";
+                mapped_entry = 1;
             } else if (strcmp(name, "System") == 0 ||
                        strcmp(name, "usr") == 0) {
                 expected_path = name[0] == 'S' ? "/System" : "/usr";
@@ -416,7 +419,7 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
 
     close(dirfd);
     printf("bulk_extended mapped_entries_found=%d normal_entries_found=%d\n", found, normal_found);
-    return found == 3 && normal_found == 2 ? 0 : 1;
+    return found == 4 && normal_found == 2 ? 0 : 1;
 }
 
 static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const char *expected_path, uint64_t lookup_options) {
