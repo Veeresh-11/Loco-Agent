@@ -200,6 +200,40 @@ mod tests {
  }
 
  #[test]
+ fn descriptor_path_resolves_users_firmlink_without_following_display_path() {
+  let users=File::open("/Users").unwrap();
+  let resolved=descriptor_path_no_firmlink(&users).unwrap();
+  assert!(resolved.is_absolute());
+  assert_ne!(resolved,PathBuf::from("/Users"));
+ }
+
+ #[test]
+ fn root_and_descendant_use_nofirmlink_descriptor_paths() {
+  let d=tempfile::tempdir().unwrap();
+  std::fs::create_dir(d.path().join("nested")).unwrap();
+  std::fs::write(d.path().join("nested/file.txt"),b"contained").unwrap();
+  let root_file=File::open(d.path()).unwrap();
+  let expected_root=descriptor_path_no_firmlink(&root_file).unwrap();
+  let adapter=MacOsWorkspaceSnapshotAdapter::new(
+   std::fs::canonicalize(d.path()).unwrap(),"workspace"
+  ).unwrap();
+  assert_eq!(adapter.root_path(),expected_root);
+  let captured=adapter.capture(&SnapshotCaptureRequest::new("nested/file.txt",64).unwrap()).unwrap();
+  assert_eq!(captured.bytes(),b"contained");
+  let file=File::open(d.path().join("nested/file.txt")).unwrap();
+  let resolved_file=descriptor_path_no_firmlink(&file).unwrap();
+  assert!(path_is_within_root(adapter.root_path(),&resolved_file));
+ }
+
+ #[test]
+ fn nofirmlink_path_containment_uses_path_components_not_string_prefixes() {
+  let root=Path::new("/System/Volumes/Data/Users/runner/work");
+  assert!(path_is_within_root(root,Path::new("/System/Volumes/Data/Users/runner/work/src/main.rs")));
+  assert!(!path_is_within_root(root,Path::new("/System/Volumes/Data/Users/runner/work-other/secret")));
+  assert!(!path_is_within_root(root,Path::new("/System/Volumes/Data/Applications/secret")));
+ }
+
+ #[test]
  #[ignore = "requires a real nested APFS volume mounted by the macOS CI workflow"]
  fn rejects_nested_apfs_volume_mount(){
   use std::os::unix::fs::MetadataExt;
