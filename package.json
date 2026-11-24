@@ -55,6 +55,7 @@
     "pretest":"npm run compile",
     "test":"jest",
     "lint":"eslint src/core/rustSidecarClient.ts src/__tests__/rustSidecarClient.test.ts src/core/workspaceReadContract.ts src/__tests__/workspaceReadContract.test.ts",
+    "security:check-privileged-operations":"node scripts/check-privileged-operations.js",
     "lint:legacy":"eslint src --ext ts",
     "package":"vsce package --allow-missing-repository"
   },
