@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loco-agent.dev/contracts/workspace-read-request-v1.schema.json",
+  "title": "LOCO Workspace Read Request",
+  "description": "Shape-only request contract for a future bounded read-only capability. Validation does not authorize or perform filesystem access.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "workspaceId", "relativePath", "maxBytes"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Opaque host-issued workspace identifier; never a filesystem path."
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "Portable workspace-relative path. Apply the shared portable path grammar and then enforce containment during secure handle-based acquisition."
+    },
+    "maxBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 }
+  }
+}
