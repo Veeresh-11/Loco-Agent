@@ -243,7 +243,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
     #[test]
     fn selected_workspace_is_constructed_then_owned_by_registry() {
-        let parent = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
         let selected = parent.path().join("selected");
         std::fs::create_dir(&selected).unwrap();
         std::fs::write(selected.join("probe.txt"), b"registered-selection").unwrap();
