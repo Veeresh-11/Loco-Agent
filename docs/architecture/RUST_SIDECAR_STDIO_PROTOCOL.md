@@ -115,3 +115,6 @@ The TypeScript extension now has an isolated `RustSidecarClient` prototype in `s
 - Does not replay a request after a timeout/crash. A returned `allow` remains a policy result only, not an execution or write capability.
 
 This checkpoint is transport code only. It is not yet wired into the production agent task path, and packaged per-platform binaries are not yet delivered. The legacy TypeScript extension remains the active path. The current prototype tests exercise handshake/correlation, wrong IDs, oversized frames, and single-request behavior; the full crash/cancellation/restart/packaging test matrix remains an exit criterion. The client must not be treated as an authorization boundary.
+
+
+The TypeScript client now accepts an optional `AbortSignal` for evaluation. Cancellation during handshake or evaluation rejects the operation and terminates the child; the request is never replayed. Tests also cover unexpected child exit. This does not yet provide transparent automatic restart: a later caller may retry within the client's bounded three-start lifetime budget.
