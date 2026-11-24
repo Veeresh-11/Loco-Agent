@@ -329,6 +329,19 @@ mod tests {
     }
 
     #[test]
+    fn monotonic_deadline_expires_even_when_wall_clock_does_not_advance() {
+        let (mut store, clock) = test_store_at(100);
+        let action = sample_action();
+        let challenge = store.issue(&action, 5).unwrap();
+        clock.advance_monotonic(5_000);
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
     fn action_mismatch_does_not_consume() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
