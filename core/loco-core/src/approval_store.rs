@@ -244,6 +244,7 @@ mod tests {
 
     struct TestClock {
         now: AtomicU64,
+        monotonic_millis: AtomicU64,
         fail: Mutex<Option<ApprovalClockError>>,
     }
     impl TestClock {
@@ -259,6 +260,9 @@ mod tests {
         fn now_unix_seconds(&self) -> Result<u64, ApprovalClockError> {
             if let Some(error) = self.fail.lock().unwrap().clone() { return Err(error); }
             Ok(self.now.load(Ordering::SeqCst))
+        }
+        fn monotonic_now(&self) -> Result<Duration, ApprovalClockError> {
+            Ok(Duration::from_millis(self.monotonic_millis.load(Ordering::SeqCst)))
         }
     }
 
@@ -284,6 +288,7 @@ mod tests {
         let challenge = store.issue(&action, 30).unwrap();
         assert_eq!(challenge.expires_at_unix, 130);
         clock.set(129);
+        clock.advance_monotonic(29_000);
         store.consume(&challenge.challenge_id, &action).unwrap();
         assert!(store.is_consumed(&challenge.challenge_id).unwrap());
         assert!(matches!(
@@ -298,6 +303,7 @@ mod tests {
         let action = sample_action();
         let challenge = store.issue(&action, 10).unwrap();
         clock.set(110);
+        clock.advance_monotonic(10_000);
         assert!(matches!(
             store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
