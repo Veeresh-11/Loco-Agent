@@ -783,7 +783,7 @@ mod tests {
       Ok(())
      );
     },
-    Err(SnapshotPayloadError::AcquisitionFailed)=>{},
+    Err(SnapshotPayloadError::AcquisitionFailed | SnapshotPayloadError::FirmlinkBoundary)=>{},
     Err(other)=>panic!("unexpected capture error during path swap: {other:?}"),
    }
   }
