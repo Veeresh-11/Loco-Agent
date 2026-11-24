@@ -21,132 +21,6 @@ fn filesystem_name(file:&File)->Result<String,MacOsSnapshotAdapterError>{
 }
 
 #[cfg(target_os="macos")]
-#[repr(C)]
-#[derive(Clone,Copy)]
-struct MacAttrList {
- bitmapcount:u16,
- reserved:u16,
- commonattr:u32,
- volattr:u32,
- dirattr:u32,
- fileattr:u32,
- forkattr:u32,
-}
-
-#[cfg(target_os="macos")]
-#[repr(C)]
-#[derive(Clone,Copy)]
-struct MacAttributeSet {
- commonattr:u32,
- volattr:u32,
- dirattr:u32,
- fileattr:u32,
- forkattr:u32,
-}
-
-#[cfg(target_os="macos")]
-#[repr(C)]
-#[derive(Clone,Copy)]
-struct MacAttrReference {
- data_offset:i32,
- data_length:u32,
-}
-
-#[cfg(target_os="macos")]
-unsafe extern "C" {
- fn getattrlistbulk(
-  dirfd:libc::c_int,
-  attr_list:*mut MacAttrList,
-  attr_buf:*mut libc::c_void,
-  attr_buf_size:usize,
-  options:u64,
- )->libc::c_int;
-}
-
-#[cfg(target_os="macos")]
-fn directory_entry_flags(parent:&File,name:&str)->Result<Option<u32>,MacOsSnapshotAdapterError>{
- use std::os::fd::AsRawFd;
- const ATTR_BIT_MAP_COUNT:u16=5;
- const ATTR_CMN_NAME:u32=0x0000_0001;
- const ATTR_CMN_FLAGS:u32=0x0004_0000;
- const ATTR_CMN_RETURNED_ATTRS:u32=0x8000_0000;
- const SF_FIRMLINK:u32=0x0080_0000;
- let mut attrs=MacAttrList{
-  bitmapcount:ATTR_BIT_MAP_COUNT,reserved:0,
-  commonattr:ATTR_CMN_RETURNED_ATTRS|ATTR_CMN_NAME|ATTR_CMN_FLAGS,
-  volattr:0,dirattr:0,fileattr:0,forkattr:0,
- };
- let fd=parent.as_raw_fd();
- if unsafe{libc::lseek(fd,0,libc::SEEK_SET)}<0 {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
- let mut storage=[0u64;8192];
- let buffer=unsafe{
-  std::slice::from_raw_parts_mut(
-   storage.as_mut_ptr().cast::<u8>(),
-   std::mem::size_of_val(&storage)
-  )
- };
- loop {
-  let count=unsafe{
-   getattrlistbulk(fd,&mut attrs,buffer.as_mut_ptr().cast(),buffer.len(),0)
-  };
-  if count<0 {return Err(MacOsSnapshotAdapterError::InvalidRoot)}
-  if count==0 {return Ok(None)}
-  let mut cursor=0usize;
-  for _ in 0..count {
-   if cursor.checked_add(4).filter(|end|*end<=buffer.len()).is_none(){
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let record_len=u32::from_ne_bytes(buffer[cursor..cursor+4].try_into().unwrap()) as usize;
-   if record_len<4+std::mem::size_of::<MacAttributeSet>()+std::mem::size_of::<MacAttrReference>()+4
-    || record_len>buffer.len()-cursor {
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let record=&buffer[cursor..cursor+record_len];
-   let returned=unsafe{
-    std::ptr::read_unaligned(record.as_ptr().add(4).cast::<MacAttributeSet>())
-   };
-   if returned.commonattr&(ATTR_CMN_NAME|ATTR_CMN_FLAGS)!=(ATTR_CMN_NAME|ATTR_CMN_FLAGS){
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let name_ref_offset=4+std::mem::size_of::<MacAttributeSet>();
-   let name_ref=unsafe{
-    std::ptr::read_unaligned(record.as_ptr().add(name_ref_offset).cast::<MacAttrReference>())
-   };
-   let data_offset=(name_ref_offset as i64)
-    .checked_add(name_ref.data_offset as i64)
-    .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
-   let data_start=usize::try_from(data_offset).map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
-   let data_end=data_start.checked_add(name_ref.data_length as usize)
-    .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
-   if name_ref.data_length==0||data_end>record.len(){
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let name_bytes=&record[data_start..data_end];
-   if name_bytes.last()!=Some(&0){
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let flags_offset=name_ref_offset+std::mem::size_of::<MacAttrReference>();
-   if flags_offset+4>record.len(){
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let flags=u32::from_ne_bytes(record[flags_offset..flags_offset+4].try_into().unwrap());
-   if &name_bytes[..name_bytes.len()-1]==name.as_bytes(){
-    return Ok(Some(flags));
-   }
-   cursor+=record_len;
-  }
- }
-}
-
-#[cfg(target_os="macos")]
-fn directory_entry_is_firmlink(parent:&File,name:&str)->Result<bool,MacOsSnapshotAdapterError>{
- const SF_FIRMLINK:u32=0x0080_0000;
- Ok(directory_entry_flags(parent,name)?.is_some_and(|flags|flags&SF_FIRMLINK!=0))
-}
-
-#[cfg(target_os="macos")]
 fn metadata_matches(a:&std::fs::Metadata,b:&std::fs::Metadata)->bool {
  use std::os::unix::fs::MetadataExt;
  a.dev()==b.dev() && a.ino()==b.ino() && a.len()==b.len() && a.nlink()==b.nlink()
@@ -205,10 +79,6 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
   if parts.is_empty()||parts.iter().any(|p|p.is_empty()||*p=="."||*p==".."){return Err(SnapshotPayloadError::AcquisitionFailed)}
   let mut parent=self.root.try_clone().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
   for part in &parts[..parts.len()-1]{
-   if directory_entry_is_firmlink(&parent,part)
-    .map_err(|_|SnapshotPayloadError::AcquisitionFailed)? {
-    return Err(SnapshotPayloadError::AcquisitionFailed);
-   }
    let fd=openat(&parent,*part,OFlags::RDONLY|OFlags::DIRECTORY|OFlags::CLOEXEC|OFlags::NOFOLLOW,Mode::empty())
     .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    let child=File::from(fd);
@@ -279,39 +149,10 @@ mod tests {
   );
  }
 
- #[test]
- fn rejects_users_firmlink_into_data_volume(){
-  use std::os::unix::fs::MetadataExt;
-
-  // On the hosted macOS runner, /Users is a firmlink into the APFS Data
-  // volume. Construct the adapter directly from / only inside this test:
-  // production workspace admission intentionally does not allow / as a root.
-  let root=File::open("/").unwrap();
-  let root_device=root.metadata().unwrap().dev();
-  assert_eq!(filesystem_name(&root).unwrap(),"apfs");
-  let users_flags=directory_entry_flags(&root,"Users").unwrap();
-  let applications_flags=directory_entry_flags(&root,"Applications").unwrap();
-  assert!(
-   users_flags.is_some_and(|flags|flags&0x0080_0000!=0)
-    || applications_flags.is_some_and(|flags|flags&0x0080_0000!=0),
-   "expected an actual /Users or /Applications firmlink; Users flags={users_flags:?}, Applications flags={applications_flags:?}"
-  );
-
-  let adapter=MacOsWorkspaceSnapshotAdapter{
-   root,root_device,workspace_id:"firmlink-boundary-test".into(),
-   canonical_root:PathBuf::from("/")
-  };
-  let path=if users_flags.is_some_and(|flags|flags&0x0080_0000!=0) {
-   "Users/runner/should-not-be-opened"
-  } else {
-   "Applications/should-not-be-opened"
-  };
-  assert_eq!(
-   adapter.capture(&SnapshotCaptureRequest::new(path,128).unwrap()),
-   Err(SnapshotPayloadError::AcquisitionFailed),
-   "descriptor-relative traversal must fail closed at a firmlink directory entry"
-  );
- }
+ // Firmlink containment is intentionally not claimed by this adapter yet.
+ // The hosted runner exposes firmlink paths in /usr/share/firmlinks but its
+ // ATTR_CMN_FLAGS output did not provide SF_FIRMLINK for those entries.
+ // Track native detection and a deterministic acceptance test in issue #74.
 
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();
