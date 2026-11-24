@@ -46,7 +46,7 @@ jobs:
           printf 'kernel=%s\narchitecture=%s\n' "$(uname -r)" "$(uname -m)"
           echo "=== Runner temporary filesystem ==="
           findmnt --target "$RUNNER_TEMP" --output TARGET,SOURCE,FSTYPE,OPTIONS
-          stat -f -c 'filesystem_type=%T block_size=%S' "$RUNNER_TEMP"
+          stat -f -c 'statfs_family=%T block_size=%S' "$RUNNER_TEMP"
           df -T "$RUNNER_TEMP"
       - name: Record native Windows runner and workspace filesystem
         if: runner.os == 'Windows'
