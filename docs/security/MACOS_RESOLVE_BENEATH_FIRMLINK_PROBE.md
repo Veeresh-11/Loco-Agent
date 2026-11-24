@@ -1,6 +1,6 @@
 # macOS `O_RESOLVE_BENEATH` and firmlink probe
 
-**Status:** native experiment pending exact-head macOS CI; no adapter authorization change is made by this probe.
+**Status:** native macOS 26.7.2 experiment completed; `O_RESOLVE_BENEATH` does not reject the tested System/Data firmlinks. A regression now verifies the post-open `f_fsid` boundary.
 
 ## Question
 
@@ -32,6 +32,27 @@ Sources:
 5. For successful opens, records `F_GETPATH_NOFIRMLINK` so the observed target-side path is visible beside the outcome.
 
 The probe is diagnostic by design: mapped entries may be reported as either `blocked` or `opened`. It must not turn a surprising outcome into a false green authorization claim. The control case ensures the tested flag is actually enforced for a lexical parent escape. The native macOS CI log is the evidence used to decide whether this primitive contributes any firmlink-specific protection.
+
+## Observed result (macOS 26.7.2, build 25G332, arm64)
+
+Exact probe run: [Rust Core Tests #45350359899](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350359899), native probe executed in the macOS job. The probe's lexical escape control returned `ENOTCAPABLE` (errno 107), confirming that `O_RESOLVE_BENEATH` was active.
+
+Despite that control:
+- Ordinary controls `/System` and `/usr` opened successfully.
+- Root mappings `/Users`, `/Applications`, `/Library`, and `/private` all opened successfully.
+- All seven nested mappings beneath `/System/Library` opened successfully, including `CoreTypes.bundle/Contents/Library`.
+- Every successful mapped open returned a `F_GETPATH_NOFIRMLINK` path under `/System/Volumes/Data`.
+
+Therefore `O_RESOLVE_BENEATH` enforces its lexical/namespace beneath rule but does **not** reject these firmlink transitions. It is not an atomic firmlink boundary and must not replace the adapter's post-open volume identity check.
+
+The same run's APFS identity probe recorded:
+- `/System`: `f_fsid=(16777232,26)`
+- `/System/Volumes/Data`: `f_fsid=(16777229,26)`
+- Both returned `st_dev=16777229`.
+
+This confirms that `st_dev` alone does not distinguish these volumes on this runner, while the descriptor-derived `f_fsid` does.
+
+PR #110 adds `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`, which deliberately bypasses the bulk preflight, opens each real firmlink relative to its retained parent descriptor, and asserts the opened handle reports the Data `f_fsid` while its parent reports the System `f_fsid`. Exact-head CI for that added regression is pending.
 
 ## Interpretation and acceptance
 
