@@ -50,7 +50,8 @@ export class RustSidecarClient implements vscodeDisposable {
     if (this.busy) throw new Error('A sidecar request is already in progress.');
     this.busy = true;
     try {
-      throwIfAborted(signal);\n      await this.ensureStarted(signal);
+      throwIfAborted(signal);
+      await this.ensureStarted(signal);
       const requestId = randomUUID();
       const response = await this.exchange({
         protocolVersion: PROTOCOL_VERSION,
@@ -84,7 +85,8 @@ export class RustSidecarClient implements vscodeDisposable {
     if (this.starts >= MAX_STARTS) throw new Error('Sidecar restart budget exhausted.');
     if (this.starts > 0) await (this.options.sleep ?? delay)(250 * (2 ** (this.starts - 1)));
     this.starts += 1;
-    throwIfAborted(signal);\n    const executable = this.options.resolveExecutable();
+    throwIfAborted(signal);
+    const executable = this.options.resolveExecutable();
     if (!executable || executable.includes('\0')) throw new Error('Packaged sidecar executable is unavailable.');
     const spawnProcess = this.options.spawnProcess ?? ((path: string) =>
       cp.spawn(path, [], { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }) as cp.ChildProcessWithoutNullStreams);
@@ -243,7 +245,11 @@ export class RustSidecarClient implements vscodeDisposable {
 
 interface vscodeDisposable { dispose(): void; }
 
-function throwIfAborted(signal?: AbortSignal): void {\n  if (signal?.aborted) throw new Error('Sidecar request cancelled.');\n}\n\nfunction isObject(value: unknown): value is JsonObject {
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('Sidecar request cancelled.');
+}
+
+function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
