@@ -42,9 +42,15 @@ export class RustSidecarClient implements vscodeDisposable {
   private started = false;
   private closed = false;
   private starts = 0;
+  private serverCapabilities = new Set<string>();
   private stderrTextDecoder = new TextDecoder();
 
   constructor(private readonly options: SidecarClientOptions) {}
+
+  /** Runtime capabilities reported by the child; never treat these as authorization grants. */
+  hasCapability(name: string): boolean {
+    return this.serverCapabilities.has(name);
+  }
 
   async evaluate(proposal: JsonObject, signal?: AbortSignal): Promise<SidecarDecision> {
     if (this.busy) throw new Error('A sidecar request is already in progress.');
@@ -114,10 +120,13 @@ export class RustSidecarClient implements vscodeDisposable {
         typeof response.server.version !== 'string' || response.server.version.length < 1 ||
         response.server.version.length > 64 ||
         !Array.isArray(response.server.capabilities) ||
+        response.server.capabilities.some(capability =>
+          typeof capability !== 'string' || !/^[a-z0-9_]{1,64}$/.test(capability)) ||
         !response.server.capabilities.includes('proposal_evaluation')) {
       await this.terminate();
       throw new Error('Rust sidecar handshake did not satisfy the v1 contract.');
     }
+    this.serverCapabilities = new Set(response.server.capabilities as string[]);
     this.started = true;
   }
 
@@ -242,6 +251,7 @@ export class RustSidecarClient implements vscodeDisposable {
     const child = this.child;
     this.child = undefined;
     this.started = false;
+    this.serverCapabilities.clear();
     this.pending?.reject(new Error('Sidecar process terminated.'));
     this.pending = undefined;
     if (!child) return;
