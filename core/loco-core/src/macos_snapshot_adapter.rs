@@ -118,7 +118,9 @@ fn attr_reference_range(
  let payload_end = payload_start.checked_add(payload_len)
   .filter(|end| *end <= record_len)
   .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
- if payload_start < reference_end
+ if reference_offset % std::mem::size_of::<u32>() != 0
+    || payload_start % std::mem::size_of::<u32>() != 0
+    || payload_start < reference_end
     || payload_len < minimum_payload_len
     || payload_len > maximum_payload_len {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
@@ -798,6 +800,7 @@ mod tests {
   for malformed in [
    libc::attrreference_t { attr_dataoffset: -8, attr_length: 4 },
    libc::attrreference_t { attr_dataoffset: 0, attr_length: 4 },
+   libc::attrreference_t { attr_dataoffset: 9, attr_length: 4 },
    libc::attrreference_t { attr_dataoffset: i32::MAX, attr_length: 4 },
    libc::attrreference_t { attr_dataoffset: 8, attr_length: 0 },
    libc::attrreference_t { attr_dataoffset: 8, attr_length: 33 },
