@@ -275,6 +275,154 @@ static int probe_bulk_entry_identity(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static int probe_bulk_symlink_vs_directory(void) {
+    char template[] = "/tmp/loco-bulk-alias-XXXXXX";
+    char *root = mkdtemp(template);
+    if (root == NULL) {
+        printf("bulk_alias mkdtemp_error=%d\n", errno);
+        return 1;
+    }
+
+    char ordinary[PATH_MAX];
+    char alias[PATH_MAX];
+    if (snprintf(ordinary, sizeof(ordinary), "%s/ordinary", root) >= (int)sizeof(ordinary) ||
+        snprintf(alias, sizeof(alias), "%s/alias", root) >= (int)sizeof(alias)) {
+        rmdir(root);
+        return 1;
+    }
+    if (mkdir(ordinary, 0700) != 0 || symlink("ordinary", alias) != 0) {
+        int error = errno;
+        unlink(alias);
+        rmdir(ordinary);
+        rmdir(root);
+        printf("bulk_alias setup_error=%d\n", error);
+        return 1;
+    }
+
+    int dirfd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) {
+        int error = errno;
+        unlink(alias);
+        rmdir(ordinary);
+        rmdir(root);
+        printf("bulk_alias root_open_error=%d\n", error);
+        return 1;
+    }
+
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_FLAGS;
+    attrs.forkattr = ATTR_CMNEXT_NOFIRMLINKPATH;
+    unsigned char buffer[16 * 1024] __attribute__((aligned(8)));
+    int seen_ordinary = 0;
+    int seen_alias = 0;
+
+    for (;;) {
+        int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer),
+                                    FSOPT_ATTR_CMN_EXTENDED);
+        if (count < 0) {
+            int error = errno;
+            close(dirfd);
+            unlink(alias);
+            rmdir(ordinary);
+            rmdir(root);
+            printf("bulk_alias enumerate_error=%d\n", error);
+            return 1;
+        }
+        if (count == 0) break;
+
+        size_t cursor = 0;
+        for (int i = 0; i < count; ++i) {
+            uint32_t record_len = 0;
+            attribute_set_t returned;
+            if (cursor + sizeof(record_len) + sizeof(returned) > sizeof(buffer)) {
+                close(dirfd);
+                unlink(alias);
+                rmdir(ordinary);
+                rmdir(root);
+                return 1;
+            }
+            memcpy(&record_len, buffer + cursor, sizeof(record_len));
+            if (record_len < sizeof(record_len) + sizeof(returned) ||
+                record_len > sizeof(buffer) - cursor) {
+                close(dirfd);
+                unlink(alias);
+                rmdir(ordinary);
+                rmdir(root);
+                return 1;
+            }
+            const unsigned char *record = buffer + cursor;
+            memcpy(&returned, record + sizeof(record_len), sizeof(returned));
+            size_t offset = sizeof(record_len) + sizeof(returned);
+            if (!(returned.commonattr & ATTR_CMN_NAME) ||
+                !(returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH)) {
+                cursor += record_len;
+                continue;
+            }
+            attrreference_t name_ref;
+            memcpy(&name_ref, record + offset, sizeof(name_ref));
+            int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+            if (name_start < 0 || name_ref.attr_length == 0 ||
+                (uint64_t)name_start + name_ref.attr_length > record_len ||
+                name_ref.attr_length > NAME_MAX + 1) {
+                close(dirfd);
+                unlink(alias);
+                rmdir(ordinary);
+                rmdir(root);
+                return 1;
+            }
+            char name[NAME_MAX + 1];
+            memcpy(name, record + (size_t)name_start, name_ref.attr_length);
+            if (name[name_ref.attr_length - 1] != '\0') {
+                close(dirfd);
+                unlink(alias);
+                rmdir(ordinary);
+                rmdir(root);
+                return 1;
+            }
+            offset += sizeof(name_ref);
+            if (returned.commonattr & ATTR_CMN_FLAGS) offset += sizeof(uint32_t);
+            attrreference_t path_ref;
+            memcpy(&path_ref, record + offset, sizeof(path_ref));
+            int64_t path_start = (int64_t)offset + (int64_t)path_ref.attr_dataoffset;
+            if (path_start < 0 || path_ref.attr_length == 0 ||
+                (uint64_t)path_start + path_ref.attr_length > record_len ||
+                path_ref.attr_length > PATH_MAX ||
+                record[path_start + path_ref.attr_length - 1] != '\0') {
+                close(dirfd);
+                unlink(alias);
+                rmdir(ordinary);
+                rmdir(root);
+                return 1;
+            }
+
+            if (strcmp(name, "ordinary") == 0 || strcmp(name, "alias") == 0) {
+                struct stat st;
+                if (fstatat(dirfd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+                    close(dirfd);
+                    unlink(alias);
+                    rmdir(ordinary);
+                    rmdir(root);
+                    return 1;
+                }
+                printf("bulk_alias name=%s nofirmlink_path=%s lstat_is_symlink=%s mode=0%o\n",
+                       name, (const char *)(record + (size_t)path_start),
+                       S_ISLNK(st.st_mode) ? "yes" : "no", (unsigned int)st.st_mode);
+                if (strcmp(name, "ordinary") == 0) seen_ordinary = 1;
+                else seen_alias = 1;
+            }
+            cursor += record_len;
+        }
+    }
+
+    close(dirfd);
+    unlink(alias);
+    rmdir(ordinary);
+    rmdir(root);
+    return seen_ordinary && seen_alias ? 0 : 1;
+}
+
 static int probe_bulk_extended_nofirmlink_paths(void) {
     int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirfd < 0) {
@@ -1102,7 +1250,8 @@ int main(void) {
         close(dirfd);
         return 4;
     }
-    if (probe_bulk_extended_nofirmlink_paths() != 0) {
+    if (probe_bulk_extended_nofirmlink_paths() != 0 ||
+        probe_bulk_symlink_vs_directory() != 0) {
         close(dirfd);
         return 5;
     }
