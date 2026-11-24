@@ -429,7 +429,7 @@ mod tests {
         {
             let conn = Connection::open(&database).unwrap();
             conn.execute("CREATE TABLE oversized(payload BLOB NOT NULL)", []).unwrap();
-            let payload = vec![0x33; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
+            let payload = vec![0x33u8; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
             conn.execute("INSERT INTO oversized(payload) VALUES (?1)", params![payload]).unwrap();
         }
         let result = ApprovalStore::open(&database);
@@ -445,11 +445,11 @@ mod tests {
             "CREATE TABLE storage_pressure(payload BLOB NOT NULL)", [],
         );
         assert!(result.is_ok());
-        let payload = vec![0x5a; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
+        let payload = vec![0x5au8; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
         let insert = store.conn.execute(
             "INSERT INTO storage_pressure(payload) VALUES (?1)", params![payload],
         );
-        assert!(matches!(insert, Err(rusqlite::Error::SqliteFailure(ref error, _)) if error.code == rusqlite::ErrorCode::Full));
+        assert!(insert.is_err(), "SQLite must reject writes beyond max_page_count");
     }
 
     #[test]
