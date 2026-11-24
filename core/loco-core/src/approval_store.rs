@@ -166,6 +166,12 @@ impl ApprovalStore {
             return Err(StoreError::InvalidChallenge);
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
+        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
+        deadlines.retain(|_, deadline| *deadline > monotonic_now);
+        if deadlines.len() >= MAX_OUTSTANDING_APPROVAL_CHALLENGES {
+            return Err(StoreError::CapacityExceeded);
+        }
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
