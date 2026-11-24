@@ -86,6 +86,29 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 }
 
 
+static void print_descriptor_paths(int fd, const char *label) {
+    char visible_path[PATH_MAX];
+    memset(visible_path, 0, sizeof(visible_path));
+    if (fcntl(fd, F_GETPATH, visible_path) == 0) {
+        printf("fcntl_getpath label=%s path=%s\\n", label, visible_path);
+    } else {
+        printf("fcntl_getpath label=%s error=%d\\n", label, errno);
+    }
+
+#if defined(F_GETPATH_NOFIRMLINK)
+    char nofirmlink_path[PATH_MAX];
+    memset(nofirmlink_path, 0, sizeof(nofirmlink_path));
+    if (fcntl(fd, F_GETPATH_NOFIRMLINK, nofirmlink_path) == 0) {
+        printf("fcntl_getpath_nofirmlink label=%s path=%s\\n",
+               label, nofirmlink_path);
+    } else {
+        printf("fcntl_getpath_nofirmlink label=%s error=%d\\n", label, errno);
+    }
+#else
+    printf("fcntl_getpath_nofirmlink label=%s unavailable_in_sdk\\n", label);
+#endif
+}
+
 static void print_path_api_flags(int rootfd, const char *path) {
     // Compare path-based stat flags with getattrlist results. Firmlinks are not
     // POSIX symlinks, so AT_SYMLINK_NOFOLLOW is diagnostic only, not a boundary.
@@ -146,6 +169,8 @@ static void print_path_api_flags(int rootfd, const char *path) {
         printf("openat path=%s O_NOFOLLOW error=%d\n", path, errno);
         return;
     }
+    print_descriptor_paths(childfd, path);
+
     struct stat handle_stat;
     if (fstat(childfd, &handle_stat) == 0) {
         printf("fstat_handle path=%s st_flags=0x%08x st_dev=%llu st_ino=%llu\n",
@@ -190,6 +215,8 @@ int main(void) {
         perror("open(/)");
         return 1;
     }
+
+    print_descriptor_paths(dirfd, "/");
 
     unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
     for (;;) {
