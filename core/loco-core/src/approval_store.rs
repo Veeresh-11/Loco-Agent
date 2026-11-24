@@ -195,12 +195,6 @@ impl ApprovalStore {
         }
         let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
-        let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
-            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
-            .get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;
-        if monotonic_now >= monotonic_deadline {
-            return Err(StoreError::AlreadyConsumedOrExpired);
-        }
         if now_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
@@ -216,6 +210,12 @@ impl ApprovalStore {
         ).optional()?;
         let (digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
         if challenge_epoch != self.process_epoch { return Err(StoreError::AlreadyConsumedOrExpired); }
+        let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;
+        if monotonic_now >= monotonic_deadline {
+            return Err(StoreError::AlreadyConsumedOrExpired);
+        }
         if consumed_at.is_some() || now_unix >= expires_at {
             return Err(StoreError::AlreadyConsumedOrExpired);
         }
