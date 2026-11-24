@@ -5,7 +5,7 @@
 //! separate, unresolved requirement.
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use std::path::Path;
+use std::collections::HashMap;\nuse std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -128,7 +128,7 @@ impl ApprovalStore {
             params![process_epoch],
         )?;
         tx.commit()?;
-        Ok(Self { conn, clock, process_epoch })
+        Ok(Self { conn, clock, process_epoch, monotonic_deadlines: HashMap::new() })
     }
 
     fn ensure_active_epoch(tx: &rusqlite::Transaction<'_>, expected_epoch: &str) -> Result<(), StoreError> {
@@ -154,7 +154,7 @@ impl ApprovalStore {
             return Err(StoreError::InvalidChallenge);
         }
         let challenge_id = generate_challenge_id().map_err(StoreError::Entropy)?;
-        let now = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
+        let now = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;\n        let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;\n        let monotonic_deadline = monotonic_now.checked_add(Duration::from_secs(ttl_seconds)).ok_or(StoreError::InvalidChallenge)?;
         let expires_at_unix = now.checked_add(ttl_seconds).ok_or(StoreError::InvalidChallenge)?;
         if expires_at_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
@@ -186,7 +186,7 @@ impl ApprovalStore {
         if !is_valid_challenge_id(challenge_id) {
             return Err(StoreError::InvalidChallenge);
         }
-        let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
+        let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;\n        let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;\n        let monotonic_deadline = self.monotonic_deadlines.get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;\n        if monotonic_now >= monotonic_deadline {\n            return Err(StoreError::AlreadyConsumedOrExpired);\n        }
         if now_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
@@ -248,9 +248,9 @@ mod tests {
     }
     impl TestClock {
         fn new(now: u64) -> Self {
-            Self { now: AtomicU64::new(now), fail: Mutex::new(None) }
+            Self { now: AtomicU64::new(now), monotonic_millis: AtomicU64::new(0), fail: Mutex::new(None) }
         }
-        fn set(&self, now: u64) { self.now.store(now, Ordering::SeqCst); }
+        fn set(&self, now: u64) { self.now.store(now, Ordering::SeqCst); }\n        fn advance_monotonic(&self, millis: u64) { self.monotonic_millis.fetch_add(millis, Ordering::SeqCst); }
         fn fail_with(&self, error: ApprovalClockError) {
             *self.fail.lock().unwrap() = Some(error);
         }
