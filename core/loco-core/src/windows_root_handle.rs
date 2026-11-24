@@ -918,6 +918,177 @@ mod tests {
         assert_ne!(ok, 0, "setting junction mount-point reparse data failed");
     }
 
+    // Test-only direct NtCreateFile probe. Unlike the production adapter,
+    // this returns the raw NTSTATUS so the supported runner builds can record
+    // the actual result of OBJ_DONT_REPARSE with a handle-relative RootDirectory.
+    fn nt_create_file_probe(
+        parent: &File,
+        relative_path: &str,
+        object_attributes_flags: u32,
+        directory: bool,
+    ) -> (i32, Option<File>) {
+        let mut name: Vec<u16> = relative_path.encode_utf16().collect();
+        let byte_len = name.len().checked_mul(2).expect("UTF-16 byte length overflow");
+        assert!(byte_len > 0 && byte_len <= u16::MAX as usize);
+        let mut unicode_name = UnicodeString {
+            length: byte_len as u16,
+            maximum_length: byte_len as u16,
+            buffer: name.as_mut_ptr(),
+        };
+        let mut attributes = ObjectAttributes {
+            length: size_of::<ObjectAttributes>() as u32,
+            root_directory: parent.as_raw_handle() as HANDLE,
+            object_name: &mut unicode_name,
+            attributes: OBJ_CASE_INSENSITIVE | object_attributes_flags,
+            security_descriptor: null_mut(),
+            security_quality_of_service: null_mut(),
+        };
+        let mut io_status: IoStatusBlock = unsafe { zeroed() };
+        let mut raw_handle: HANDLE = null_mut();
+        const FILE_READ_DATA_VALUE: u32 = 0x0001;
+        let desired_access = if directory {
+            FILE_LIST_DIRECTORY_VALUE
+                | FILE_TRAVERSE_VALUE
+                | FILE_READ_ATTRIBUTES_VALUE
+                | SYNCHRONIZE_VALUE
+        } else {
+            FILE_READ_DATA_VALUE | FILE_READ_ATTRIBUTES_VALUE | SYNCHRONIZE_VALUE
+        };
+        const FILE_NON_DIRECTORY_FILE_VALUE: u32 = 0x0000_0040;
+        let create_options = (if directory {
+            FILE_DIRECTORY_FILE
+        } else {
+            FILE_NON_DIRECTORY_FILE_VALUE
+        }) | FILE_SYNCHRONOUS_IO_NONALERT;
+
+        // SAFETY: the UTF-16 name and all ABI structures remain live for the
+        // synchronous call; RootDirectory is a retained directory handle.
+        let status = unsafe {
+            NtCreateFile(
+                &mut raw_handle,
+                desired_access,
+                &mut attributes,
+                &mut io_status,
+                null_mut(),
+                0,
+                FILE_SHARE_READ_VALUE | FILE_SHARE_WRITE_VALUE | FILE_SHARE_DELETE_VALUE,
+                FILE_OPEN,
+                create_options,
+                null_mut(),
+                0,
+            )
+        };
+        let handle = if raw_handle.is_null() {
+            None
+        } else {
+            // SAFETY: NtCreateFile returned a non-null uniquely owned handle.
+            Some(unsafe { File::from(OwnedHandle::from_raw_handle(raw_handle as RawHandle)) })
+        };
+        (status, handle)
+    }
+
+    #[test]
+    fn obj_dont_reparse_runtime_status_for_final_and_intermediate_junctions() {
+        use std::io::Read;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(workspace.path().join("nested")).unwrap();
+        std::fs::write(workspace.path().join("nested/inside.txt"), b"inside-control").unwrap();
+        std::fs::write(outside.path().join("target.txt"), b"outside-junction-sentinel").unwrap();
+        // Use the Windows inbox mklink implementation for this probe's
+        // traversable junction control. The existing raw FSCTL helper is used
+        // by rejection-only tests, but this test must prove the target resolves.
+        let junction = workspace.path().join("junction");
+        let output = std::process::Command::new("cmd.exe")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(outside.path())
+            .output()
+            .expect("cmd.exe must be available on Windows CI");
+        assert!(
+            output.status.success(),
+            "mklink /J failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let volume_root = test_volume_root_for(workspace.path());
+        let root = WindowsWorkspaceRoot::open(&volume_root).unwrap();
+        let workspace_relative = test_workspace_relative_path(workspace.path());
+        let components: Vec<&str> = workspace_relative.split('/').collect();
+        let retained_workspace = root.open_directory_components(&components).unwrap();
+        let parent = &retained_workspace.handle;
+
+        let (ordinary_directory_status, ordinary_directory) =
+            nt_create_file_probe(parent, "nested", OBJ_DONT_REPARSE, true);
+        assert_eq!(ordinary_directory_status, 0, "ordinary directory must open with OBJ_DONT_REPARSE");
+        drop(ordinary_directory);
+
+        let (ordinary_file_status, ordinary_file) =
+            nt_create_file_probe(parent, r"nested\inside.txt", OBJ_DONT_REPARSE, false);
+        assert_eq!(ordinary_file_status, 0, "ordinary file must open with OBJ_DONT_REPARSE");
+        drop(ordinary_file);
+
+        // Baseline controls omit OBJ_DONT_REPARSE and prove that the same
+        // handle-relative names are otherwise resolvable through the junction.
+        // Confirm that the fixture itself is a working NTFS junction through
+        // the ordinary Win32 path API before interpreting native NTSTATUS values.
+        assert_eq!(
+            std::fs::read(workspace.path().join("junction").join("target.txt")).unwrap(),
+            b"outside-junction-sentinel"
+        );
+
+        let (baseline_final_status, baseline_final_handle) =
+            nt_create_file_probe(parent, "junction", 0, true);
+        if baseline_final_status >= 0 {
+            assert!(baseline_final_handle.is_some(), "successful unflagged open must return a handle");
+            drop(baseline_final_handle);
+        } else {
+            assert!(baseline_final_handle.is_none(), "failed unflagged open must not return a handle");
+        }
+
+        let (flagged_final_status, flagged_final_handle) =
+            nt_create_file_probe(parent, "junction", OBJ_DONT_REPARSE, true);
+        assert!(
+            flagged_final_status < 0 && flagged_final_handle.is_none(),
+            "OBJ_DONT_REPARSE must reject a final junction; raw NTSTATUS={:#010X}",
+            flagged_final_status as u32
+        );
+
+        let (baseline_nested_status, baseline_nested_handle) =
+            nt_create_file_probe(parent, r"junction\target.txt", 0, false);
+        if baseline_nested_status >= 0 {
+            let mut outside_bytes = Vec::new();
+            baseline_nested_handle
+                .expect("successful unflagged open must return a handle")
+                .read_to_end(&mut outside_bytes)
+                .unwrap();
+            assert_eq!(outside_bytes, b"outside-junction-sentinel");
+        } else {
+            assert!(baseline_nested_handle.is_none(), "failed unflagged open must not return a handle");
+        }
+
+        let (flagged_nested_status, flagged_nested_handle) =
+            nt_create_file_probe(parent, r"junction\target.txt", OBJ_DONT_REPARSE, false);
+        assert!(
+            flagged_nested_status < 0 && flagged_nested_handle.is_none(),
+            "OBJ_DONT_REPARSE must reject intermediate junction traversal; raw NTSTATUS={:#010X}",
+            flagged_nested_status as u32
+        );
+
+        println!(
+            "OBJ_DONT_REPARSE raw NTSTATUS: ordinary_directory={:#010X}, ordinary_file={:#010X}, final_junction_unflagged={:#010X}, final_junction_flagged={:#010X}, intermediate_junction_unflagged={:#010X}, intermediate_junction_flagged={:#010X}, expected_reparse_status={:#010X}",
+            ordinary_directory_status as u32,
+            ordinary_file_status as u32,
+            baseline_final_status as u32,
+            flagged_final_status as u32,
+            baseline_nested_status as u32,
+            flagged_nested_status as u32,
+            STATUS_REPARSE_POINT_ENCOUNTERED as u32,
+        );
+    }
+
     #[test]
     fn rejects_ntfs_junction_mount_point_reparse_tag() {
         use std::os::windows::ffi::OsStringExt;
