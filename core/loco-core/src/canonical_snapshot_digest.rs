@@ -25,7 +25,7 @@ pub fn canonical_snapshot_binding_bytes(snapshot: &WorkspaceSnapshot) -> Vec<u8>
     put_string(&mut out, &snapshot.contract_version);
     put_string(&mut out, &snapshot.workspace_id);
     put_string(&mut out, &snapshot.relative_path);
-    out.push(match snapshot.file_kind {
+    out.push(match &snapshot.file_kind {
         SnapshotFileKind::RegularFile => 1,
         SnapshotFileKind::Directory => 2,
         SnapshotFileKind::SymlinkOrReparsePoint => 3,
