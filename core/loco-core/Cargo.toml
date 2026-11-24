@@ -12,6 +12,7 @@ sha2 = "0.10"
 subtle = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 rustix = { version = "1.1.6", features = ["fs"] }
+getrandom = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
