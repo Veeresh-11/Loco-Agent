@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 
 pub const CONTRACT_VERSION: &str = "1.0";
 
+pub mod workspace_read_contract;
+pub use workspace_read_contract::{WorkspaceReadRequest, WorkspaceReadRequestError};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum ProposedAction {

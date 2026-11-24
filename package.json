@@ -54,7 +54,7 @@
     "watch":"tsc -watch -p ./",
     "pretest":"npm run compile",
     "test":"jest",
-    "lint":"eslint src/core/rustSidecarClient.ts src/__tests__/rustSidecarClient.test.ts",
+    "lint":"eslint src/core/rustSidecarClient.ts src/__tests__/rustSidecarClient.test.ts src/core/workspaceReadContract.ts src/__tests__/workspaceReadContract.test.ts",
     "lint:legacy":"eslint src --ext ts",
     "package":"vsce package --allow-missing-repository"
   },
