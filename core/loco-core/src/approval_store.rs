@@ -4,8 +4,9 @@
 //! from unconsumed to consumed once. This store does not authenticate approval
 //! identity; authenticity remains a separate requirement.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
+use std::time::Duration;
 
 use crate::approval_binding::{ApprovalChallenge, ApprovalError, verify_approval_binding};
 use crate::ProposedAction;
@@ -33,6 +34,7 @@ impl ApprovalStore {
         Self::initialize(Connection::open_in_memory()?)
     }
     fn initialize(conn: Connection) -> Result<Self, StoreError> {
+        conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
@@ -70,7 +72,10 @@ impl ApprovalStore {
         if challenge_id.trim().is_empty() || now_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
-        let tx = self.conn.transaction()?;
+        // Acquire the write reservation before reading the challenge. With multiple
+        // processes/connections, a deferred read-then-write transaction can race
+        // while upgrading its lock. IMMEDIATE serializes consumers before the read.
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let record: Option<(String, u64, Option<u64>)> = tx.query_row(
             "SELECT action_digest, expires_at, consumed_at FROM approval_challenges WHERE challenge_id=?1",
             params![challenge_id],
@@ -187,6 +192,52 @@ mod tests {
         let mut store = ApprovalStore::in_memory().unwrap();
         let challenge = create_challenge("overflow-expiry".into(), &sample_action(), i64::MAX as u64 + 1).unwrap();
         assert!(matches!(store.issue(&challenge), Err(StoreError::InvalidChallenge)));
+    }
+
+
+    #[test]
+    fn concurrent_connections_can_consume_a_challenge_only_once() {
+        use std::sync::{Arc, Barrier};
+
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("approvals.sqlite");
+        let action = sample_action();
+        let challenge = create_challenge("concurrent".into(), &action, 500).unwrap();
+
+        let mut issuer = ApprovalStore::open(&database).unwrap();
+        issuer.issue(&challenge).unwrap();
+        let first = ApprovalStore::open(&database).unwrap();
+        let second = ApprovalStore::open(&database).unwrap();
+        let barrier = Arc::new(Barrier::new(3));
+
+        let first_barrier = Arc::clone(&barrier);
+        let first_action = action.clone();
+        let first_thread = std::thread::spawn(move || {
+            let mut store = first;
+            first_barrier.wait();
+            match store.consume("concurrent", &first_action, 499) {
+                Ok(()) => true,
+                Err(StoreError::AlreadyConsumedOrExpired) => false,
+                Err(error) => panic!("unexpected first consumer error: {error:?}"),
+            }
+        });
+
+        let second_barrier = Arc::clone(&barrier);
+        let second_thread = std::thread::spawn(move || {
+            let mut store = second;
+            second_barrier.wait();
+            match store.consume("concurrent", &action, 499) {
+                Ok(()) => true,
+                Err(StoreError::AlreadyConsumedOrExpired) => false,
+                Err(error) => panic!("unexpected second consumer error: {error:?}"),
+            }
+        });
+
+        barrier.wait();
+        let first_succeeded = first_thread.join().unwrap();
+        let second_succeeded = second_thread.join().unwrap();
+        assert_ne!(first_succeeded, second_succeeded, "exactly one consumer must succeed");
+        assert!(issuer.is_consumed("concurrent").unwrap());
     }
 
     #[test]
