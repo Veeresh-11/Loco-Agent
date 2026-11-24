@@ -73,6 +73,8 @@ jobs:
           sw_vers
           clang -Wall -Wextra -Werror scripts/macos-firmlink-record-probe.c -o "$RUNNER_TEMP/loco-firmlink-record-probe"
           "$RUNNER_TEMP/loco-firmlink-record-probe"
+          clang -Wall -Wextra -Werror scripts/macos-apfs-volume-identity-probe.c -o "$RUNNER_TEMP/loco-apfs-volume-identity-probe"
+          "$RUNNER_TEMP/loco-apfs-volume-identity-probe"
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash
