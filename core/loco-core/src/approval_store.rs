@@ -15,6 +15,7 @@ use crate::approval_clock::{ApprovalClock, ApprovalClockError, SystemApprovalClo
 use crate::ProposedAction;
 
 pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
+pub const MAX_OUTSTANDING_APPROVAL_CHALLENGES: usize = 1024;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -23,6 +24,7 @@ pub enum StoreError {
     RuntimeEpochUnavailable,
     StaleRuntime,
     InvalidChallenge,
+    CapacityExceeded,
     Binding(ApprovalError),
     Clock(ApprovalClockError),
     AlreadyConsumedOrExpired,
@@ -177,9 +179,7 @@ impl ApprovalStore {
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         tx.commit()?;
-        MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
-            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
-            .insert(challenge.challenge_id.clone(), monotonic_deadline);
+        deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         Ok(challenge)
     }
 
@@ -326,6 +326,21 @@ mod tests {
             store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
+    }
+
+    #[test]
+    fn outstanding_challenge_cache_is_bounded() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let mut ids = Vec::with_capacity(MAX_OUTSTANDING_APPROVAL_CHALLENGES);
+        for _ in 0..MAX_OUTSTANDING_APPROVAL_CHALLENGES {
+            ids.push(store.issue(&action, MAX_APPROVAL_TTL_SECONDS).unwrap().challenge_id);
+        }
+        assert!(matches!(store.issue(&action, 1), Err(StoreError::CapacityExceeded)));
+        for id in ids {
+            store.consume(&id, &action).unwrap();
+        }
+        assert!(store.issue(&action, 1).is_ok());
     }
 
     #[test]
