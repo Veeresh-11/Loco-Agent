@@ -52,6 +52,12 @@ fn handshake_evaluate_and_shutdown_are_correlated() {
     assert_eq!(messages.len(), 3);
     assert_eq!(messages[0]["messageType"], "hello");
     assert_eq!(messages[0]["requestId"], "boot-1");
+    let capabilities = messages[0]["server"]["capabilities"].as_array().unwrap();
+    assert!(capabilities.iter().any(|value| value == "proposal_evaluation"));
+    #[cfg(target_os = "macos")]
+    assert!(capabilities.iter().any(|value| value == "macos_fcntl_getpath_nofirmlink"));
+    #[cfg(not(target_os = "macos"))]
+    assert!(!capabilities.iter().any(|value| value == "macos_fcntl_getpath_nofirmlink"));
     assert_eq!(messages[1]["messageType"], "decision");
     assert_eq!(messages[1]["requestId"], "eval-1");
     assert_eq!(messages[1]["decision"]["proposalId"], "p-1");
