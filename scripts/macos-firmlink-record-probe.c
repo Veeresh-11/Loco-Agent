@@ -443,6 +443,7 @@ static void print_path_api_flags(int rootfd, const char *path) {
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
     attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FSID | ATTR_CMN_FLAGS |
                        ATTR_CMN_FILEID | ATTR_CMN_PARENTID;
+    attrs.dirattr = ATTR_DIR_MOUNTSTATUS;
 
     unsigned char buffer[256] __attribute__((aligned(8)));
     int result = getattrlistat(rootfd, path, &attrs, buffer, sizeof(buffer),
@@ -489,8 +490,18 @@ static void print_path_api_flags(int rootfd, const char *path) {
     memcpy(&entry_fileid, buffer + identity_offset, sizeof(entry_fileid));
     identity_offset += sizeof(entry_fileid);
     memcpy(&entry_parentid, buffer + identity_offset, sizeof(entry_parentid));
-    printf("getattrlistat path=%s options=NOFOLLOW_ANY|RESOLVE_BENEATH flags=0x%08x returned=0x%08x\n",
-           path, flags, returned.commonattr);
+    identity_offset += sizeof(entry_parentid);
+    uint32_t dir_mountstatus = 0;
+    if (returned.dirattr & ATTR_DIR_MOUNTSTATUS) {
+        if (length < identity_offset + sizeof(dir_mountstatus)) {
+            printf("getattrlistat path=%s truncated_dir_mountstatus length=%u\n", path, length);
+            return;
+        }
+        memcpy(&dir_mountstatus, buffer + identity_offset, sizeof(dir_mountstatus));
+    }
+    printf("getattrlistat path=%s options=NOFOLLOW_ANY|RESOLVE_BENEATH flags=0x%08x "
+           "dir_mountstatus=0x%08x returned_common=0x%08x returned_dir=0x%08x\n",
+           path, flags, dir_mountstatus, returned.commonattr, returned.dirattr);
 
     struct stat root_stat;
     struct statfs root_fs;
