@@ -34,6 +34,7 @@ The native C probe on macOS 26.7.2 (build 25G332, arm64) verified both `getattrl
 | `/Users` | `/System/Volumes/Data/Users` |
 | `/Applications` | `/System/Volumes/Data/Applications` |
 | `/Library` | `/System/Volumes/Data/Library` |
+| `/private` | `/System/Volumes/Data/private` |
 | `/System` | `/System` |
 | `/usr` | `/usr` |
 
