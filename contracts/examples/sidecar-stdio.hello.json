@@ -1,0 +1,9 @@
+{
+  "protocolVersion": "1.0",
+  "messageType": "hello",
+  "requestId": "boot-1",
+  "client": {
+    "name": "loco-vscode-extension",
+    "version": "0.1.0"
+  }
+}
