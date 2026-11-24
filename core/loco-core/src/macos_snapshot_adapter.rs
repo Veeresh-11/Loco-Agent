@@ -191,6 +191,12 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
   std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
  };
  let name_range = attr_reference_range(record_len, offset, name_ref, 2, 256)?;
+ let minimum_name_start = name_ref_end
+  .checked_add(4 + reference_size)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ if name_range.start < minimum_name_start {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
  let name_bytes = &record[name_range];
  if name_bytes.last() != Some(&0) || name_bytes[..name_bytes.len() - 1].contains(&0) {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
@@ -611,6 +617,32 @@ mod tests {
   let mut oversized = valid.clone();
   oversized[..4].copy_from_slice(&((MAX_BULK_RECORD_BYTES as u32) + 1).to_ne_bytes());
   assert!(parse_bulk_entry_record(&oversized).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_name_payload_overlapping_later_fields() {
+  let mut record = synthetic_bulk_entry_record(
+   b"System\\0", b"/System\\0", 0, 0, true,
+  );
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4;
+  let path_ref_offset = name_ref_offset + std::mem::size_of::<libc::attrreference_t>() + 4;
+  let mut name_ref = unsafe {
+   std::ptr::read_unaligned(
+    record.as_ptr().add(name_ref_offset).cast::<libc::attrreference_t>()
+   )
+  };
+  // The first two bytes of the path-reference header form a valid
+  // one-byte NUL-terminated name unless later fixed-field overlap is checked.
+  name_ref.attr_dataoffset = (path_ref_offset - name_ref_offset) as i32;
+  name_ref.attr_length = 2;
+  unsafe {
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    name_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&record).is_err());
  }
 
  #[test]
