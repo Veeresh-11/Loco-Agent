@@ -996,7 +996,22 @@ mod tests {
         std::fs::create_dir(workspace.path().join("nested")).unwrap();
         std::fs::write(workspace.path().join("nested/inside.txt"), b"inside-control").unwrap();
         std::fs::write(outside.path().join("target.txt"), b"outside-junction-sentinel").unwrap();
-        create_junction(&workspace.path().join("junction"), outside.path());
+        // Use the Windows inbox mklink implementation for this probe's
+        // traversable junction control. The existing raw FSCTL helper is used
+        // by rejection-only tests, but this test must prove the target resolves.
+        let junction = workspace.path().join("junction");
+        let output = std::process::Command::new("cmd.exe")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(outside.path())
+            .output()
+            .expect("cmd.exe must be available on Windows CI");
+        assert!(
+            output.status.success(),
+            "mklink /J failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         let volume_root = test_volume_root_for(workspace.path());
         let root = WindowsWorkspaceRoot::open(&volume_root).unwrap();
