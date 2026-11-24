@@ -395,3 +395,13 @@ This is a contract and schema checkpoint, not a working sidecar. The repository 
 PR #93 adds the first `loco-authority` Rust binary target on top of the v1 stdio contract. It implements the hello handshake, sequential proposal evaluation, correlated decision responses, graceful shutdown, bounded 12 MiB frame reads, a 4,096-request process cap, strict request-ID handling, and stderr-only diagnostics. Unknown proposal fields are rejected during Rust deserialization. Integration tests exercise the child process as a subprocess, including handshake/evaluation/shutdown, evaluate-before-handshake, duplicate IDs, unknown proposal fields, and oversized input.
 
 This is only the Rust child process. There is still no TypeScript launcher/pipe client, no packaged binary delivery, no parent-enforced timeout/restart policy, and no end-to-end extension integration. The protocol exposes proposal evaluation only; it does not read or write workspace files, execute commands, or authenticate approval. The child-side prototype must pass exact-head CI on Linux, Windows, and macOS before it is considered validated. Do not use its policy decision as an execution capability.
+
+
+## 2026-11-24 follow-up: Rust sidecar and TypeScript parent transport
+
+- PR #93's exact head `9b884836ee1b76aee60be0217d478edb124263db` passed Cargo tests on Ubuntu, Windows, and macOS, Contract Validation, and GitGuardian.
+- PR #93 implements the Rust child-side NDJSON server. It evaluates proposals only; it cannot execute commands or read/write workspace files.
+- The next stacked change, PR #94, adds an isolated TypeScript parent client with direct no-shell process spawn, mandatory handshake, bounded NDJSON framing, strict response correlation, single-request semantics, deadlines, bounded stderr retention, termination, and a bounded start budget.
+- The client is not wired into the existing agent workflow and does not ship packaged platform binaries. The existing TypeScript extension remains the production baseline/fallback.
+- macOS firmlink detection remains unresolved under issue #74. PR #77's descriptor-derived `f_fsid` comparison detects the observed System/Data volume boundary, but does not establish universal same-volume firmlink detection.
+- Approval, controlled Rust writes, command execution authority, Python extraction, full end-to-end integration, and packaging/release remain incomplete. No dependent PR stack is ready for merge.
