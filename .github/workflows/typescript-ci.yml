@@ -41,3 +41,4 @@ jobs:
       - run: npm test -- --runInBand
       - run: npm run lint
       - run: npm run security:check-privileged-operations
+      - run: npm run security:check-privileged-operations
