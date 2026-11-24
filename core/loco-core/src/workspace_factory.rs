@@ -167,7 +167,7 @@ fn windows_selection_to_volume_root(
 fn normalize_windows_drive_path(value: &str) -> Option<String> {
     let replaced = value.replace('/', "\\");
     let without_extended_prefix = replaced
-        .strip_prefix(r"\\?\\")
+        .strip_prefix(r"\\?\")
         .unwrap_or(&replaced);
     let without_trailing_separator = if without_extended_prefix.len() > 3 {
         without_extended_prefix.trim_end_matches('\\')
