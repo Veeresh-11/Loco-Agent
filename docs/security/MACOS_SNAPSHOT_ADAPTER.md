@@ -103,3 +103,16 @@ The assertion-bearing head `81dc3e6eba2e0ff8d7f097f3f85935e0819390bc` passed the
 - The original descriptor's device/inode identity remained unchanged; the replacement descriptor had a distinct identity.
 
 This demonstrates sequential rename/replacement tracking for this runner and fixture. It does not establish behavior under concurrent rename races, sandbox restrictions, or all filesystem implementations. Continue to treat path output as diagnostic evidence, not as an atomic authorization check.
+
+
+### Concurrent rename stress result (PR #102, run #45336267947)
+
+The bounded stress experiment ran on the macOS 26.7.2 (build 25G332, arm64) hosted runner. One writer thread alternated a retained directory between `left` and `right` for 2,000 rename cycles while the main thread made 4,000 paired `F_GETPATH` / `F_GETPATH_NOFIRMLINK` observations on the same open descriptor. The exact log result was:
+
+```
+rename_race iterations=4000 path_errors=0 unexpected_paths=0 writer_error=0 writer_errno=0 join_error=0 identity_same=yes
+```
+
+The native diagnostic step and full Rust Core Tests matrix passed on Ubuntu, Windows, and macOS in [run #45336267947](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45336267947). The concurrent test observed no API errors, paths outside the two expected names, writer errors, join errors, or descriptor identity changes.
+
+**Scope:** this is bounded empirical coverage on one hosted macOS image. It does not prove all scheduler interleavings, all filesystems/OS versions, sandbox compatibility, or an atomic ancestry guarantee. A pair of path queries is not itself atomic; each result may reflect a different instant during concurrent renames. Keep the signal diagnostic until the adapter can preserve handle-relative authority and fail closed without relying on string-prefix checks.
