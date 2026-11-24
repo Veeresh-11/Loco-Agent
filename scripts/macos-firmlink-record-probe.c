@@ -85,6 +85,69 @@ static void dump_record(const unsigned char *record, size_t record_len) {
     }
 }
 
+
+static void print_path_api_flags(int rootfd, const char *path) {
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FLAGS;
+
+    unsigned char buffer[256] __attribute__((aligned(8)));
+    int result = getattrlistat(rootfd, path, &attrs, buffer, sizeof(buffer),
+                               FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH);
+    if (result != 0) {
+        printf("getattrlistat path=%s options=NOFOLLOW_ANY|RESOLVE_BENEATH error=%d\n",
+               path, errno);
+        return;
+    }
+
+    uint32_t length = 0;
+    attribute_set_t returned;
+    memcpy(&length, buffer, sizeof(length));
+    if (length < sizeof(length) + sizeof(returned) ||
+        length > sizeof(buffer)) {
+        printf("getattrlistat path=%s malformed_length=%u\n", path, length);
+        return;
+    }
+    memcpy(&returned, buffer + sizeof(length), sizeof(returned));
+    if ((returned.commonattr & ATTR_CMN_FLAGS) == 0 ||
+        length < sizeof(length) + sizeof(returned) + sizeof(uint32_t)) {
+        printf("getattrlistat path=%s flags=NOT_RETURNED returned=0x%08x\n",
+               path, returned.commonattr);
+        return;
+    }
+    uint32_t flags = 0;
+    memcpy(&flags, buffer + sizeof(length) + sizeof(returned), sizeof(flags));
+    printf("getattrlistat path=%s options=NOFOLLOW_ANY|RESOLVE_BENEATH flags=0x%08x returned=0x%08x\n",
+           path, flags, returned.commonattr);
+
+    int childfd = openat(rootfd, path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (childfd < 0) {
+        printf("openat path=%s O_NOFOLLOW error=%d\n", path, errno);
+        return;
+    }
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FLAGS;
+    memset(buffer, 0, sizeof(buffer));
+    result = fgetattrlist(childfd, &attrs, buffer, sizeof(buffer), 0);
+    if (result != 0) {
+        printf("fgetattrlist path=%s error=%d\n", path, errno);
+    } else {
+        memcpy(&length, buffer, sizeof(length));
+        if (length >= sizeof(length) + sizeof(returned) + sizeof(uint32_t) &&
+            length <= sizeof(buffer)) {
+            memcpy(&returned, buffer + sizeof(length), sizeof(returned));
+            memcpy(&flags, buffer + sizeof(length) + sizeof(returned), sizeof(flags));
+            printf("fgetattrlist path=%s flags=0x%08x returned=0x%08x\n",
+                   path, flags, returned.commonattr);
+        } else {
+            printf("fgetattrlist path=%s malformed_length=%u\n", path, length);
+        }
+    }
+    close(childfd);
+}
+
 int main(void) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
@@ -130,6 +193,10 @@ int main(void) {
             cursor += record_len;
         }
     }
+
+    print_path_api_flags(dirfd, "Users");
+    print_path_api_flags(dirfd, "Applications");
+    print_path_api_flags(dirfd, "Library");
 
     close(dirfd);
     return 0;
