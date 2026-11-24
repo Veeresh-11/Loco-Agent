@@ -96,6 +96,8 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
 }
 
 #[cfg(target_os="macos")]
+const ATTR_CMN_ERROR: u32 = 0x2000_0000;
+
 #[cfg(target_os="macos")]
 fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
  use std::os::fd::AsRawFd;
@@ -120,7 +122,8 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
  attrs.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
  attrs.commonattr = libc::ATTR_CMN_RETURNED_ATTRS
   | libc::ATTR_CMN_NAME
-  | libc::ATTR_CMN_FLAGS;
+  | libc::ATTR_CMN_FLAGS
+  | ATTR_CMN_ERROR;
  attrs.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
 
  let mut buffer = vec![0u8; 64 * 1024];
@@ -169,6 +172,16 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
    }
 
    let mut offset = header_size;
+   let mut entry_error = 0u32;
+   if returned.commonattr & ATTR_CMN_ERROR != 0 {
+    if offset.checked_add(4).filter(|end| *end <= record_len).is_none() {
+     return Err(MacOsSnapshotAdapterError::InvalidRoot);
+    }
+    entry_error = u32::from_ne_bytes(
+     record[offset..offset + 4].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
+    );
+    offset += 4;
+   }
    let reference_size = std::mem::size_of::<libc::attrreference_t>();
    if offset.checked_add(reference_size).filter(|end| *end <= record_len).is_none() {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
@@ -191,7 +204,8 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
    offset += reference_size;
 
    if &name_bytes[..name_len - 1] == wanted {
-    if returned.commonattr & libc::ATTR_CMN_FLAGS == 0
+    if entry_error != 0
+       || returned.commonattr & libc::ATTR_CMN_FLAGS == 0
        || returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0
        || offset.checked_add(4 + reference_size).filter(|end| *end <= record_len).is_none() {
      return Err(MacOsSnapshotAdapterError::InvalidRoot);
