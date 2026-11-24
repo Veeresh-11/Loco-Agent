@@ -1097,7 +1097,8 @@ int main(void) {
         close(dirfd);
         return 5;
     }
-    if (probe_extended_nofirmlink_path_at(dirfd, "Users", "/System/Volumes/Data/Users") != 0 ||
+    if (probe_extended_nofirmlink_path_at(dirfd, ".", "/") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Users", "/System/Volumes/Data/Users") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Applications", "/System/Volumes/Data/Applications") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Library", "/System/Volumes/Data/Library") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "System", "/System") != 0 ||
