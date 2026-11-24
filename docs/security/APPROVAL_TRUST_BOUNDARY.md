@@ -113,3 +113,12 @@ Public platform documentation supports investigating a FIDO2/WebAuthn assertion 
 **Research conclusion:** WebAuthn/FIDO2 is a promising protocol candidate because it can bind a fresh challenge to a relying-party identity and return a verifiable assertion. It is not yet approved as LOCO's cross-platform authenticator. Native platform API parity, origin/RP identity strategy for a local desktop application, user-verification policy, transaction-display limitations, and Linux availability remain open. A generic FIDO assertion generally proves authenticator participation for an RP challenge; it does not necessarily display or cryptographically attest the full human-readable command/file diff. LOCO must display the exact action in its own trusted UI boundary and must not overstate what the authenticator attests.
 
 No dependency, native API, key enrollment flow, or production code is selected by this survey.
+
+
+## Rust-owned clock implementation checkpoint — 2026-11-24
+
+PR #83 introduces a process-wide Rust wall-clock guard and changes the SQLite store API so challenge issuance and consumption obtain time internally. Challenge issuance accepts a bounded TTL (1–300 seconds) and computes absolute expiry inside the store; consumption no longer accepts a caller-supplied timestamp. Backward wall-clock movement during the running process returns an error and fails closed.
+
+This does **not** solve wall-clock rollback across process or machine restart. The persisted expiry is still Unix wall time. It also does not make challenge IDs unpredictable, authenticate a user, or protect the SQLite file from same-user tampering. The caller currently supplies the challenge ID; cryptographically random nonce generation and platform-authenticator assertions remain separate work.
+
+The clock abstraction has deterministic tests for backward movement, expiry, range overflow, and clock failure. Exact-head cross-platform CI is required before treating this checkpoint as validated.

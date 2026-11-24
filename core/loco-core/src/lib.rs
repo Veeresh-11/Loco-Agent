@@ -323,6 +323,8 @@ pub mod workspace_fs;
 
 pub mod approval_binding;
 
+pub mod approval_clock;
+
 pub mod approval_store;
 
 pub mod canonical_action_digest;
