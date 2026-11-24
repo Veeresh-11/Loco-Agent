@@ -222,6 +222,9 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
  let path_range = attr_reference_range(
   record_len, offset, path_ref, 2, libc::PATH_MAX as usize
  )?;
+ if name_range.start < path_ref_end || name_range.end > path_range.start {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
  let path_bytes = &record[path_range];
  if path_bytes.last() != Some(&0) || path_bytes[..path_bytes.len() - 1].contains(&0) {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
@@ -664,6 +667,16 @@ mod tests {
    );
   }
   assert!(parse_bulk_entry_record(&malformed_name).is_err());
+
+  let mut name_overlaps_path_reference = valid.clone();
+  name_ref.attr_dataoffset = (std::mem::size_of::<libc::attrreference_t>() + 4) as i32;
+  unsafe {
+   std::ptr::write_unaligned(
+    name_overlaps_path_reference.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    name_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&name_overlaps_path_reference).is_err());
 
   let path_ref_offset = name_ref_offset + std::mem::size_of::<libc::attrreference_t>() + 4;
   let mut malformed_path = valid;
