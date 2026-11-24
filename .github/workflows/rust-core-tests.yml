@@ -34,6 +34,44 @@ jobs:
         uses: actions/checkout@v4
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Record native Linux runner and workspace filesystem
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Linux distribution ==="
+          cat /etc/os-release
+          echo "=== Kernel and architecture ==="
+          uname -a
+          printf 'kernel=%s\narchitecture=%s\n' "$(uname -r)" "$(uname -m)"
+          echo "=== Runner temporary filesystem ==="
+          findmnt --target "$RUNNER_TEMP" --output TARGET,SOURCE,FSTYPE,OPTIONS
+          stat -f -c 'filesystem_type=%T block_size=%S' "$RUNNER_TEMP"
+          df -T "$RUNNER_TEMP"
+      - name: Record native Windows runner and workspace filesystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $os = Get-CimInstance Win32_OperatingSystem
+          $drive = ([System.IO.Path]::GetPathRoot($env:RUNNER_TEMP)).Substring(0, 1)
+          $volume = Get-Volume -DriveLetter $drive
+          Write-Output "=== Windows operating system ==="
+          [pscustomobject]@{
+            Product = $os.Caption
+            Version = $os.Version
+            Build = $os.BuildNumber
+            Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+            PowerShell = $PSVersionTable.PSVersion.ToString()
+          } | Format-List
+          Write-Output "=== Runner temporary filesystem ==="
+          [pscustomobject]@{
+            Drive = $drive
+            FileSystem = $volume.FileSystem
+            FileSystemLabel = $volume.FileSystemLabel
+            Size = $volume.Size
+            AllocationUnitSize = $volume.AllocationUnitSize
+          } | Format-List
       - name: Prepare real Linux bind mount fixture
         if: runner.os == 'Linux'
         shell: bash
