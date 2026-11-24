@@ -4,7 +4,7 @@
 use sha2::{Digest, Sha256};
 use crate::workspace_snapshot::{WorkspaceSnapshot, SnapshotFileKind};
 
-const PREFIX: &[u8] = b"LOCO-SNAPSHOT-BINDING-V1\\0";
+const PREFIX: &[u8] = b"LOCO-SNAPSHOT-BINDING-V1\0";
 
 fn put_string(out: &mut Vec<u8>, value: &str) {
     let bytes = value.as_bytes();
