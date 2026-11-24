@@ -9,6 +9,54 @@ use crate::snapshot_payload::{build_snapshot_contract,CapturedWorkspaceSnapshot,
 pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
+const F_GETPATH_NOFIRMLINK: libc::c_int = 102;
+
+/// Returns the kernel's descriptor path with firmlink redirection disabled.
+/// This is a path observation, not a capability or an atomic ancestry proof.
+#[cfg(target_os="macos")]
+fn descriptor_path_no_firmlink(file: &File) -> Result<PathBuf, MacOsSnapshotAdapterError> {
+ use std::ffi::OsString;
+ use std::os::fd::AsRawFd;
+ use std::os::unix::ffi::OsStringExt;
+
+ let mut buffer = vec![0u8; libc::PATH_MAX as usize];
+ if buffer.is_empty() {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let result = unsafe {
+  libc::fcntl(file.as_raw_fd(), F_GETPATH_NOFIRMLINK, buffer.as_mut_ptr())
+ };
+ if result != 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let end = buffer.iter().position(|byte| *byte == 0)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ if end == 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let path = PathBuf::from(OsString::from_vec(buffer[..end].to_vec()));
+ if !path.is_absolute() {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok(path)
+}
+
+#[cfg(target_os="macos")]
+fn path_is_within_root(root: &Path, candidate: &Path) -> bool {
+ candidate.starts_with(root)
+}
+
+/// Capability probe used by the sidecar handshake. The actual adapter repeats
+/// the query for each retained descriptor and fails closed on any error.
+#[cfg(target_os="macos")]
+pub fn fcntl_getpath_nofirmlink_available() -> bool {
+ File::open(".")
+  .ok()
+  .and_then(|file| descriptor_path_no_firmlink(&file).ok())
+  .is_some()
+}
+
+#[cfg(target_os="macos")]
 // Keep fsid_t opaque: compare the OS-provided volume identifier without decoding its private layout.
 fn filesystem_id(file:&File)->Result<[u8;8],MacOsSnapshotAdapterError>{
  use std::os::fd::AsRawFd;
@@ -64,7 +112,6 @@ impl MacOsWorkspaceSnapshotAdapter {
   let workspace_id=workspace_id.into();
   if workspace_id.trim().is_empty(){return Err(MacOsSnapshotAdapterError::InvalidWorkspaceId)}
   let mut current=File::open("/").map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
-  let mut canonical=PathBuf::from("/");
   let mut seen=false;
   for component in path.components(){
    match component {
@@ -72,7 +119,7 @@ impl MacOsWorkspaceSnapshotAdapter {
     Component::Normal(name)=>{
      let name=name.to_str().ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
      if name.is_empty()||name=="."||name==".."{return Err(MacOsSnapshotAdapterError::InvalidRoot)}
-     current=open_dir(&current,name)?; canonical.push(name); seen=true;
+     current=open_dir(&current,name)?; seen=true;
     },
     _=>return Err(MacOsSnapshotAdapterError::InvalidRoot),
    }
@@ -88,7 +135,8 @@ impl MacOsWorkspaceSnapshotAdapter {
   if root_filesystem_id.iter().all(|byte| *byte == 0) {
    return Err(MacOsSnapshotAdapterError::InvalidRoot);
   }
-  Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root:canonical})
+  let canonical_root=descriptor_path_no_firmlink(&current)?;
+  Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root})
  }
  pub fn root_path(&self)->&Path{&self.canonical_root}
 }
@@ -104,8 +152,10 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
     .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    let child=File::from(fd);
    let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+   let child_path=descriptor_path_no_firmlink(&child).map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    if !m.is_dir()||m.dev()!=self.root_device
     || filesystem_id(&child).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? != self.root_filesystem_id
+    || !path_is_within_root(&self.canonical_root,&child_path)
    {return Err(SnapshotPayloadError::AcquisitionFailed)}
    parent=child;
   }
@@ -113,6 +163,8 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
    .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
   let mut file=File::from(fd);
   let before=file.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+  let file_path=descriptor_path_no_firmlink(&file).map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+  if !path_is_within_root(&self.canonical_root,&file_path){return Err(SnapshotPayloadError::AcquisitionFailed)}
   if !before.is_file(){return Err(SnapshotPayloadError::InvalidFileType)}
   if before.dev()!=self.root_device
    || filesystem_id(&file).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? != self.root_filesystem_id
