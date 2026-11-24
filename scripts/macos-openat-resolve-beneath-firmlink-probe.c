@@ -17,6 +17,11 @@
 #define F_GETPATH_NOFIRMLINK 102
 #endif
 
+/* Older macOS SDKs omit the public errno macro although Darwin uses ABI value 107. */
+#ifndef ENOTCAPABLE
+#define ENOTCAPABLE 107
+#endif
+
 static int print_descriptor_path(int fd, char *buffer, size_t size) {
     memset(buffer, 0, size);
     if (fcntl(fd, F_GETPATH_NOFIRMLINK, buffer) != 0) {
