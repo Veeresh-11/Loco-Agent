@@ -219,7 +219,7 @@ mod tests {
         store.consume(&challenge.challenge_id, &action).unwrap();
         assert!(store.is_consumed(&challenge.challenge_id).unwrap());
         assert!(matches!(
-            store.consume("single-use", &action),
+            store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
