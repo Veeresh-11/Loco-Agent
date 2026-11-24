@@ -200,7 +200,7 @@ mod windows_tests {
 
     #[test]
     fn windows_path_normalization_accepts_drive_paths_and_extended_prefix() {
-        assert_eq!(normalize_windows_drive_path(r"C:\\").as_deref(), Some(r"C:\\"));
+        assert_eq!(normalize_windows_drive_path(r"C:\").as_deref(), Some(r"C:\"));
         assert_eq!(
             normalize_windows_drive_path(r"C:\work\repo").as_deref(),
             Some(r"C:\work\repo")
