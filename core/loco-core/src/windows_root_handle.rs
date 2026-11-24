@@ -1301,7 +1301,28 @@ mod tests {
                 if std::fs::rename(&active, &held).is_ok() {
                     create_junction(&active, &writer_outside);
                     thread::yield_now();
-                    std::fs::remove_dir(&active).unwrap();
+
+                    // A concurrent reader may briefly hold the junction handle
+                    // while it rejects the reparse point. Windows then reports
+                    // ERROR_SHARING_VIOLATION (32) for RemoveDirectoryW. Retry
+                    // only that transient condition; all other errors remain
+                    // immediate test failures.
+                    let mut removed_junction = false;
+                    for attempt in 0..250 {
+                        match std::fs::remove_dir(&active) {
+                            Ok(()) => {
+                                removed_junction = true;
+                                break;
+                            }
+                            Err(error) if error.raw_os_error() == Some(32) && attempt < 249 => {
+                                thread::sleep(std::time::Duration::from_millis(2));
+                            }
+                            Err(error) => {
+                                panic!("failed to remove temporary junction after {attempt} retries: {error}");
+                            }
+                        }
+                    }
+                    assert!(removed_junction, "temporary junction remained busy after bounded retries");
                     std::fs::rename(&held, &active).unwrap();
                     replacements += 1;
                 } else {
