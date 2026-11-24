@@ -140,6 +140,18 @@ jobs:
           sudo chmod 0644 "$mountpoint/secret.txt"
           mountpoint -q "$mountpoint"
           echo "LOCO_LINUX_TMPFS_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare tmpfs workspace root fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-tmpfs-root-workspace"
+          mkdir -p "$workspace"
+          sudo mount -t tmpfs -o size=16m tmpfs "$workspace"
+          printf 'tmpfs-workspace-root-sentinel' | sudo tee "$workspace/root-sentinel.txt" >/dev/null
+          sudo chmod 0644 "$workspace/root-sentinel.txt"
+          mountpoint -q "$workspace"
+          echo "LOCO_LINUX_TMPFS_ROOT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Inspect native macOS firmlink metadata
         if: runner.os == 'macOS'
         shell: bash
@@ -289,6 +301,9 @@ jobs:
       - name: Verify tmpfs mount boundary
         if: runner.os == 'Linux'
         run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_ci_prepared_tmpfs_mount_crossing
+      - name: Verify tmpfs workspace root capture
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored captures_file_from_ci_prepared_tmpfs_workspace_root
       - name: Detach tmpfs mount fixture
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -301,6 +316,20 @@ jobs:
           fi
           if mountpoint -q "$mountpoint"; then
             echo "tmpfs mount is still active; refusing to remove fixture" >&2
+            exit 1
+          fi
+          rm -rf "$workspace"
+      - name: Detach tmpfs workspace root fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-tmpfs-root-workspace"
+          if mountpoint -q "$workspace"; then
+            sudo umount "$workspace"
+          fi
+          if mountpoint -q "$workspace"; then
+            echo "tmpfs workspace root is still mounted; refusing to remove fixture" >&2
             exit 1
           fi
           rm -rf "$workspace"
