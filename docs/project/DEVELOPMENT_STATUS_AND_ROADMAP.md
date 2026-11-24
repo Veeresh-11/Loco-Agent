@@ -365,3 +365,10 @@ PR #80 exact head `a2cad679a5f9e8402c81c5848ff92450c5f19aa7` passed Rust Core Te
 PR #81 (this documentation change) records the next trust-boundary gate. Current challenge data is not signed or authenticated; timestamps are caller supplied in the prototype; local SQLite ACL/tamper protection and target freshness are not solved by the replay store. The design requires Rust-owned challenge/time/verification/consumption and platform-specific OS-owned user-presence evidence. No authenticator or production cryptographic protocol is selected yet. Same-user malware, clock rollback across restart, enrollment/recovery, and IPC identity remain review items.
 
 The approval feature must remain prototype-only. Do not authorize production privileged writes or command execution from a plain TypeScript click, an unsigned challenge, or a software key accessible to the extension process. No dependent PR stack has been merged; preserve the TypeScript baseline and keep the stack open until independent security review, controlled-write implementation, end-to-end integration, packaging, and rollback gates are complete.
+
+
+## Follow-up update — 2026-11-24: Rust-owned approval time
+
+PR #83 changes `ApprovalStore` so challenge expiry is derived from a Rust-owned clock and challenge consumption no longer accepts caller-supplied `now_unix`. Issuance accepts a bounded TTL of 1–300 seconds. A process-wide guard rejects backward wall-clock movement while the process is running. Deterministic tests cover expiry, invalid TTL/ID, signed SQLite range overflow, clock failure, and concurrent single-use consumption.
+
+Residual limitations remain: persisted Unix expiry cannot detect wall-clock rollback across process/machine restart; challenge IDs are still caller supplied and are not guaranteed unpredictable; approval is still not authenticated; database ACL/tamper protection and target freshness are not implemented. Exact-head CI for PR #83 is pending. No production privileged operation may rely on this prototype.
