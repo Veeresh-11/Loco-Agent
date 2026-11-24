@@ -273,6 +273,106 @@ static int probe_bulk_entry_identity(void) {
     return 0;
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static int probe_getdirentriesattr_firmlink_flags(void) {
+    int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) {
+        printf("getdirentriesattr root_open_error=%d\n", errno);
+        return 1;
+    }
+
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_FLAGS;
+
+    unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
+    unsigned int basep = 0;
+    unsigned int state = 0;
+    unsigned int count = 128;
+    int done = 0;
+    int found = 0;
+    do {
+        count = 128;
+        done = getdirentriesattr(dirfd, &attrs, buffer, sizeof(buffer),
+                                 &count, &basep, &state, 0);
+        if (done < 0) {
+            int error = errno;
+            printf("getdirentriesattr error=%d%s\n", error,
+                   error == ENOTSUP ? " unsupported_on_volume" : "");
+            close(dirfd);
+            return error == ENOTSUP ? 0 : 1;
+        }
+
+        size_t cursor = 0;
+        for (unsigned int i = 0; i < count; ++i) {
+            if (cursor + sizeof(uint32_t) + sizeof(attribute_set_t) > sizeof(buffer)) {
+                printf("getdirentriesattr record_header_out_of_bounds\n");
+                close(dirfd);
+                return 1;
+            }
+            uint32_t record_len = 0;
+            memcpy(&record_len, buffer + cursor, sizeof(record_len));
+            if (record_len < sizeof(uint32_t) + sizeof(attribute_set_t) ||
+                record_len > sizeof(buffer) - cursor) {
+                printf("getdirentriesattr invalid_record_length=%u\n", record_len);
+                close(dirfd);
+                return 1;
+            }
+
+            const unsigned char *record = buffer + cursor;
+            attribute_set_t returned;
+            memcpy(&returned, record + sizeof(record_len), sizeof(returned));
+            size_t offset = sizeof(record_len) + sizeof(returned);
+            if (!(returned.commonattr & ATTR_CMN_NAME) ||
+                !(returned.commonattr & ATTR_CMN_FLAGS) ||
+                offset + sizeof(attrreference_t) + sizeof(uint32_t) > record_len) {
+                printf("getdirentriesattr required_attrs_missing returned=0x%08x\n",
+                       returned.commonattr);
+                close(dirfd);
+                return 1;
+            }
+
+            attrreference_t name_ref;
+            memcpy(&name_ref, record + offset, sizeof(name_ref));
+            int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+            if (name_start < 0 || name_ref.attr_length == 0 ||
+                (uint64_t)name_start + name_ref.attr_length > record_len ||
+                name_ref.attr_length > NAME_MAX + 1) {
+                printf("getdirentriesattr invalid_name_ref\n");
+                close(dirfd);
+                return 1;
+            }
+            char name[NAME_MAX + 1];
+            memcpy(name, record + (size_t)name_start, name_ref.attr_length);
+            if (name[name_ref.attr_length - 1] != '\0') {
+                printf("getdirentriesattr nonterminated_name\n");
+                close(dirfd);
+                return 1;
+            }
+
+            uint32_t flags = 0;
+            memcpy(&flags, record + offset + sizeof(name_ref), sizeof(flags));
+            if (strcmp(name, "Users") == 0 ||
+                strcmp(name, "Applications") == 0 ||
+                strcmp(name, "Library") == 0) {
+                printf("getdirentriesattr name=%s flags=0x%08x firmlink=%s\n",
+                       name, flags,
+                       (flags & SF_FIRMLINK) != 0 ? "yes" : "no");
+                found++;
+            }
+            cursor += record_len;
+        }
+    } while (!done && count > 0);
+
+    printf("getdirentriesattr completed=%s mapped_entries_found=%d\n",
+           done ? "yes" : "no", found);
+    close(dirfd);
+    return found == 3 ? 0 : 1;
+}
+#pragma clang diagnostic pop
+
 static int capture_descriptor_paths(int fd, const char *label,
                                       char visible_path[MAXPATHLEN],
                                       char nofirmlink_path[MAXPATHLEN]) {
@@ -783,6 +883,9 @@ int main(void) {
     close(dirfd);
     if (probe_bulk_entry_identity() != 0) {
         return 4;
+    }
+    if (probe_getdirentriesattr_firmlink_flags() != 0) {
+        return 5;
     }
     return 0;
 }
