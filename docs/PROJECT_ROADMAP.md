@@ -30,7 +30,7 @@ Relevant PRs: #73, #75, #76, #77, #78, #100, #102. PR #102 probes descriptor-der
 - The original native `getattrlistbulk` probe returned `0x00100000` (`SF_NOUNLINK`), not `SF_FIRMLINK = 0x00800000`.
 - Follow-up probes of `getattrlistat(FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH)` and `fgetattrlist` returned the same `SF_NOUNLINK` value.
 - PR #77 added a descriptor-derived `f_fsid` comparison. Its exact-head run #45322641807 passed Ubuntu, Windows, and macOS; the observed System/Data crossing is rejected even when `st_dev` is shared. This is a distinct-volume boundary, not a universal same-volume firmlink detector.
-- PR #100's run #45334961812 passed Ubuntu, Windows, and macOS. On the macOS runner, `getattrlistbulk`, `getattrlistat`, `fgetattrlist`, `fstatat(AT_SYMLINK_NOFOLLOW)`, followed `fstatat`, and opened-handle `fstat` all returned `0x00100000` for the three mapped entries. Raw bulk records showed the returned attribute mask and parsed flags field at the expected offset.
+- PR #100's initial diagnostic run #45334961812 passed Ubuntu, Windows, and macOS; after the newline-format and evidence-documentation updates, the exact updated head `c212b45a15053482473fb8c2e34e6dc5ecb3b3b6` also passed all three platforms in run #45335436957. On the macOS runner, `getattrlistbulk`, `getattrlistat`, `fgetattrlist`, `fstatat(AT_SYMLINK_NOFOLLOW)`, followed `fstatat`, and opened-handle `fstat` all returned `0x00100000` for the three mapped entries. Raw bulk records showed the returned attribute mask and parsed flags field at the expected offset.
 - Apple's public `getattrlistbulk(2)` manual documents `SF_FIRMLINK` in `ATTR_CMN_FLAGS` for a firmlink entry; Apple's `FileFlags.firmlink` documentation identifies the corresponding C constant. The hosted runner's behavior therefore remains unexplained.
 
 ### Remaining work
@@ -126,7 +126,7 @@ These legacy feature items should be reviewed as a separate release/consolidatio
 ## PR and merge policy
 
 - All reviewed security/migration PRs remain open and draft until their stated dependencies, exact-head CI, acceptance criteria, and independent review are complete.
-- PR #100's first exact-head run passed all three platforms. Its subsequent log-format and documentation commits require a fresh exact-head CI run before that updated head is accepted.
+- PR #100's updated exact head `c212b45a15053482473fb8c2e34e6dc5ecb3b3b6` passed all three platforms in run #45335436957. PR #102's descriptor-path probe is currently awaiting exact-head CI.
 - Do not close a PR because a later PR supersedes it unless the code, tests, and dependency relationship have been reviewed and the superseding PR is confirmed to contain the required changes.
 - Do not merge a stacked PR out of dependency order. Merge only after the complete stack is validated and reviewed.
 - Keep issue #74 and issue #82 open until their acceptance criteria are satisfied.
