@@ -92,6 +92,7 @@ jobs:
           (allow file-write*)
           (allow process-exec)
           (allow sysctl-read)
+          (deny system-fcntl)
           (allow system-fcntl (fcntl-command F_GETPATH))
           PROFILE
           )"
