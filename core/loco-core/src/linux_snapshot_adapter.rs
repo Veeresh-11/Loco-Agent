@@ -545,6 +545,45 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a tmpfs workspace root mounted by the Linux CI workflow"]
+    fn captures_file_from_ci_prepared_tmpfs_workspace_root() {
+        use std::os::unix::fs::MetadataExt;
+
+        let workspace = std::path::PathBuf::from(
+            std::env::var("LOCO_LINUX_TMPFS_ROOT_WORKSPACE")
+                .expect("Linux tmpfs-root fixture workflow must set LOCO_LINUX_TMPFS_ROOT_WORKSPACE"),
+        );
+        let parent = workspace.parent().expect("tmpfs root fixture must have a parent");
+        assert_ne!(
+            std::fs::metadata(parent).unwrap().dev(),
+            std::fs::metadata(&workspace).unwrap().dev(),
+            "workspace root must be on a distinct tmpfs device"
+        );
+        assert_eq!(
+            std::fs::read(workspace.join("root-sentinel.txt")).unwrap(),
+            b"tmpfs-workspace-root-sentinel",
+            "fixture must contain the tmpfs-root sentinel"
+        );
+
+        let canonical = std::fs::canonicalize(&workspace).unwrap();
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(
+            &canonical,
+            "linux-tmpfs-workspace-root",
+        )
+        .expect("tmpfs directory should be accepted as a retained workspace root");
+        assert_eq!(adapter.root_path(), canonical.as_path());
+
+        let captured = adapter.capture(
+            &SnapshotCaptureRequest::new("root-sentinel.txt", 128).unwrap(),
+        ).expect("a file directly beneath the tmpfs workspace root should be capturable");
+        assert_eq!(captured.bytes(), b"tmpfs-workspace-root-sentinel");
+        assert_eq!(
+            crate::snapshot_payload::validate_snapshot_payload(captured.snapshot(), captured.bytes()),
+            Ok(())
+        );
+    }
+
+    #[test]
     #[ignore = "requires a tmpfs mounted by the Linux CI workflow"]
     fn rejects_ci_prepared_tmpfs_mount_crossing() {
         use std::os::unix::fs::MetadataExt;
