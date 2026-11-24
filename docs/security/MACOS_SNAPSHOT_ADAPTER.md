@@ -92,3 +92,14 @@ A new native CI experiment now opens a temporary directory by descriptor, captur
 - the replacement descriptor has a distinct device/inode identity.
 
 The assertions deliberately require a NUL-terminated result in a `MAXPATHLEN`-sized buffer. This follows the macOS `fcntl(2)` manual's documented buffer requirement. This fixture is a sequential rename/replacement test, not a concurrent-race proof. The latest assertion-bearing source commit is `b63b8ca309850ffb615704ccfde728e0f2dd09d3`; exact-head macOS CI is still required before recording its outcome.
+
+
+### Exact-head rename/replacement result (run #45336024346)
+
+The assertion-bearing head `81dc3e6eba2e0ff8d7f097f3f85935e0819390bc` passed the full Rust Core Tests matrix on Ubuntu, Windows, and macOS. The macOS native diagnostic step completed successfully on macOS 26.7.2 (build 25G332, arm64). Its logs show:
+- Before rename, both path APIs returned the temporary directory's `.../before` path.
+- After renaming the opened directory to `.../after` and creating a replacement at the old `.../before` path, the retained descriptor returned `/private/tmp/.../after` through `F_GETPATH` and `/System/Volumes/Data/private/tmp/.../after` through `F_GETPATH_NOFIRMLINK`.
+- A separately opened descriptor for the replacement returned the `.../before` path through both APIs.
+- The original descriptor's device/inode identity remained unchanged; the replacement descriptor had a distinct identity.
+
+This demonstrates sequential rename/replacement tracking for this runner and fixture. It does not establish behavior under concurrent rename races, sandbox restrictions, or all filesystem implementations. Continue to treat path output as diagnostic evidence, not as an atomic authorization check.
