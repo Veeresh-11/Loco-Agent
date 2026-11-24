@@ -275,6 +275,126 @@ static int probe_bulk_entry_identity(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static int probe_bulk_extended_nofirmlink_paths(void) {
+    int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) {
+        printf("bulk_extended root_open_error=%d\n", errno);
+        return 1;
+    }
+
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_FLAGS;
+    attrs.forkattr = ATTR_CMNEXT_NOFIRMLINKPATH;
+
+    unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
+    int found = 0;
+    for (;;) {
+        int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer),
+                                    FSOPT_ATTR_CMN_EXTENDED);
+        if (count < 0) {
+            printf("bulk_extended error=%d\n", errno);
+            close(dirfd);
+            return 1;
+        }
+        if (count == 0) break;
+
+        size_t cursor = 0;
+        for (int i = 0; i < count; ++i) {
+            if (cursor + sizeof(uint32_t) + sizeof(attribute_set_t) > sizeof(buffer)) {
+                printf("bulk_extended truncated_header\n");
+                close(dirfd);
+                return 1;
+            }
+            uint32_t record_len = 0;
+            attribute_set_t returned;
+            memcpy(&record_len, buffer + cursor, sizeof(record_len));
+            if (record_len < sizeof(uint32_t) + sizeof(returned) ||
+                record_len > sizeof(buffer) - cursor) {
+                printf("bulk_extended invalid_record_length=%u\n", record_len);
+                close(dirfd);
+                return 1;
+            }
+            const unsigned char *record = buffer + cursor;
+            memcpy(&returned, record + sizeof(record_len), sizeof(returned));
+            size_t offset = sizeof(record_len) + sizeof(returned);
+            if (!(returned.commonattr & ATTR_CMN_NAME) ||
+                !(returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH)) {
+                cursor += record_len;
+                continue;
+            }
+
+            attrreference_t name_ref;
+            if (offset + sizeof(name_ref) > record_len) {
+                printf("bulk_extended truncated_name_ref\n");
+                close(dirfd);
+                return 1;
+            }
+            memcpy(&name_ref, record + offset, sizeof(name_ref));
+            int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+            if (name_start < 0 || name_ref.attr_length == 0 ||
+                (uint64_t)name_start + name_ref.attr_length > record_len ||
+                name_ref.attr_length > NAME_MAX + 1) {
+                printf("bulk_extended invalid_name_ref\n");
+                close(dirfd);
+                return 1;
+            }
+            char name[NAME_MAX + 1];
+            memcpy(name, record + (size_t)name_start, name_ref.attr_length);
+            if (name[name_ref.attr_length - 1] != '\0') {
+                printf("bulk_extended unterminated_name\n");
+                close(dirfd);
+                return 1;
+            }
+            offset += sizeof(name_ref);
+
+            if (returned.commonattr & ATTR_CMN_FLAGS) {
+                if (offset + sizeof(uint32_t) > record_len) {
+                    printf("bulk_extended truncated_flags\n");
+                    close(dirfd);
+                    return 1;
+                }
+                offset += sizeof(uint32_t);
+            }
+
+            attrreference_t path_ref;
+            if (offset + sizeof(path_ref) > record_len) {
+                printf("bulk_extended truncated_path_ref name=%s\n", name);
+                close(dirfd);
+                return 1;
+            }
+            memcpy(&path_ref, record + offset, sizeof(path_ref));
+            int64_t path_start = (int64_t)offset + (int64_t)path_ref.attr_dataoffset;
+            if (path_start < 0 || path_ref.attr_length == 0 ||
+                (uint64_t)path_start + path_ref.attr_length > record_len ||
+                path_ref.attr_length > PATH_MAX ||
+                record[path_start + path_ref.attr_length - 1] != '\0') {
+                printf("bulk_extended invalid_path_ref name=%s\n", name);
+                close(dirfd);
+                return 1;
+            }
+
+            if (strcmp(name, "Users") == 0 ||
+                strcmp(name, "Applications") == 0 ||
+                strcmp(name, "Library") == 0) {
+                uint32_t flags = 0;
+                size_t flags_offset = sizeof(record_len) + sizeof(returned) +
+                                      sizeof(name_ref);
+                memcpy(&flags, record + flags_offset, sizeof(flags));
+                printf("bulk_extended name=%s flags=0x%08x nofirmlink_path=%s\n",
+                       name, flags, (const char *)(record + (size_t)path_start));
+                found++;
+            }
+            cursor += record_len;
+        }
+    }
+
+    close(dirfd);
+    printf("bulk_extended mapped_entries_found=%d\n", found);
+    return found == 3 ? 0 : 1;
+}
+
 static int probe_extended_nofirmlink_path_at(int rootfd, const char *path) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
@@ -946,6 +1066,9 @@ int main(void) {
     close(dirfd);
     if (probe_bulk_entry_identity() != 0) {
         return 4;
+    }
+    if (probe_bulk_extended_nofirmlink_paths() != 0) {
+        return 5;
     }
     if (probe_extended_nofirmlink_path_at(dirfd, "Users") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Applications") != 0 ||
