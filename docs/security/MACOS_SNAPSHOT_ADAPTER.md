@@ -29,3 +29,15 @@ The hosted macOS runner returned `SF_NOUNLINK`, not `SF_FIRMLINK`, for mapped en
 
 This remains a read-only snapshot prototype. Metadata checks are not an atomic snapshot guarantee and do not implement approvals, controlled writes, or process execution. PR #77 remains draft pending the broader independent security review and completion of the approval/write/integration gates.
 
+
+
+## Follow-up diagnostic — BSD stat flag surfaces (2026-11-24)
+
+The existing native probe established that `getattrlistbulk`, `getattrlistat`, and `fgetattrlist` returned `SF_NOUNLINK` rather than `SF_FIRMLINK` for the hosted macOS runner's mapped directories. A further diagnostic now records `st_flags` from:
+- `fstatat(..., AT_SYMLINK_NOFOLLOW)` on the parent-relative entry;
+- `fstatat(..., 0)` on the followed entry; and
+- `fstat()` on the opened directory handle.
+
+It records `st_dev` and `st_ino` alongside the flags so the results can be compared with the existing `getattrlist*` output. `AT_SYMLINK_NOFOLLOW` is diagnostic only: firmlinks are not POSIX symbolic links, and this option must not be treated as a firmlink denial primitive.
+
+The Rust Core Tests workflow now runs when `scripts/macos-*.c` changes, so this probe is independently exercised by the macOS runner. This experiment does not change production adapter behavior. Until the exact-head macOS output establishes a reliable distinction, the adapter continues to enforce only the tested handle-derived volume identity boundary and must not claim universal firmlink detection.
