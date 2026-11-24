@@ -1,6 +1,7 @@
 #include <sys/attr.h>
 #include <sys/stat.h>
 #include <sys/param.h>
+#include <sys/mount.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <limits.h>
