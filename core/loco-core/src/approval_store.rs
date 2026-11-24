@@ -566,6 +566,43 @@ mod tests {
     }
 
     #[test]
+    fn legacy_action_only_rows_migrate_with_empty_snapshot_digest_and_fail_closed() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE approval_challenges (
+                challenge_id TEXT PRIMARY KEY,
+                action_digest TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                consumed_at INTEGER NULL
+             );"
+        ).unwrap();
+        let action = sample_action();
+        let challenge_id = "a".repeat(64);
+        conn.execute(
+            "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at)
+             VALUES (?1, ?2, 200, NULL)",
+            params![challenge_id, action_digest(&action).unwrap()],
+        ).unwrap();
+
+        let clock = Arc::new(TestClock::new(100));
+        let mut store = ApprovalStore::initialize_with_epoch(
+            conn, clock, "new-process-epoch".into(),
+        ).unwrap();
+        let migrated_digest: String = store.conn.query_row(
+            "SELECT snapshot_digest FROM approval_challenges WHERE challenge_id=?1",
+            params![challenge_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(migrated_digest.is_empty(), "legacy action-only rows must not gain a snapshot binding");
+
+        let snapshot = sample_snapshot_at(Duration::from_millis(0));
+        assert!(matches!(
+            store.consume(&challenge_id, &action, &snapshot),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+    }
+
+    #[test]
     fn stale_snapshot_is_rejected_at_issue_and_consume() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
