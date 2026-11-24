@@ -354,3 +354,14 @@ These results establish hosted-runner coverage for the specific NTFS, APFS, Linu
 PR #73 adds a macOS-native test for the hosted runner's `/Users` firmlink into the APFS Data volume. The first run showed `/` and the runner's home directory share the same `st_dev`, and `fstat` on the opened `/Users` handle did not expose the firmlink flag. The adapter now inspects the parent directory's entries with `getattrlistbulk`, requesting `ATTR_CMN_NAME` and `ATTR_CMN_FLAGS`, and rejects a child entry carrying Apple's `SF_FIRMLINK` bit before opening it. The test uses a test-only adapter rooted at `/` to require capture through a discovered firmlink entry to fail closed.
 
 The test-only root construction does not change production root admission: the adapter's public constructor still rejects `/` as a workspace root. This exercises the host's actual firmlink directory-entry metadata; exact-head macOS CI must confirm that `getattrlistbulk` returns the expected `SF_FIRMLINK` flag and that capture rejects the entry. It does not establish behavior for every firmlink, OS release, or APFS volume arrangement.
+
+
+## Follow-up update — 2026-11-24: approval-store concurrency and trust boundary
+
+PR #79 exact head `659b6c07e2331454a46a74576b48ac3993d95975` passed Rust Core Tests on Ubuntu, Windows, and macOS, Contract Validation, and GitGuardian. It rejects malformed challenge digests and values outside SQLite's signed integer range.
+
+PR #80 exact head `a2cad679a5f9e8402c81c5848ff92450c5f19aa7` passed Rust Core Tests on Ubuntu, Windows, and macOS, Contract Validation, and GitGuardian. It configures a bounded SQLite busy timeout, begins consumption with an IMMEDIATE transaction, and adds a two-connection race test requiring exactly one successful consumer.
+
+PR #81 (this documentation change) records the next trust-boundary gate. Current challenge data is not signed or authenticated; timestamps are caller supplied in the prototype; local SQLite ACL/tamper protection and target freshness are not solved by the replay store. The design requires Rust-owned challenge/time/verification/consumption and platform-specific OS-owned user-presence evidence. No authenticator or production cryptographic protocol is selected yet. Same-user malware, clock rollback across restart, enrollment/recovery, and IPC identity remain review items.
+
+The approval feature must remain prototype-only. Do not authorize production privileged writes or command execution from a plain TypeScript click, an unsigned challenge, or a software key accessible to the extension process. No dependent PR stack has been merged; preserve the TypeScript baseline and keep the stack open until independent security review, controlled-write implementation, end-to-end integration, packaging, and rollback gates are complete.
