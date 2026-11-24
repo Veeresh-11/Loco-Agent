@@ -204,16 +204,13 @@ impl ApprovalStore {
             return Err(StoreError::InvalidChallenge);
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
-        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
-            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
-        prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
             expires_at_unix,
         };
-        // Serialize pruning, capacity accounting, and insertion so parallel
-        // issuers cannot exceed the persistent row ceiling.
+        // Always acquire SQLite's write reservation before the shared deadline
+        // mutex. consume follows the same lock order, preventing lock inversion.
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Self::ensure_active_epoch(&tx, &self.process_epoch)?;
         prune_persistent_challenges(&tx, now, &self.process_epoch)?;
@@ -223,13 +220,19 @@ impl ApprovalStore {
             tx.commit()?;
             return Err(StoreError::PersistentCapacityExceeded);
         }
+        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
+        prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         tx.execute(
             "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
              VALUES (?1, ?2, ?3, NULL, ?4)",
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
-        tx.commit()?;
         deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
+        if let Err(error) = tx.commit() {
+            deadlines.remove(&challenge.challenge_id);
+            return Err(StoreError::Sql(error));
+        }
         Ok(challenge)
     }
 
