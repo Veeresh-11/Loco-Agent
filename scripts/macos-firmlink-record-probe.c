@@ -186,7 +186,7 @@ static void print_path_api_flags(int rootfd, const char *path) {
 static int probe_nested_firmlink(const char *parent_path, const char *entry_name, const char *expected_path) {
     int dirfd = open(parent_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirfd < 0) {
-        printf("nested_firmlink name=%s open_error=%d\n", entry_name, errno);
+        printf("nested_firmlink parent=%s name=%s open_error=%d\n", parent_path, entry_name, errno);
         return 1;
     }
 
@@ -202,7 +202,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
         int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer),
                                     FSOPT_ATTR_CMN_EXTENDED);
         if (count < 0) {
-            printf("nested_firmlink name=%s bulk_error=%d\n", entry_name, errno);
+            printf("nested_firmlink parent=%s name=%s bulk_error=%d\n", parent_path, entry_name, errno);
             close(dirfd);
             return 1;
         }
@@ -211,7 +211,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
         size_t cursor = 0;
         for (int i = 0; i < count; ++i) {
             if (cursor + sizeof(uint32_t) + sizeof(attribute_set_t) > sizeof(buffer)) {
-                printf("nested_firmlink name=%s truncated_header\n", entry_name);
+                printf("nested_firmlink parent=%s name=%s truncated_header\n", parent_path, entry_name);
                 close(dirfd);
                 return 1;
             }
@@ -220,7 +220,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
             memcpy(&record_len, buffer + cursor, sizeof(record_len));
             if (record_len < sizeof(uint32_t) + sizeof(returned) ||
                 record_len > sizeof(buffer) - cursor) {
-                printf("nested_firmlink name=%s invalid_record_length=%u\n",
+                printf("nested_firmlink parent=%s name=%s invalid_record_length=%u\n",
                        parent_path, entry_name, record_len);
                 close(dirfd);
                 return 1;
@@ -232,7 +232,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
             int32_t entry_error = 0;
             if (returned.commonattr & ATTR_CMN_ERROR) {
                 if (offset + sizeof(entry_error) > record_len) {
-                    printf("nested_firmlink name=%s truncated_entry_error\n", entry_name);
+                    printf("nested_firmlink parent=%s name=%s truncated_entry_error\n", parent_path, entry_name);
                     close(dirfd);
                     return 1;
                 }
@@ -248,7 +248,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
 
             attrreference_t name_ref;
             if (offset + sizeof(name_ref) > record_len) {
-                printf("nested_firmlink name=%s truncated_name_ref\n", entry_name);
+                printf("nested_firmlink parent=%s name=%s truncated_name_ref\n", parent_path, entry_name);
                 close(dirfd);
                 return 1;
             }
@@ -259,7 +259,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
                 name_ref.attr_length > NAME_MAX + 1 ||
                 (uint64_t)name_start + name_ref.attr_length > record_len ||
                 record[name_start + name_ref.attr_length - 1] != '\0') {
-                printf("nested_firmlink name=%s invalid_name_ref\n", entry_name);
+                printf("nested_firmlink parent=%s name=%s invalid_name_ref\n", parent_path, entry_name);
                 close(dirfd);
                 return 1;
             }
@@ -267,7 +267,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
             char name[NAME_MAX + 1];
             memcpy(name, record + (size_t)name_start, name_ref.attr_length);
             if (memchr(name, '\0', name_ref.attr_length) != name + name_ref.attr_length - 1) {
-                printf("nested_firmlink name=%s invalid_name\n", entry_name);
+                printf("nested_firmlink parent=%s name=%s invalid_name\n", parent_path, entry_name);
                 close(dirfd);
                 return 1;
             }
@@ -278,7 +278,7 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
 
             offset = name_ref_end;
             if (offset + sizeof(uint32_t) + sizeof(attrreference_t) > record_len) {
-                printf("nested_firmlink name=%s truncated_fixed_fields\n", entry_name);
+                printf("nested_firmlink parent=%s name=%s truncated_fixed_fields\n", parent_path, entry_name);
                 close(dirfd);
                 return 1;
             }
@@ -297,26 +297,26 @@ static int probe_nested_firmlink(const char *parent_path, const char *entry_name
                 record[path_start + path_ref.attr_length - 1] != '\0' ||
                 memchr(record + (size_t)path_start, '\0', path_ref.attr_length) !=
                     record + (size_t)path_start + path_ref.attr_length - 1) {
-                printf("nested_firmlink name=%s invalid_path_ref_or_overlap\n", entry_name);
+                printf("nested_firmlink parent=%s name=%s invalid_path_ref_or_overlap\n", parent_path, entry_name);
                 close(dirfd);
                 return 1;
             }
 
             const char *resolved_path = (const char *)(record + (size_t)path_start);
             if (strcmp(resolved_path, expected_path) != 0) {
-                printf("nested_firmlink name=%s flags=0x%08x path=%s expected=%s match=no\n",
-                       parent_path, parent_path, entry_name, flags, resolved_path, expected_path);
+                printf("nested_firmlink parent=%s name=%s flags=0x%08x path=%s expected=%s match=no\n",
+                       parent_path, entry_name, flags, resolved_path, expected_path);
                 close(dirfd);
                 return 1;
             }
-            printf("nested_firmlink name=%s flags=0x%08x nofirmlink_path=%s expected=%s match=yes\n",
-                   entry_name, flags, resolved_path, expected_path);
+            printf("nested_firmlink parent=%s name=%s flags=0x%08x nofirmlink_path=%s expected=%s match=yes\n",
+                   parent_path, entry_name, flags, resolved_path, expected_path);
             close(dirfd);
             return 0;
         }
     }
 
-    printf("nested_firmlink name=%s not_found_in_bulk_listing\n", entry_name);
+    printf("nested_firmlink parent=%s name=%s not_found_in_bulk_listing\n", parent_path, entry_name);
     close(dirfd);
     return 1;
 }
