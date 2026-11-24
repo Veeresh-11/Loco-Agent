@@ -135,6 +135,11 @@ pub fn attr_cmnex_nofirmlinkpath_available() -> bool {
   .is_some()
 }
 
+#[cfg(target_os="macos")]
+fn path_is_within_root(root: &Path, candidate: &Path) -> bool {
+ candidate.starts_with(root)
+}
+
 /// Capability probe used by the sidecar handshake. The actual adapter repeats
 /// the query for each retained descriptor and fails closed on any error.
 #[cfg(target_os="macos")]
