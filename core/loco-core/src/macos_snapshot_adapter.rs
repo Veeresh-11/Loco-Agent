@@ -615,7 +615,7 @@ mod tests {
 
  #[test]
  fn bulk_entry_record_parser_rejects_malformed_name_and_path_references() {
-  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0, true);
   let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
   let name_ref_offset = header_size + 4;
   let mut malformed_name = valid.clone();
@@ -652,7 +652,7 @@ mod tests {
 
  #[test]
  fn bulk_entry_record_parser_requires_terminators_absolute_paths_and_zero_entry_error() {
-  let mut bad_name = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let mut bad_name = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0, true);
   let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
   let name_ref_offset = header_size + 4;
   let name_ref = unsafe {
@@ -673,7 +673,7 @@ mod tests {
 
  #[test]
  fn bulk_entry_record_parser_rejects_missing_requested_attributes() {
-  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0, true);
   let common = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
   for (commonattr, forkattr) in [
    (libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
