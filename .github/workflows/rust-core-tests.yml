@@ -92,7 +92,7 @@ jobs:
           }
           $source = (Resolve-Path 'scripts/windows-ffi-abi-probe.c').Path
           $object = Join-Path $env:RUNNER_TEMP 'windows-ffi-abi-probe.obj'
-          $command = 'call "' + $vcvars + '" && cl.exe /nologo /W4 /WX /std:c11 /c "' + $source + '" /Fo"' + $object + '"'
+          $command = 'call "' + $vcvars + '" >nul && echo WindowsSdkDir=%WindowsSdkDir% && echo WindowsSDKVersion=%WindowsSDKVersion% && cl.exe /Bv /nologo /W4 /WX /std:c11 /c "' + $source + '" /Fo"' + $object + '"'
           Write-Output '=== Compile x64 Windows SDK ABI probe ==='
           & cmd.exe /d /c $command
           if ($LASTEXITCODE -ne 0) {
