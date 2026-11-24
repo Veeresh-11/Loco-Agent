@@ -78,7 +78,7 @@ The same exact run recorded the System and Data volume identities:
 
 Thus `st_dev` is not discriminating on this runner, but descriptor-derived `f_fsid` is. The adapter compares `f_fsid` from every opened intermediate directory and final file to the retained root's `f_fsid` **before reading content**. Consequently, the bulk no-firmlink path is an early-denial observation, not the authorization authority: if an entry changes between preflight and `openat`, the actual opened vnode is still checked by its descriptor-associated filesystem identity before any bytes are acquired.
 
-PR #110 adds `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`, which deliberately bypasses preflight, opens the OS-provided firmlink entries relative to their parent descriptors, and asserts the parent handle has the System `f_fsid` while the opened target has the Data `f_fsid`. Exact-head CI for this new regression is pending.
+PR #110 adds `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`, which deliberately bypasses preflight, opens the OS-provided firmlink entries relative to their parent descriptors, and asserts the parent handle has the System `f_fsid` while the opened target has the Data `f_fsid`. This regression passed at exact head `7a86ae80a2b0147fc4c058792abd44c5751219b3`: Rust Core Tests [#45350706796](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706796) passed on Ubuntu, Windows, and macOS; Contract Validation [#45350706807](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706807) passed. macOS reported 130 passed, 0 failed, 1 ignored.
 
 ## Security boundary and acceptance decision
 
