@@ -10,13 +10,19 @@ pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
 // Keep fsid_t opaque: compare the OS-provided volume identifier without decoding its private layout.
-fn filesystem_id(file:&File)->Result<libc::fsid_t,MacOsSnapshotAdapterError>{
+fn filesystem_id(file:&File)->Result<[u8;8],MacOsSnapshotAdapterError>{
  use std::os::fd::AsRawFd;
  let mut stat:libc::statfs=unsafe{std::mem::zeroed()};
  if unsafe{libc::fstatfs(file.as_raw_fd(),&mut stat)}!=0 {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
- Ok(stat.f_fsid)
+ // Darwin fsid_t is defined by the SDK as two 32-bit integers. Copy its
+ // fixed-width C representation without depending on libc private fields.
+ let mut bytes=[0u8;8];
+ unsafe { std::ptr::copy_nonoverlapping(
+  (&stat.f_fsid as *const libc::fsid_t).cast::<u8>(), bytes.as_mut_ptr(), bytes.len()
+ ); }
+ Ok(bytes)
 }
 
 #[cfg(target_os="macos")]
@@ -47,7 +53,7 @@ fn open_dir(parent:&File,name:&str)->Result<File,MacOsSnapshotAdapterError>{
  Ok(file)
 }
 
-pub struct MacOsWorkspaceSnapshotAdapter { root:File, root_device:u64, root_filesystem_id:libc::fsid_t, workspace_id:String, canonical_root:PathBuf }
+pub struct MacOsWorkspaceSnapshotAdapter { root:File, root_device:u64, root_filesystem_id:[u8;8], workspace_id:String, canonical_root:PathBuf }
 impl MacOsWorkspaceSnapshotAdapter {
  /// Opens an absolute workspace path from /, one component at a time.
  /// O_NOFOLLOW rejects symlinks; the retained final descriptor is the capability.
@@ -79,7 +85,7 @@ impl MacOsWorkspaceSnapshotAdapter {
   }
   let meta=current.metadata().map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
   let root_filesystem_id=filesystem_id(&current)?;
-  if root_filesystem_id == unsafe{std::mem::zeroed()} {
+  if root_filesystem_id.iter().all(|byte| *byte == 0) {
    return Err(MacOsSnapshotAdapterError::InvalidRoot);
   }
   Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root:canonical})
