@@ -516,9 +516,11 @@ mod tests {
   path: &[u8],
   flags: u32,
   entry_error: u32,
+  include_entry_error: bool,
  ) -> Vec<u8> {
   let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
-  let name_ref_offset = header_size + 4;
+  let error_size = if include_entry_error { 4 } else { 0 };
+  let name_ref_offset = header_size + error_size;
   let name_ref_end = name_ref_offset + std::mem::size_of::<libc::attrreference_t>();
   let flags_offset = name_ref_end;
   let path_ref_offset = flags_offset + 4;
@@ -530,7 +532,8 @@ mod tests {
   record[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
 
   let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
-  returned.commonattr = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
+  returned.commonattr = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS
+   | if include_entry_error { ATTR_CMN_ERROR } else { 0 };
   returned.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
   unsafe {
    std::ptr::write_unaligned(
@@ -552,7 +555,9 @@ mod tests {
     },
    );
   }
-  record[header_size..header_size + 4].copy_from_slice(&entry_error.to_ne_bytes());
+  if include_entry_error {
+   record[header_size..header_size + 4].copy_from_slice(&entry_error.to_ne_bytes());
+  }
   record[flags_offset..flags_offset + 4].copy_from_slice(&flags.to_ne_bytes());
   record[name_offset..name_offset + name.len()].copy_from_slice(name);
   record[path_offset..path_offset + path.len()].copy_from_slice(path);
@@ -574,7 +579,7 @@ mod tests {
  #[test]
  fn bulk_entry_record_parser_accepts_valid_entry_and_preserves_raw_flags() {
   let record = synthetic_bulk_entry_record(
-   b"Users\0", b"/System/Volumes/Data/Users\0", 0x0010_0000, 0,
+   b"Users\0", b"/System/Volumes/Data/Users\0", 0x0010_0000, 0, true,
   );
   let parsed = parse_bulk_entry_record(&record).unwrap();
   assert_eq!(parsed.name, b"Users");
@@ -583,8 +588,18 @@ mod tests {
  }
 
  #[test]
+ fn bulk_entry_record_parser_accepts_record_without_optional_entry_error() {
+  let record = synthetic_bulk_entry_record(
+   b"System\0", b"/System\0", 0x0008_0000, 0, false,
+  );
+  let parsed = parse_bulk_entry_record(&record).unwrap();
+  assert_eq!(parsed.name, b"System");
+  assert_eq!(parsed.no_firmlink_path, PathBuf::from("/System"));
+ }
+
+ #[test]
  fn bulk_entry_record_parser_rejects_truncated_or_oversized_records() {
-  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0, true);
   assert!(parse_bulk_entry_record(&valid[..3]).is_err());
 
   let mut truncated = valid.clone();
@@ -649,10 +664,10 @@ mod tests {
   bad_name[name_start + name_ref.attr_length as usize - 1] = b'X';
   assert!(parse_bulk_entry_record(&bad_name).is_err());
 
-  let relative = synthetic_bulk_entry_record(b"System\0", b"System\0", 0, 0);
+  let relative = synthetic_bulk_entry_record(b"System\0", b"System\0", 0, 0, true);
   assert!(parse_bulk_entry_record(&relative).is_err());
 
-  let nonzero_error = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 5);
+  let nonzero_error = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 5, true);
   assert!(parse_bulk_entry_record(&nonzero_error).is_err());
  }
 
@@ -661,10 +676,9 @@ mod tests {
   let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
   let common = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
   for (commonattr, forkattr) in [
-   (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
-   (common, 0),
+   (libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
    (libc::ATTR_CMN_NAME | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
-   (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (common, 0),
   ] {
    let mut missing = valid.clone();
    set_bulk_returned_attributes(&mut missing, commonattr, forkattr);
