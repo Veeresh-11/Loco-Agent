@@ -61,3 +61,14 @@ PR #110 adds `opened_system_data_firmlinks_are_rejected_by_handle_volume_identit
 - Ordinary controls must continue to open successfully; otherwise the probe is not discriminating.
 - The `O_RESOLVE_BENEATH` result is separate from `O_NOFOLLOW`, which is documented for symbolic links and does not itself reject firmlinks.
 - No production code changes are authorized by this probe. The existing adapter must keep checking the actual opened descriptor's `f_fsid`, firmlink-free descriptor path, root containment, object type, link count, and read-time metadata. Any missing or inconsistent check remains a hard denial.
+
+
+## Exact-head validation
+
+Head: `7a86ae80a2b0147fc4c058792abd44c5751219b3`.
+
+- Rust Core Tests [run #45350706796](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706796): Ubuntu, Windows, and macOS passed.
+- Contract Validation [run #45350706807](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45350706807): passed.
+- macOS Rust tests: 130 passed, 0 failed, 1 ignored.
+- The new opened-handle firmlink identity test passed. It bypasses the bulk preflight and confirms each tested firmlink's parent descriptor has the System `f_fsid`, while the `openat` result has the Data `f_fsid`.
+- The native `O_RESOLVE_BENEATH` probe repeated successfully: the lexical `..` escape was denied, but root and nested firmlink entries opened and resolved to Data-volume paths.
