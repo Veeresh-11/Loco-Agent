@@ -145,8 +145,8 @@ export class RustSidecarClient implements vscodeDisposable {
     void this.terminate();
   }
 
-  private async ensureStarted(): Promise<void> {
-    if (!this.started) await this.start();
+  private async ensureStarted(signal?: AbortSignal): Promise<void> {
+    if (!this.started) await this.start(signal);
   }
 
   private exchange(message: JsonObject, timeoutMs: number, signal?: AbortSignal): Promise<JsonObject> {
