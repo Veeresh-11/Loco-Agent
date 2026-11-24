@@ -129,3 +129,10 @@ The clock abstraction has deterministic tests for backward movement, expiry, ran
 PR #84 changes the store to generate a fresh 256-bit challenge identifier from the operating system random source using `getrandom`. Callers no longer choose the challenge ID. The returned identifier is 64 lowercase hexadecimal characters and remains bound in SQLite to the canonical action digest and store-owned expiry.
 
 This improves unpredictability and prevents caller-selected ID collisions, but is not itself authenticated approval. The nonce is not a signature, the UI must treat it as opaque, and a future platform authenticator must bind its signed assertion to this nonce, the relying-party/application identity, and the action digest. Entropy-source failure fails closed. The database is still not protected from same-user tampering by this change.
+
+
+## Process-restart invalidation checkpoint — 2026-11-24
+
+PR #85 adds a random process epoch to the approval database. On authority startup, Rust rotates the active epoch. Challenges are stored with the epoch that issued them; consumption requires both the issuing store handle and persisted singleton runtime epoch to match. Starting a new authority process therefore invalidates all outstanding challenges from the previous process, even if the wall clock moved backward while the application was stopped. A stale still-running store handle also fails closed after another authority process takes over.
+
+This is a single-active-authority design: opening a second authority against the same database intentionally revokes the first authority's outstanding challenges. It does not protect against an attacker who can rewrite the SQLite database, forge its epoch rows, or compromise the authority process. OS ACLs, IPC peer identity, and a reviewed authenticator remain required.
