@@ -90,3 +90,19 @@ No missing snapshot, identity-less snapshot, stale capture, mismatched path, abs
 - No generic software key, UI click, or unsigned DTO may authorize privileged operations.
 - The platform-authenticator research issue #82 remains open. Same-user malware, enrollment/recovery/revocation, app/RP identity, IPC peer identity, and OS-owned user-presence semantics require independent decisions.
 - No production write or command execution is enabled. Independent security review remains mandatory.
+
+
+## Implementation checkpoint — 2026-11-24
+
+PR #125 implements this prototype contract in Rust:
+
+- `canonical_snapshot_digest.rs` provides the domain-separated, length-prefixed Snapshot Binding Digest v1.
+- `CapturedWorkspaceSnapshot` records a private process-monotonic capture instant; its constructors are crate-private so callers outside the Rust crate cannot manufacture a trusted capture or set its timestamp.
+- `ApprovalStore::issue` and `consume` require a captured snapshot and enforce the 30-second maximum age using the same Rust-owned monotonic clock source used by the approval store.
+- The challenge DTO and SQLite row both carry the snapshot digest. Consumption verifies action and snapshot digests in constant time.
+- `ReadFile` requires an exact path match. `ProposePatch` requires an exact path and a present target digest equal to the captured content digest. `RunCommand` is rejected as unsupported by this file-only contract.
+- Existing action-only rows migrate with an empty snapshot digest and remain unusable; process-epoch invalidation remains in force.
+
+Rust Core Tests [run #45367727222](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45367727222) passed Ubuntu, Windows, and macOS. Contract Validation [run #45367727547](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45367727547) passed.
+
+This is still a prototype. The store does not authenticate a human, protect SQLite against same-user tampering, or invoke a platform authenticator. A future privileged operation must reacquire and compare the target/workspace snapshot immediately before use. No production write or command path is enabled.
