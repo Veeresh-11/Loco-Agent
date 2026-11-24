@@ -159,3 +159,12 @@ For each milestone, record:
 - Security threats addressed and remaining risks.
 - Manual checks still pending.
 - Rollback steps.
+
+
+## Approval trust-boundary decision gate — 2026-11-24
+
+See [Approval Trust Boundary](../security/APPROVAL_TRUST_BOUNDARY.md). The existing digest challenge and SQLite replay store are prototypes, not authenticated human approval. Rust must own challenge generation, assertion verification, freshness checks, and atomic consumption. TypeScript is presentation/transport only; Python remains proposal-only.
+
+Do not select or ship a generic signing key as proof of user intent. Platform authenticator selection must first establish the same-user attacker model, OS-owned user-presence prompt, application binding, enrollment/recovery/revocation, and fail-closed behavior independently for Windows, macOS, and Linux. Rust-owned time must replace caller-supplied production timestamps; rollback across machine restart remains a residual risk until a platform-backed source is selected.
+
+Implementation is gated on the ADR's exit criteria. In particular, no production privileged write or command execution may rely on the current unsigned challenge DTO.
