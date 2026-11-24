@@ -49,7 +49,12 @@ impl ApprovalStore {
     }
     /// Insert a challenge. IDs cannot be overwritten.
     pub fn issue(&mut self, challenge: &ApprovalChallenge) -> Result<(), StoreError> {
-        if challenge.challenge_id.trim().is_empty() || challenge.action_digest.len() != 64 {
+        if challenge.challenge_id.trim().is_empty()
+            || challenge.action_digest.len() != 64
+            || !challenge.action_digest.is_ascii()
+            || !challenge.action_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || challenge.expires_at_unix > i64::MAX as u64
+        {
             return Err(StoreError::InvalidChallenge);
         }
         self.conn.execute(
@@ -62,7 +67,9 @@ impl ApprovalStore {
     /// Atomically consume an existing, unexpired, unused challenge for the exact
     /// action. The timestamp must come from a trusted clock.
     pub fn consume(&mut self, challenge_id: &str, action: &ProposedAction, now_unix: u64) -> Result<(), StoreError> {
-        if challenge_id.trim().is_empty() { return Err(StoreError::InvalidChallenge); }
+        if challenge_id.trim().is_empty() || now_unix > i64::MAX as u64 {
+            return Err(StoreError::InvalidChallenge);
+        }
         let tx = self.conn.transaction()?;
         let record: Option<(String, u64, Option<u64>)> = tx.query_row(
             "SELECT action_digest, expires_at, consumed_at FROM approval_challenges WHERE challenge_id=?1",
@@ -157,5 +164,41 @@ mod tests {
     fn unknown_challenge_rejected() {
         let mut store = ApprovalStore::in_memory().unwrap();
         assert!(matches!(store.consume("missing", &sample_action(), 100), Err(StoreError::NotFound)));
+    }
+
+    #[test]
+    fn issue_rejects_non_hex_action_digest() {
+        let mut store = ApprovalStore::in_memory().unwrap();
+        let mut challenge = create_challenge("bad-digest".into(), &sample_action(), 200).unwrap();
+        challenge.action_digest = "z".repeat(64);
+        assert!(matches!(store.issue(&challenge), Err(StoreError::InvalidChallenge)));
+    }
+
+    #[test]
+    fn issue_rejects_non_ascii_action_digest() {
+        let mut store = ApprovalStore::in_memory().unwrap();
+        let mut challenge = create_challenge("unicode-digest".into(), &sample_action(), 200).unwrap();
+        challenge.action_digest = "🦀".repeat(16);
+        assert!(matches!(store.issue(&challenge), Err(StoreError::InvalidChallenge)));
+    }
+
+    #[test]
+    fn issue_rejects_expiry_outside_sqlite_integer_range() {
+        let mut store = ApprovalStore::in_memory().unwrap();
+        let challenge = create_challenge("overflow-expiry".into(), &sample_action(), i64::MAX as u64 + 1).unwrap();
+        assert!(matches!(store.issue(&challenge), Err(StoreError::InvalidChallenge)));
+    }
+
+    #[test]
+    fn consume_rejects_time_outside_sqlite_integer_range() {
+        let mut store = ApprovalStore::in_memory().unwrap();
+        let action = sample_action();
+        let challenge = create_challenge("overflow-now".into(), &action, 200).unwrap();
+        store.issue(&challenge).unwrap();
+        assert!(matches!(
+            store.consume("overflow-now", &action, i64::MAX as u64 + 1),
+            Err(StoreError::InvalidChallenge)
+        ));
+        assert!(!store.is_consumed("overflow-now").unwrap());
     }
 }
