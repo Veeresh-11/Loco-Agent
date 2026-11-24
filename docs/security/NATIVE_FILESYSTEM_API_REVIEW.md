@@ -163,6 +163,18 @@ The following records the implementation and hosted-runner evidence accumulated 
 | macOS nested mount boundary | Component-wise `openat(O_NOFOLLOW)`; compare descendant device identity with retained root | PR #69 implementation run #45185300723; dedicated APFS sparse-image test reran and passed in macOS job #45188239997 | Hosted nested-APFS volume fixture passes. Firmlinks are not established by this different-device test; see issue #74. |
 | Cross-platform metadata/read semantics | Handle identity and metadata revalidation before/after bounded reads; exact byte count and digest | PRs #58–#72 exact-head matrices; current PR #72 Rust matrix #45188239997 and contract #45188239539 pass | Best-effort mutation detection only; not an atomic content snapshot. Approval enforcement must reacquire and revalidate immediately before an operation. |
 
+### Exact hosted runner versions recorded by PR #72 follow-up CI
+
+The workflow now records the OS/kernel build and the runner workspace filesystem on each platform. Exact head `6acb108a3a6342a3e3c64b1e39a699ede48dbc1e` passed Rust Core Tests run [#45342704201](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45342704201) and Contract Validation run [#45342704159](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45342704159).
+
+| Hosted runner | Recorded environment | Native fixtures executed |
+|---|---|---|
+| `ubuntu-latest` | Ubuntu 26.04.1 LTS; kernel `7.0.0-1020-azure`; runner temp path on ext4 | Real same-device bind mount and distinct-device ext4 loop mount; both explicit rejection tests passed |
+| `macos-latest` | macOS 26.7.2; build `25G332` | Nested APFS sparse-image mount; explicit rejection test passed |
+| `windows-latest` | Windows Server 2025 Datacenter; version `10.0.26100`, build `26100`, 64-bit; runner temp volume NTFS | Pre-existing incompatible writer, real secondary NTFS VHDX mountpoint; both explicit tests passed |
+
+The hosted-runner labels remain moving targets. These records improve reproducibility for this run but do not constitute a pinned multi-version support matrix.
+
 ### Supported prototype baseline
 
 - **Linux:** kernel 5.6+ with `openat2` and the required resolution flags; descendant mount and bind-mount crossings rejected. Hosted Ubuntu tested with a same-device bind mount and a distinct ext4 loop mount.
