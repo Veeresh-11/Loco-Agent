@@ -122,3 +122,10 @@ PR #83 introduces a process-wide Rust wall-clock guard and changes the SQLite st
 This does **not** solve wall-clock rollback across process or machine restart. The persisted expiry is still Unix wall time. It also does not make challenge IDs unpredictable, authenticate a user, or protect the SQLite file from same-user tampering. The caller currently supplies the challenge ID; cryptographically random nonce generation and platform-authenticator assertions remain separate work.
 
 The clock abstraction has deterministic tests for backward movement, expiry, range overflow, and clock failure. Exact-head cross-platform CI is required before treating this checkpoint as validated.
+
+
+## Cryptographic challenge nonce checkpoint — 2026-11-24
+
+PR #84 changes the store to generate a fresh 256-bit challenge identifier from the operating system random source using `getrandom`. Callers no longer choose the challenge ID. The returned identifier is 64 lowercase hexadecimal characters and remains bound in SQLite to the canonical action digest and store-owned expiry.
+
+This improves unpredictability and prevents caller-selected ID collisions, but is not itself authenticated approval. The nonce is not a signature, the UI must treat it as opaque, and a future platform authenticator must bind its signed assertion to this nonce, the relying-party/application identity, and the action digest. Entropy-source failure fails closed. The database is still not protected from same-user tampering by this change.
