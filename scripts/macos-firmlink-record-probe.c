@@ -290,6 +290,7 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
 
     unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
     int found = 0;
+    int normal_found = 0;
     for (;;) {
         int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer),
                                     FSOPT_ATTR_CMN_EXTENDED);
@@ -375,27 +376,52 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
                 return 1;
             }
 
-            if (strcmp(name, "Users") == 0 ||
-                strcmp(name, "Applications") == 0 ||
-                strcmp(name, "Library") == 0) {
+            const char *expected_path = NULL;
+            int mapped_entry = 0;
+            if (strcmp(name, "Users") == 0) {
+                expected_path = "/System/Volumes/Data/Users";
+                mapped_entry = 1;
+            } else if (strcmp(name, "Applications") == 0) {
+                expected_path = "/System/Volumes/Data/Applications";
+                mapped_entry = 1;
+            } else if (strcmp(name, "Library") == 0) {
+                expected_path = "/System/Volumes/Data/Library";
+                mapped_entry = 1;
+            } else if (strcmp(name, "System") == 0 ||
+                       strcmp(name, "usr") == 0 ||
+                       strcmp(name, "private") == 0) {
+                expected_path = name[0] == 'S' ? "/System" :
+                                (name[0] == 'u' ? "/usr" : "/private");
+            }
+            if (expected_path != NULL) {
                 uint32_t flags = 0;
                 size_t flags_offset = sizeof(record_len) + sizeof(returned) +
                                       sizeof(name_ref);
                 memcpy(&flags, record + flags_offset, sizeof(flags));
-                printf("bulk_extended name=%s flags=0x%08x nofirmlink_path=%s\n",
-                       name, flags, (const char *)(record + (size_t)path_start));
-                found++;
+                const char *resolved_path = (const char *)(record + (size_t)path_start);
+                printf("bulk_extended name=%s flags=0x%08x nofirmlink_path=%s expected=%s match=%s\n",
+                       name, flags, resolved_path, expected_path,
+                       strcmp(resolved_path, expected_path) == 0 ? "yes" : "no");
+                if (strcmp(resolved_path, expected_path) != 0) {
+                    close(dirfd);
+                    return 1;
+                }
+                if (mapped_entry) {
+                    found++;
+                } else {
+                    normal_found++;
+                }
             }
             cursor += record_len;
         }
     }
 
     close(dirfd);
-    printf("bulk_extended mapped_entries_found=%d\n", found);
-    return found == 3 ? 0 : 1;
+    printf("bulk_extended mapped_entries_found=%d normal_entries_found=%d\n", found, normal_found);
+    return found == 3 && normal_found == 3 ? 0 : 1;
 }
 
-static int probe_extended_nofirmlink_path_at(int rootfd, const char *path) {
+static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const char *expected_path) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
@@ -440,11 +466,13 @@ static int probe_extended_nofirmlink_path_at(int rootfd, const char *path) {
         return 1;
     }
 
-    printf("extended_nofirmlink path=%s flags=0x%08x resolved_path=%s "
+    const char *resolved_path = (char *)(buffer + (size_t)path_start);
+    int matches = expected_path == NULL || strcmp(resolved_path, expected_path) == 0;
+    printf("extended_nofirmlink path=%s flags=0x%08x resolved_path=%s expected=%s match=%s "
            "path_bytes=%u\n",
-           path, flags, (char *)(buffer + (size_t)path_start),
-           path_ref.attr_length);
-    return 0;
+           path, flags, resolved_path, expected_path == NULL ? "(unspecified)" : expected_path,
+           matches ? "yes" : "no", path_ref.attr_length);
+    return matches ? 0 : 1;
 }
 
 static int probe_getdirentriesattr_firmlink_flags(void) {
@@ -1071,9 +1099,12 @@ int main(void) {
         close(dirfd);
         return 5;
     }
-    if (probe_extended_nofirmlink_path_at(dirfd, "Users") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "Applications") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "Library") != 0) {
+    if (probe_extended_nofirmlink_path_at(dirfd, "Users", "/System/Volumes/Data/Users") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Applications", "/System/Volumes/Data/Applications") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Library", "/System/Volumes/Data/Library") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "System", "/System") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "private", "/private") != 0) {
         close(dirfd);
         return 5;
     }
