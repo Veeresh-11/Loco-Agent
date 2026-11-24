@@ -227,3 +227,23 @@ The same bulk records still report `SF_NOUNLINK`, not `SF_FIRMLINK`; the separat
 The XNU `getattrlistbulk(2)` manual says a firmlink directory entry should have `SF_FIRMLINK` and that bulk attributes should describe the firmlink rather than its target. The hosted runner's observed target identity/path remains inconsistent with that documented behavior. `getdirentriesattr(2)` is not a fallback: the volume returns `ENOTSUP` (45), which the manual explicitly documents for unsupported volumes.
 
 **Decision:** keep `ATTR_CMNEXT_NOFIRMLINKPATH` as diagnostic evidence only. It is a path of the vnode returned by the API, not a pre-open entry-level firmlink bit. The acceptance requirement for a reliable signal read without traversing the target remains unresolved. Exact-head Rust Core Tests [#45340410986](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45340410986) passed Ubuntu, Windows, and macOS.
+
+
+### Bulk extended-path controls and exact-head result (run #45340686612)
+
+The native bulk probe now checks three mapped entries and two stable ordinary-directory controls. On macOS 26.7.2 (build 25G332, arm64), `ATTR_CMNEXT_NOFIRMLINKPATH` returned:
+
+```
+bulk_extended name=usr flags=0x00088000 nofirmlink_path=/usr expected=/usr match=yes
+bulk_extended name=Library flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Library expected=/System/Volumes/Data/Library match=yes
+bulk_extended name=System flags=0x00080000 nofirmlink_path=/System expected=/System match=yes
+bulk_extended name=Users flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Users expected=/System/Volumes/Data/Users match=yes
+bulk_extended name=Applications flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Applications expected=/System/Volumes/Data/Applications match=yes
+bulk_extended mapped_entries_found=3 normal_entries_found=2
+```
+
+The `/private` entry was deliberately excluded as an ordinary-directory control because it is a symlink alias to `/System/Volumes/Data/private`, not a plain directory. The `/System` and `/usr` controls return their expected unchanged paths; the mapped entries return their Data-volume no-firmlink paths. The corresponding `getattrlistat` extended-path results match those same paths.
+
+This gives a reproducible *pre-application-open path observation* during directory enumeration, but the returned value remains a path for the vnode produced by the filesystem's bulk operation. Public XNU source documents the intended `SF_FIRMLINK` entry flag and firmlink-entry metadata behavior, while the hosted APFS runner still reports target FSIDs/file IDs and `SF_NOUNLINK`. Without APFS implementation source or an Apple-provided same-volume fixture, we cannot prove that the bulk call observes the firmlink entry without internally traversing to its target. Do not promote the path comparison to the authorization boundary.
+
+The exact head [197be79](https://github.com/Veeresh-11/Loco-Agent/commit/197be79fb66db571af5c48ecc0b5d466b4473a64) passed Ubuntu, Windows, and macOS in [run #45340686612](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45340686612). macOS recorded 96 unit tests passed and one ignored nested-volume fixture.
