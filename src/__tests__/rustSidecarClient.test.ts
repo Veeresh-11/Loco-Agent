@@ -10,13 +10,13 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' = 'normal';
+  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' = 'normal';
 
   constructor() {
     super();
     this.stdin.on('data', (chunk: Buffer) => {
       const request = JSON.parse(chunk.toString('utf8').trim());
-      let response: Record<string, unknown>;
+      if (this.mode === 'stall-evaluate' && request.messageType === 'evaluate') return;\n      let response: Record<string, unknown>;
       if (request.messageType === 'hello') {
         response = {
           protocolVersion: '1.0', messageType: 'hello', requestId: request.requestId,
@@ -81,7 +81,7 @@ describe('RustSidecarClient', () => {
       .rejects.toThrow(/frame limit/i);
   });
 
-  it('rejects concurrent requests instead of multiplexing', async () => {
+  it('terminates the child when an evaluation is cancelled', async () => {\n    child.mode = 'stall-evaluate';\n    const controller = new AbortController();\n    const pending = client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' }, controller.signal);\n    await new Promise(resolve => setImmediate(resolve));\n    controller.abort();\n    await expect(pending).rejects.toThrow(/cancelled/i);\n    expect(child.killed).toBe(true);\n  });\n\n  it('fails an in-flight request when the child exits unexpectedly', async () => {\n    child.mode = 'stall-evaluate';\n    const pending = client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' });\n    await new Promise(resolve => setImmediate(resolve));\n    child.exitCode = 2;\n    child.emit('exit', 2, null);\n    await expect(pending).rejects.toThrow(/exited unexpectedly/i);\n  });\n\n  it('rejects concurrent requests instead of multiplexing', async () => {
     const first = client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' });
     await expect(client.evaluate({ contractVersion: '1.0', proposalId: 'p-2' }))
       .rejects.toThrow(/already in progress/i);
