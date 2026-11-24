@@ -13,8 +13,11 @@ use std::time::Duration;
 use crate::approval_binding::{action_digest, verify_approval_binding, ApprovalChallenge, ApprovalError};
 use crate::approval_clock::{ApprovalClock, ApprovalClockError, SystemApprovalClock};
 use crate::ProposedAction;
+use crate::canonical_snapshot_digest::canonical_snapshot_binding_digest;
+use crate::snapshot_payload::CapturedWorkspaceSnapshot;
 
 pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
+pub const MAX_APPROVAL_SNAPSHOT_AGE: Duration = Duration::from_secs(30);
 pub const MAX_OUTSTANDING_APPROVAL_CHALLENGES: usize = 1024;
 pub const MAX_PERSISTED_APPROVAL_CHALLENGES: u64 = 4096;
 pub const APPROVAL_RETENTION_BATCH_SIZE: u64 = 256;
@@ -67,6 +70,15 @@ fn process_epoch() -> Result<&'static str, StoreError> {
         Ok(epoch) => Ok(epoch.as_str()),
         Err(_) => Err(StoreError::RuntimeEpochUnavailable),
     }
+}
+
+fn ensure_snapshot_fresh(snapshot: &CapturedWorkspaceSnapshot, now: Duration) -> Result<(), StoreError> {
+    let captured_at = snapshot.captured_at_monotonic();
+    let age = now.checked_sub(captured_at).ok_or(StoreError::Binding(ApprovalError::SnapshotStale))?;
+    if age > MAX_APPROVAL_SNAPSHOT_AGE {
+        return Err(StoreError::Binding(ApprovalError::SnapshotStale));
+    }
+    Ok(())
 }
 
 fn prune_and_check_capacity(
@@ -159,6 +171,7 @@ impl ApprovalStore {
              CREATE TABLE IF NOT EXISTS approval_challenges (
                 challenge_id TEXT PRIMARY KEY,
                 action_digest TEXT NOT NULL,
+                snapshot_digest TEXT NOT NULL DEFAULT '',
                 expires_at INTEGER NOT NULL,
                 consumed_at INTEGER NULL,
                 process_epoch TEXT NOT NULL DEFAULT ''
@@ -170,6 +183,20 @@ impl ApprovalStore {
                 process_epoch TEXT NOT NULL
              );"
         )?;
+
+        // Old action-only rows receive an empty snapshot digest and are unusable.
+        // The process epoch also rotates on startup, invalidating all old challenges.
+        let has_snapshot_digest: bool = {
+            let mut statement = conn.prepare("PRAGMA table_info(approval_challenges)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            columns.filter_map(Result::ok).any(|name| name == "snapshot_digest")
+        };
+        if !has_snapshot_digest {
+            conn.execute(
+                "ALTER TABLE approval_challenges ADD COLUMN snapshot_digest TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
 
         // Migrate stores created before process epochs were introduced. Existing
         // rows receive an empty epoch and therefore become unusable (fail closed).
@@ -216,6 +243,7 @@ impl ApprovalStore {
     pub fn issue(
         &mut self,
         action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
         ttl_seconds: u64,
     ) -> Result<ApprovalChallenge, StoreError> {
         if !(1..=MAX_APPROVAL_TTL_SECONDS).contains(&ttl_seconds) {
@@ -224,15 +252,19 @@ impl ApprovalStore {
         let challenge_id = generate_challenge_id().map_err(StoreError::Entropy)?;
         let now = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
+        ensure_snapshot_fresh(snapshot, monotonic_now)?;
+        crate::approval_binding::validate_action_snapshot_binding(action, snapshot).map_err(StoreError::Binding)?;
         let monotonic_deadline = monotonic_now.checked_add(Duration::from_secs(ttl_seconds)).ok_or(StoreError::InvalidChallenge)?;
         let expires_at_unix = now.checked_add(ttl_seconds).ok_or(StoreError::InvalidChallenge)?;
         if expires_at_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
+        let snapshot_digest = canonical_snapshot_binding_digest(snapshot.snapshot());
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
+            snapshot_digest,
             expires_at_unix,
         };
         // Always acquire SQLite's write reservation before the shared deadline
@@ -250,9 +282,9 @@ impl ApprovalStore {
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
         prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         tx.execute(
-            "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
-             VALUES (?1, ?2, ?3, NULL, ?4)",
-            params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
+            "INSERT INTO approval_challenges(challenge_id, action_digest, snapshot_digest, expires_at, consumed_at, process_epoch)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+            params![challenge.challenge_id, challenge.action_digest, challenge.snapshot_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         if let Err(error) = tx.commit() {
@@ -268,12 +300,14 @@ impl ApprovalStore {
         &mut self,
         challenge_id: &str,
         action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
     ) -> Result<(), StoreError> {
         if !is_valid_challenge_id(challenge_id) {
             return Err(StoreError::InvalidChallenge);
         }
         let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
+        ensure_snapshot_fresh(snapshot, monotonic_now)?;
         if now_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
@@ -282,12 +316,12 @@ impl ApprovalStore {
         // serializes concurrent consumers across independent SQLite connections.
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Self::ensure_active_epoch(&tx, &self.process_epoch)?;
-        let record: Option<(String, u64, Option<u64>, String)> = tx.query_row(
-            "SELECT action_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
+        let record: Option<(String, String, u64, Option<u64>, String)> = tx.query_row(
+            "SELECT action_digest, snapshot_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
             params![challenge_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         ).optional()?;
-        let (digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
+        let (digest, snapshot_digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
         if challenge_epoch != self.process_epoch { return Err(StoreError::AlreadyConsumedOrExpired); }
         let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
@@ -301,9 +335,10 @@ impl ApprovalStore {
         let challenge = ApprovalChallenge {
             challenge_id: challenge_id.to_string(),
             action_digest: digest,
+            snapshot_digest,
             expires_at_unix: expires_at,
         };
-        verify_approval_binding(&challenge, action, now_unix).map_err(StoreError::Binding)?;
+        verify_approval_binding(&challenge, action, snapshot, now_unix).map_err(StoreError::Binding)?;
         let changed = tx.execute(
             "UPDATE approval_challenges SET consumed_at=?2
              WHERE challenge_id=?1 AND consumed_at IS NULL AND expires_at>?2",
