@@ -565,6 +565,48 @@ mod tests {
     }
 
     #[test]
+    fn stale_snapshot_is_rejected_at_issue_and_consume() {
+        let (mut store, clock) = test_store_at(100);
+        let action = sample_action();
+        let stale = sample_snapshot_at(Duration::from_millis(0));
+        clock.advance_monotonic(MAX_APPROVAL_SNAPSHOT_AGE.as_millis() as u64 + 1);
+        assert!(matches!(
+            store.issue(&action, &stale, 30),
+            Err(StoreError::Binding(ApprovalError::SnapshotStale))
+        ));
+
+        let (mut store, clock) = test_store_at(100);
+        let fresh = sample_snapshot_at(Duration::from_millis(0));
+        let challenge = store.issue(&action, &fresh, 30).unwrap();
+        clock.advance_monotonic(MAX_APPROVAL_SNAPSHOT_AGE.as_millis() as u64 + 1);
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action, &fresh),
+            Err(StoreError::Binding(ApprovalError::SnapshotStale))
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn changed_snapshot_identity_is_rejected_without_consuming() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let original = sample_snapshot_at(Duration::from_millis(0));
+        let challenge = store.issue(&action, &original, 30).unwrap();
+        let bytes = b"captured";
+        let changed_contract = crate::snapshot_payload::build_snapshot_contract(
+            "workspace-test", "src/lib.rs", "different-file-id", bytes,
+        ).unwrap();
+        let changed = CapturedWorkspaceSnapshot::new_at(
+            changed_contract, bytes.to_vec(), Duration::from_millis(1),
+        ).unwrap();
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action, &changed),
+            Err(StoreError::Binding(ApprovalError::SnapshotDigestMismatch))
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
     fn action_mismatch_does_not_consume() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
