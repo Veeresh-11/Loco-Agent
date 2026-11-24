@@ -788,6 +788,40 @@ mod tests {
  }
 
  #[test]
+ fn bulk_preflight_rejects_nested_system_data_firmlinks() {
+  let firmlinks = std::fs::read_to_string("/usr/share/firmlinks")
+   .expect("macOS system firmlink map");
+  let nested_names = firmlinks.lines().filter_map(|line| {
+   let mut fields = line.split_whitespace();
+   let source = fields.next()?;
+   fields.next()?;
+   let name = source.strip_prefix("/System/Library/")?;
+   if name.is_empty() || name.contains('/') {
+    None
+   } else {
+    Some(name.to_owned())
+   }
+  }).collect::<Vec<_>>();
+  assert!(
+   !nested_names.is_empty(),
+   "runner must provide a nested /System/Library firmlink fixture"
+  );
+
+  let parent = File::open("/System/Library").unwrap();
+  assert_eq!(
+   descriptor_path_no_firmlink(&parent).unwrap(),
+   PathBuf::from("/System/Library")
+  );
+  for name in nested_names {
+   assert_eq!(
+    preflight_entry_path(&parent, &name),
+    Err(SnapshotPayloadError::FirmlinkBoundary),
+    "nested system/data firmlink must be rejected before open: {name}"
+   );
+  }
+ }
+
+ #[test]
  fn bulk_attrreference_ranges_reject_overlaps_and_out_of_bounds_payloads() {
   let valid = libc::attrreference_t { attr_dataoffset: 8, attr_length: 4 };
   assert_eq!(
