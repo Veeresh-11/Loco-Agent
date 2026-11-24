@@ -947,9 +947,9 @@ int main(void) {
     if (probe_bulk_entry_identity() != 0) {
         return 4;
     }
-    if (probe_extended_nofirmlink_path_at(rootfd, "Users") != 0 ||
-        probe_extended_nofirmlink_path_at(rootfd, "Applications") != 0 ||
-        probe_extended_nofirmlink_path_at(rootfd, "Library") != 0) {
+    if (probe_extended_nofirmlink_path_at(dirfd, "Users") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Applications") != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Library") != 0) {
         return 5;
     }
     if (probe_getdirentriesattr_firmlink_flags() != 0) {
