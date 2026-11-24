@@ -158,10 +158,12 @@ mod tests {
   let volume=File::open(&mounted).unwrap();
   assert_eq!(filesystem_name(&root).unwrap(),"apfs");
   assert_eq!(filesystem_name(&volume).unwrap(),"apfs");
+  assert_ne!(filesystem_id(&root).unwrap(),filesystem_id(&volume).unwrap(),
+   "fixture must expose a distinct APFS volume identity through retained handles");
   assert_ne!(
    root.metadata().unwrap().dev(),
    volume.metadata().unwrap().dev(),
-   "fixture must be a distinct mounted APFS volume"
+   "fixture must also preserve the existing distinct st_dev boundary"
   );
   std::fs::write(mounted.join("probe.txt"),b"mounted-volume-sentinel").unwrap();
   let adapter=MacOsWorkspaceSnapshotAdapter::new(
