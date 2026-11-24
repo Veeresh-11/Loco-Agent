@@ -81,3 +81,14 @@ The Apple Developer Forums discussion that identified this command also notes th
 The probe now also opens a temporary directory, records both descriptor paths, renames that directory while keeping the descriptor open, creates a replacement directory at the original name, and queries the original and replacement descriptors independently. It records whether the original descriptor retains its device/inode identity and whether the replacement has a distinct identity. This experiment is intended to establish whether the path strings track the opened vnode across rename/replacement; it does not claim concurrent-race safety.
 
 The rename experiment was added after run #45335594962, so it still requires a fresh exact-head macOS run. Keep PR #102 and issue #74 open until that evidence is reviewed and sandbox/compatibility and security semantics are resolved.
+
+
+### Descriptor-path rename/replacement fixture (PR #102 follow-up)
+
+A new native CI experiment now opens a temporary directory by descriptor, captures both path forms, renames the directory while retaining the original descriptor, creates a different directory at the old pathname, and then queries both descriptors. The probe asserts:
+- the original descriptor's device/inode identity remains unchanged across the rename;
+- both path APIs report the moved name for the retained descriptor;
+- both path APIs report the original name for the replacement descriptor; and
+- the replacement descriptor has a distinct device/inode identity.
+
+The assertions deliberately require a NUL-terminated result in a `MAXPATHLEN`-sized buffer. This follows the macOS `fcntl(2)` manual's documented buffer requirement. This fixture is a sequential rename/replacement test, not a concurrent-race proof. The latest assertion-bearing source commit is `b63b8ca309850ffb615704ccfde728e0f2dd09d3`; exact-head macOS CI is still required before recording its outcome.
