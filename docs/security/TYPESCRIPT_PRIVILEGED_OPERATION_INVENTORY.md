@@ -95,3 +95,17 @@ This checkpoint does not:
 - No packaged per-platform Rust executable or trusted executable resolver exists.
 - Approval evidence remains a prototype and does not prove user presence.
 - The legacy implementation remains active until parity, adversarial tests, and rollback are demonstrated.
+
+
+## Workspace read request contract checkpoint — 2026-11-24
+
+The first narrow request DTO is now defined in:
+- `contracts/workspace-read-request-v1.schema.json`
+- `core/loco-core/src/workspace_read_contract.rs`
+- `src/core/workspaceReadContract.ts`
+
+Version 1.0 contains only an opaque host-issued `workspaceId`, portable workspace-relative `relativePath`, and `maxBytes` (1 byte through 10 MiB). The request rejects unknown fields, unsupported versions, malformed workspace IDs, ambiguous/escaping path forms, and paths over 4,096 UTF-8 bytes. TypeScript and Rust validators share the same limits and portable path rules.
+
+**This is a shape/lexical contract only.** A workspace ID must later be resolved through a host-owned registry; a syntactically valid relative path is not proof of containment. The contract does not open or read files, and the Rust sidecar does not advertise this capability. The existing `workspace_fs.rs` helper remains explicitly a TOCTOU-vulnerable prototype and is not used as a production implementation.
+
+The next gate is cross-language conformance testing against shared JSON fixtures, then a platform-specific handle-relative acquisition design. No live task path or default behavior changes in this checkpoint.
