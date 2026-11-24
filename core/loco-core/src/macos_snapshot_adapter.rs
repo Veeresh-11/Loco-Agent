@@ -101,6 +101,35 @@ const ATTR_CMN_ERROR: u32 = 0x2000_0000;
 const MAX_ENTRY_NAME_BYTES: usize = 3 * 255 + 1;
 
 #[cfg(target_os="macos")]
+fn attr_reference_range(
+ record_len: usize,
+ reference_offset: usize,
+ reference: libc::attrreference_t,
+ minimum_payload_len: usize,
+ maximum_payload_len: usize,
+) -> Result<std::ops::Range<usize>, MacOsSnapshotAdapterError> {
+ let reference_end = reference_offset
+  .checked_add(std::mem::size_of::<libc::attrreference_t>())
+  .filter(|end| *end <= record_len)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ let payload_start = (reference_offset as isize)
+  .checked_add(reference.attr_dataoffset as isize)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ let payload_start = usize::try_from(payload_start)
+  .map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
+ let payload_len = reference.attr_length as usize;
+ let payload_end = payload_start.checked_add(payload_len)
+  .filter(|end| *end <= record_len)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ if payload_start < reference_end
+    || payload_len < minimum_payload_len
+    || payload_len > maximum_payload_len {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok(payload_start..payload_end)
+}
+
+#[cfg(target_os="macos")]
 fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
  use std::os::fd::AsRawFd;
  use std::ffi::OsString;
@@ -191,15 +220,8 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
    let name_ref = unsafe {
     std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
    };
-   let name_start = (offset as isize)
-    .checked_add(name_ref.attr_dataoffset as isize)
-    .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
-   let name_len = name_ref.attr_length as usize;
-   if name_start < 0 || name_len < 1 || name_len > 256 ||
-      (name_start as usize).checked_add(name_len).filter(|end| *end <= record_len).is_none() {
-    return Err(MacOsSnapshotAdapterError::InvalidRoot);
-   }
-   let name_bytes = &record[name_start as usize..name_start as usize + name_len];
+   let name_range = attr_reference_range(record_len, offset, name_ref, 1, 256)?;
+   let name_bytes = &record[name_range];
    if name_bytes.last() != Some(&0) || name_bytes[..name_len - 1].contains(&0) {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
    }
@@ -216,15 +238,10 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
     let path_ref = unsafe {
      std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
     };
-    let path_start = (offset as isize)
-     .checked_add(path_ref.attr_dataoffset as isize)
-     .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
-    let path_len = path_ref.attr_length as usize;
-    if path_start < 0 || path_len < 2 || path_len > libc::PATH_MAX as usize ||
-       (path_start as usize).checked_add(path_len).filter(|end| *end <= record_len).is_none() {
-     return Err(MacOsSnapshotAdapterError::InvalidRoot);
-    }
-    let path_bytes = &record[path_start as usize..path_start as usize + path_len];
+    let path_range = attr_reference_range(
+     record_len, offset, path_ref, 2, libc::PATH_MAX as usize
+    )?;
+    let path_bytes = &record[path_range];
     if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
      return Err(MacOsSnapshotAdapterError::InvalidRoot);
     }
@@ -500,6 +517,29 @@ mod tests {
    preflight_entry_path(&root,"usr").unwrap(),
    PathBuf::from("/usr")
   );
+ }
+
+ #[test]
+ fn bulk_attrreference_ranges_reject_overlaps_and_out_of_bounds_payloads() {
+  let valid = libc::attrreference_t { attr_dataoffset: 8, attr_length: 4 };
+  assert_eq!(
+   attr_reference_range(64, 24, valid, 2, 32).unwrap(),
+   32..36
+  );
+
+  for malformed in [
+   libc::attrreference_t { attr_dataoffset: -8, attr_length: 4 },
+   libc::attrreference_t { attr_dataoffset: 0, attr_length: 4 },
+   libc::attrreference_t { attr_dataoffset: i32::MAX, attr_length: 4 },
+   libc::attrreference_t { attr_dataoffset: 8, attr_length: 0 },
+   libc::attrreference_t { attr_dataoffset: 8, attr_length: 33 },
+  ] {
+   assert!(attr_reference_range(64, 24, malformed, 1, 32).is_err());
+  }
+
+  assert!(attr_reference_range(
+   32, 28, libc::attrreference_t { attr_dataoffset: 8, attr_length: 4 }, 1, 32
+  ).is_err());
  }
 
  #[test]
