@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "core/loco-core/**"
+      - "scripts/macos-*.c"
       - ".github/workflows/rust-core-tests.yml"
   push:
     branches:
