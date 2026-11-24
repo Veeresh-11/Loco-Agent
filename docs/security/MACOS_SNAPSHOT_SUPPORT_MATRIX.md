@@ -6,8 +6,8 @@
 
 | Dimension | Evidence | Current status |
 |---|---|---|
-| OS version | macOS 26.7.2, build 25G332 | Tested |
-| Architecture | arm64 hosted runner | Tested; Intel CI leg added separately and pending |
+| OS version | macOS 26.7.2 (arm64, build 25G332); macOS 26.6.1 (Intel, build 25G76) | Native probes and adapter CI passed on both runners |
+| Architecture | arm64 and x86_64 hosted runners | Both CI legs passed; record each OS build separately |
 | System/Data volume group | System and Data are separate APFS volumes with distinct descriptor-derived `f_fsid` values | Tested |
 | `st_dev` behavior | System and Data returned the same `st_dev` value on this runner | Tested; do not use as the only volume boundary |
 | `f_fsid` behavior | `fstatfs` on retained/opened descriptors distinguished System and Data | Tested |
@@ -25,9 +25,11 @@ Exact-head evidence for the opened-firmlink identity regression:
 
 | Dimension | Status |
 |---|---|
-| Earlier macOS releases (including 15.x, 14.x, 13.x, 12.x, 11.x, 10.15) | Unverified; no minimum supported version is declared |
+| macOS 15 arm64 and Intel | CI legs added using `macos-15` and `macos-15-intel`; unverified until exact-head CI passes |
+| Earlier macOS releases (14.x and older) | Unverified; no minimum supported version is declared |
 | Future macOS releases | Unverified until CI evidence is added |
-| Intel/x86_64 macOS | CI coverage added using the explicit `macos-26-intel` label; unverified until exact-head CI passes |
+| Intel/x86_64 macOS 26 | `macos-26-intel` native probes and adapter CI passed on macOS 26.6.1 (build 25G76) |
+| Intel/x86_64 macOS 15 | CI coverage added using `macos-15-intel`; unverified until exact-head CI passes |
 | APFS configurations outside the hosted System/Data volume group | Unverified |
 | APFS snapshots, sealed-system variants, external APFS volumes, and unusual volume-group layouts | Unverified beyond the explicit nested-APFS mount rejection test |
 | HFS+, exFAT, network filesystems, removable non-APFS filesystems | Not supported by this adapter's current APFS admission check; fail closed |
@@ -48,7 +50,7 @@ Apple's public design describes firmlinks as System-to-Data mappings within a vo
 Until the unverified rows are tested and independently reviewed:
 
 1. Do not publish a minimum macOS version based solely on header presence or a successful capability probe.
-2. Treat only macOS 26.7.2 arm64 as empirically validated until the newly added macOS 26 Intel CI leg passes and records its OS build and `x86_64` architecture.
+2. Treat macOS 26 arm64 (26.7.2, build 25G332) and Intel (26.6.1, build 25G76) as validated only for the configurations exercised by this CI. Do not infer macOS 15 support until both new macOS 15 legs pass.
 3. Keep all other macOS versions/architectures and non-APFS filesystems unsupported or unverified; fail closed when the runtime contract cannot be met.
 4. Require exact-head CI on every newly claimed OS/architecture/filesystem combination.
 5. Require independent security review before enabling the workspace-read capability in a production release.
