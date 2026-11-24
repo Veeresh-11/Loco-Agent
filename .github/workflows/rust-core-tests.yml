@@ -32,6 +32,37 @@ jobs:
         uses: actions/checkout@v4
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Record Linux runner and workspace filesystem
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/os-release
+          uname -a
+          findmnt -T "$RUNNER_TEMP" -o TARGET,SOURCE,FSTYPE,OPTIONS
+      - name: Record macOS runner and workspace filesystem
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -a
+          df -h "$RUNNER_TEMP"
+          diskutil info "$RUNNER_TEMP" | grep -E 'Device Node|File System Personality|APFS Container Reference|Volume Name' || true
+      - name: Record Windows runner and workspace filesystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture | Format-List
+          $root = [System.IO.Path]::GetPathRoot($env:RUNNER_TEMP)
+          $drive = [System.IO.DriveInfo]::new($root)
+          [PSCustomObject]@{
+            Root = $root
+            DriveType = $drive.DriveType
+            FileSystem = $drive.DriveFormat
+            VolumeLabel = $drive.VolumeLabel
+          } | Format-List
       - name: Prepare real Linux bind mount fixture
         if: runner.os == 'Linux'
         shell: bash
