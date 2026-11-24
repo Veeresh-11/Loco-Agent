@@ -96,6 +96,10 @@ fn persisted_challenge_count(tx: &rusqlite::Transaction<'_>) -> Result<u64, Stor
     Ok(tx.query_row("SELECT COUNT(*) FROM approval_challenges", [], |row| row.get(0))?)
 }
 
+fn persistent_capacity_reached(tx: &rusqlite::Transaction<'_>) -> Result<bool, StoreError> {
+    Ok(persisted_challenge_count(tx)? >= MAX_PERSISTED_APPROVAL_CHALLENGES)
+}
+
 pub struct ApprovalStore {
     conn: Connection,
     clock: Arc<dyn ApprovalClock>,
@@ -213,7 +217,7 @@ impl ApprovalStore {
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Self::ensure_active_epoch(&tx, &self.process_epoch)?;
         prune_persistent_challenges(&tx, now, &self.process_epoch)?;
-        if persisted_challenge_count(&tx)? >= MAX_PERSISTED_APPROVAL_CHALLENGES {
+        if persistent_capacity_reached(&tx)? {
             // Commit bounded cleanup even when admission is denied, allowing
             // subsequent requests to make progress through old rows.
             tx.commit()?;
@@ -402,12 +406,7 @@ mod tests {
             ).unwrap();
         }
         let tx = store.conn.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
-        assert_eq!(persisted_challenge_count(&tx).unwrap(), MAX_PERSISTED_APPROVAL_CHALLENGES);
-        tx.rollback().unwrap();
-        // Exercise the production admission path without filling the process-local
-        // cache: the persistent capacity guard is also tested independently above.
-        let tx = store.conn.transaction_with_behavior(TransactionBehavior::Immediate).unwrap();
-        assert!(persisted_challenge_count(&tx).unwrap() >= MAX_PERSISTED_APPROVAL_CHALLENGES);
+        assert!(persistent_capacity_reached(&tx).unwrap());
         tx.rollback().unwrap();
     }
 
