@@ -83,10 +83,10 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
  let path_bytes = &buffer[path_start..path_end];
- if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
+ if path_bytes.last() != Some(&0) || path_bytes[..path_bytes.len() - 1].contains(&0) {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
- let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
+ let path = PathBuf::from(OsString::from_vec(path_bytes[..path_bytes.len() - 1].to_vec()));
  if !path.is_absolute() || path.components().any(|part|
   matches!(part, std::path::Component::CurDir | std::path::Component::ParentDir)
  ) {
@@ -222,12 +222,12 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
    };
    let name_range = attr_reference_range(record_len, offset, name_ref, 1, 256)?;
    let name_bytes = &record[name_range];
-   if name_bytes.last() != Some(&0) || name_bytes[..name_len - 1].contains(&0) {
+   if name_bytes.last() != Some(&0) || name_bytes[..name_bytes.len() - 1].contains(&0) {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
    }
    offset += reference_size;
 
-   if &name_bytes[..name_len - 1] == wanted {
+   if &name_bytes[..name_bytes.len() - 1] == wanted {
     if entry_error != 0
        || returned.commonattr & libc::ATTR_CMN_FLAGS == 0
        || returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0
@@ -242,10 +242,10 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
      record_len, offset, path_ref, 2, libc::PATH_MAX as usize
     )?;
     let path_bytes = &record[path_range];
-    if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
+    if path_bytes.last() != Some(&0) || path_bytes[..path_bytes.len() - 1].contains(&0) {
      return Err(MacOsSnapshotAdapterError::InvalidRoot);
     }
-    let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
+    let path = PathBuf::from(OsString::from_vec(path_bytes[..path_bytes.len() - 1].to_vec()));
     if !path.is_absolute() {
      return Err(MacOsSnapshotAdapterError::InvalidRoot);
     }
