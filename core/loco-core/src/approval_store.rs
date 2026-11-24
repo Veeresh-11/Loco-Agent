@@ -454,7 +454,7 @@ mod tests {
         clock.set(110);
         clock.advance_monotonic(10_000);
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
@@ -558,7 +558,7 @@ mod tests {
         let challenge = issue(&mut store, &action, 5).unwrap();
         clock.advance_monotonic(5_000);
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
         assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
@@ -581,8 +581,8 @@ mod tests {
     fn issued_challenges_have_distinct_random_ids() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        let first = store.issue(&action, 30).unwrap();
-        let second = store.issue(&action, 30).unwrap();
+        let first = issue(&mut store,&action, 30).unwrap();
+        let second = issue(&mut store,&action, 30).unwrap();
         assert_ne!(first.challenge_id, second.challenge_id);
     }
 
@@ -627,10 +627,10 @@ mod tests {
     fn clock_failure_fails_closed_without_consuming() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 30).unwrap();
+        let challenge = issue(&mut store,&action, 30).unwrap();
         clock.fail_with(ApprovalClockError::ClockMovedBackward);
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::Clock(ApprovalClockError::ClockMovedBackward))
         ));
         assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
