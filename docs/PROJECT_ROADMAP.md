@@ -56,6 +56,9 @@ Relevant work: PRs #44–#72, especially #49–#61 and #62–#72.
 
 ### Implemented controls and hosted native evidence (2026-11-24)
 
+- **macOS firmlink follow-up (PR #104):** bulk `getattrlistbulk` preflight is implemented on top of PR #103. Exact-head Rust matrix #45343708167 passed Ubuntu, Windows, and macOS; Contract Validation #45343706476 passed. macOS exercised the four mapped-entry checks, ordinary controls, symlink alias behavior, concurrent independent directory offsets, and nested APFS fixture. The implementation remains draft: the runner's `ATTR_CMN_FLAGS` values still conflict with XNU's documented `SF_FIRMLINK` entry behavior, and the new bulk-record parser still needs isolated malformed-record tests. Issue #74 remains open; no production acceptance or merge claim is made.
+
+
 - Linux: PR #62 requires exact captured byte length; PR #63 applies `RESOLVE_NO_XDEV` to descendant `openat2` resolution while allowing the workspace root itself to reside on another mount. PR #71's same-device bind-mount rejection passed on Ubuntu (Rust #45187459253, contract #45187459247). PR #72's distinct ext4 loop-mount rejection passed (Rust #45188239997, contract #45188239539).
 - Windows: PR #64 adds x64 ABI layout assertions and explicitly excludes x86/ARM64. PR #65's incompatible pre-existing writer-handle test passed in Windows run #45181874421. PR #66 uses `FileIdInfo` (64-bit volume serial plus 128-bit file ID) with no legacy fallback; its Windows test passed in #45182566472. PR #67 admits NTFS only; #45182767243 passed. PR #70's real secondary NTFS VHDX mountpoint test passed in #45186946850 and reran in #45188239997.
 - macOS: PR #68 admits APFS only through `fstatfs`; PR #69's nested APFS sparse-image mount test passed in #45185300723 and reran in #45188239997.
