@@ -162,24 +162,25 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
  };
  if returned.commonattr & libc::ATTR_CMN_NAME == 0
   || returned.commonattr & libc::ATTR_CMN_FLAGS == 0
-  || returned.commonattr & ATTR_CMN_ERROR == 0
   || returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0
  {
   return Err(MacOsSnapshotAdapterError::InvalidRoot);
  }
 
  let mut offset = header_size;
- let error_end = offset.checked_add(4).ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
- if error_end > record_len {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ if returned.commonattr & ATTR_CMN_ERROR != 0 {
+  let error_end = offset.checked_add(4).ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+  if error_end > record_len {
+   return Err(MacOsSnapshotAdapterError::InvalidRoot);
+  }
+  let entry_error = u32::from_ne_bytes(
+   record[offset..error_end].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
+  );
+  if entry_error != 0 {
+   return Err(MacOsSnapshotAdapterError::InvalidRoot);
+  }
+  offset = error_end;
  }
- let entry_error = u32::from_ne_bytes(
-  record[offset..error_end].try_into().map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?
- );
- if entry_error != 0 {
-  return Err(MacOsSnapshotAdapterError::InvalidRoot);
- }
- offset = error_end;
 
  let reference_size = std::mem::size_of::<libc::attrreference_t>();
  let name_ref_end = offset.checked_add(reference_size).ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
