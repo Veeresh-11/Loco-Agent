@@ -6,7 +6,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use crate::approval_binding::{action_digest, verify_approval_binding, ApprovalChallenge, ApprovalError};
@@ -19,6 +19,8 @@ pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
 pub enum StoreError {
     Sql(rusqlite::Error),
     Entropy(getrandom::Error),
+    RuntimeEpochUnavailable,
+    StaleRuntime,
     InvalidChallenge,
     Binding(ApprovalError),
     Clock(ApprovalClockError),
@@ -47,9 +49,19 @@ fn is_valid_challenge_id(challenge_id: &str) -> bool {
         && challenge_id.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+static PROCESS_EPOCH: OnceLock<Result<String, String>> = OnceLock::new();
+
+fn process_epoch() -> Result<&'static str, StoreError> {
+    match PROCESS_EPOCH.get_or_init(|| generate_challenge_id().map_err(|error| error.to_string())) {
+        Ok(epoch) => Ok(epoch.as_str()),
+        Err(_) => Err(StoreError::RuntimeEpochUnavailable),
+    }
+}
+
 pub struct ApprovalStore {
     conn: Connection,
     clock: Arc<dyn ApprovalClock>,
+    process_epoch: String,
 }
 
 impl ApprovalStore {
@@ -64,6 +76,14 @@ impl ApprovalStore {
         conn: Connection,
         clock: Arc<dyn ApprovalClock>,
     ) -> Result<Self, StoreError> {
+        Self::initialize_with_epoch(conn, clock, process_epoch()?.to_string())
+    }
+
+    fn initialize_with_epoch(
+        conn: Connection,
+        clock: Arc<dyn ApprovalClock>,
+        process_epoch: String,
+    ) -> Result<Self, StoreError> {
         conn.busy_timeout(Duration::from_secs(5))?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -72,12 +92,54 @@ impl ApprovalStore {
                 challenge_id TEXT PRIMARY KEY,
                 action_digest TEXT NOT NULL,
                 expires_at INTEGER NOT NULL,
-                consumed_at INTEGER NULL
+                consumed_at INTEGER NULL,
+                process_epoch TEXT NOT NULL DEFAULT ''
              );
              CREATE INDEX IF NOT EXISTS approval_challenges_expiry
-                ON approval_challenges(expires_at);"
+                ON approval_challenges(expires_at);
+             CREATE TABLE IF NOT EXISTS approval_runtime (
+                singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                process_epoch TEXT NOT NULL
+             );"
         )?;
-        Ok(Self { conn, clock })
+
+        // Migrate stores created before process epochs were introduced. Existing
+        // rows receive an empty epoch and therefore become unusable (fail closed).
+        let has_epoch: bool = {
+            let mut statement = conn.prepare("PRAGMA table_info(approval_challenges)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            columns.filter_map(Result::ok).any(|name| name == "process_epoch")
+        };
+        if !has_epoch {
+            conn.execute(
+                "ALTER TABLE approval_challenges ADD COLUMN process_epoch TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+
+        // A newly started authority rotates the database's active epoch. Any
+        // challenge issued by a previous process is now invalid, even if the
+        // wall clock was rolled backward while the application was stopped.
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO approval_runtime(singleton_id, process_epoch) VALUES (1, ?1)
+             ON CONFLICT(singleton_id) DO UPDATE SET process_epoch=excluded.process_epoch",
+            params![process_epoch],
+        )?;
+        tx.commit()?;
+        Ok(Self { conn, clock, process_epoch })
+    }
+
+    fn ensure_active_epoch(&self, tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+        let active: String = tx.query_row(
+            "SELECT process_epoch FROM approval_runtime WHERE singleton_id=1",
+            [],
+            |row| row.get(0),
+        )?;
+        if active != self.process_epoch {
+            return Err(StoreError::StaleRuntime);
+        }
+        Ok(())
     }
 
     /// Issue a challenge with a cryptographically random 256-bit identifier.
@@ -102,11 +164,14 @@ impl ApprovalStore {
             action_digest: digest,
             expires_at_unix,
         };
-        self.conn.execute(
-            "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at)
-             VALUES (?1, ?2, ?3, NULL)",
-            params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64],
+        let tx = self.conn.unchecked_transaction()?;
+        self.ensure_active_epoch(&tx)?;
+        tx.execute(
+            "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
+             VALUES (?1, ?2, ?3, NULL, ?4)",
+            params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
+        tx.commit()?;
         Ok(challenge)
     }
 
@@ -128,12 +193,14 @@ impl ApprovalStore {
         // Acquire the write reservation before reading challenge state. This
         // serializes concurrent consumers across independent SQLite connections.
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let record: Option<(String, u64, Option<u64>)> = tx.query_row(
-            "SELECT action_digest, expires_at, consumed_at FROM approval_challenges WHERE challenge_id=?1",
+        self.ensure_active_epoch(&tx)?;
+        let record: Option<(String, u64, Option<u64>, String)> = tx.query_row(
+            "SELECT action_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
             params![challenge_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         ).optional()?;
-        let (digest, expires_at, consumed_at) = record.ok_or(StoreError::NotFound)?;
+        let (digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
+        if challenge_epoch != self.process_epoch { return Err(StoreError::AlreadyConsumedOrExpired); }
         if consumed_at.is_some() || now_unix >= expires_at {
             return Err(StoreError::AlreadyConsumedOrExpired);
         }
