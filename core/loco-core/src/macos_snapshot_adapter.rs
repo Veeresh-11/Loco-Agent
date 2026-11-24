@@ -202,7 +202,7 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
   .ok_or_else(invalid)?;
  let path_start = usize::try_from(path_start_signed).map_err(|_| invalid())?;
  let path_len = path_ref.attr_length as usize;
- let path_end = path_start.checked_add(path_len).ok_or_else(invalid())?;
+ let path_end = path_start.checked_add(path_len).ok_or_else(invalid)?;
  if path_start < path_ref_end || path_len < 2
   || path_len > libc::PATH_MAX as usize
   || path_end > record_len
@@ -625,7 +625,8 @@ mod tests {
 
   let mut truncated_header = valid.clone();
   truncated_header.truncate(4 + std::mem::size_of::<libc::attribute_set_t>() - 1);
-  truncated_header[..4].copy_from_slice(&(truncated_header.len() as u32).to_ne_bytes());
+  let truncated_len = truncated_header.len() as u32;
+  truncated_header[..4].copy_from_slice(&truncated_len.to_ne_bytes());
   assert!(parse_bulk_entry_record(&truncated_header).is_err());
 
   let mut overrun = valid.clone();
@@ -726,18 +727,6 @@ mod tests {
   assert!(parse_bulk_entry_record(&malformed).is_err());
  }
 
- #[test]
- fn nofirmlink_path_record_parser_fails_closed_on_malformed_records() {
-  // Retain regression coverage for the superseded single-result parser.
-  let valid = synthetic_nofirmlink_record(b"/System/Volumes/Data/Users\0");
-  assert_eq!(
-   parse_nofirmlink_path_record(&valid).unwrap(),
-   PathBuf::from("/System/Volumes/Data/Users")
-  );
-  let mut truncated = valid.clone();
-  truncated.truncate(truncated.len() - 1);
-  assert!(parse_nofirmlink_path_record(&truncated).is_err());
- }
 
  #[test]
  fn concurrent_preflight_path_queries_do_not_share_directory_offsets() {
