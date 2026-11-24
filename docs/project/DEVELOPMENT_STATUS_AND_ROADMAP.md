@@ -347,3 +347,37 @@ PR #71 implementation head `dc5f51419261011d4971076693457bcec7562e17` passed Rus
 PR #72 implementation head `b6d17385bedc767dd940f5a4347b62151a29f7b9` passed Rust Core Tests run `45187940996` on Ubuntu, Windows, and macOS and Contract Validation run `45187941018`. The Ubuntu runner created both a same-device bind mount and a distinct-device ext4 loop mount. Both dedicated boundary tests passed and both fixtures were detached. The matrix also reran the Windows NTFS and macOS APFS mount tests successfully.
 
 These results establish hosted-runner coverage for the specific NTFS, APFS, Linux bind-mount, and Linux ext4 loop-mount fixtures. They do not generalize to every filesystem, OS release, mount namespace, storage driver, firmlink, or network/removable volume.
+
+
+---
+
+## Native filesystem API review — evidence reconciliation (2026-11-24)
+
+The PR #61 source-level review and its follow-up implementation stack (#62–#72) now have hosted CI evidence for the principal mount, identity, sharing, and filesystem-admission controls. This is still a prototype support matrix, not a general guarantee across every OS/filesystem release.
+
+### Verified controls
+
+- **Linux:** PR #62 enforces exact captured-byte length; PR #63 uses `openat2(2)` with `RESOLVE_NO_XDEV` for descendants while allowing the workspace root itself to reside on a separate mount. PR #71's Ubuntu runner created a same-device bind mount and the explicit rejection test passed (Rust run #45187459253, contract #45187459247). The current PR #72 head created a distinct ext4 loop mount; both the bind and distinct-device mount rejection tests passed (Rust run #45188239997, contract #45188239539).
+- **Windows:** PR #64 gates the manually declared native ABI to x64 and adds layout assertions. PR #65's pre-existing incompatible writer-handle test passed on Windows in Rust run #45181874421. PR #66 uses `FileIdInfo` (64-bit volume serial plus 128-bit file ID) without legacy fallback; its Windows stability/distinct-file test passed in run #45182566472. PR #67 admits NTFS only; its exact-head matrix passed in run #45182767243. PR #70's secondary NTFS VHDX volume mountpoint test passed in run #45186946850 and reran successfully in current PR #72's matrix #45188239997.
+- **macOS:** PR #68 admits APFS only using `fstatfs`; PR #69's sparse-image nested APFS mount test passed in run #45185300723 and reran successfully in current PR #72's matrix #45188239997.
+- **Windows reparse coverage:** PR #58's intermediate-directory and final-file symlink tests were executed and passed in the PR #65 Windows matrix. The stack also retains junction/reparse-point checks and post-open verification.
+- **Exact current stack head:** PR #72 head `70b592b976def580fdcafcb0ff0d097a6311d2a9` passed all three Rust jobs in run #45188239997 and Contract Validation in run #45188239539. The Windows secondary NTFS, Linux bind/ext4, and macOS nested APFS fixtures were explicitly prepared, asserted, and cleaned up in their respective jobs.
+
+### Prototype support baseline
+
+| Platform | Admitted baseline | Enforced descendant policy | Explicitly outside current evidence |
+|---|---|---|---|
+| Linux | Linux 5.6+ with `openat2`; ext4 fixture tested on hosted Ubuntu | Reject every descendant mount crossing, including same-device bind mounts, via `RESOLVE_NO_XDEV`; no pathname fallback | Other kernel versions, filesystems, mount namespaces and unusual storage stacks |
+| macOS | APFS roots only | Component-wise `openat(O_NOFOLLOW)` and descendant device-identity checks | HFS+, network/removable filesystems, untested APFS configurations and firmlinks as an entry-level signal (issue #74) |
+| Windows | x64; Windows 8 / Server 2012 or later for `FileIdInfo`; canonical fixed NTFS volume-GUID roots | `NtCreateFile` relative to retained handles, `OBJ_DONT_REPARSE`, post-open reparse checks, strict sharing and handle-derived identity | x86/ARM64, ReFS, FAT/exFAT, network/removable filesystems and untested filter-driver behavior |
+
+### Remaining priority-2 work
+
+1. Independent Windows SDK/FFI review, including exact structure layouts, access/share/create flags and NTSTATUS interpretation.
+2. Pin explicit OS/kernel build versions and test a declared support matrix rather than relying only on moving GitHub-hosted runner labels.
+3. Decide whether any additional Linux filesystems or mount namespaces should be supported; do not infer broad support from one ext4 fixture.
+4. Keep unsupported filesystems and Windows architectures fail-closed and explicit.
+5. Keep macOS firmlink entry detection tracked separately in issue #74; the APFS nested-volume test validates a different-device mount boundary and does not validate same-volume firmlinks.
+6. Independent security review before changing the draft/merge state of the snapshot stack.
+
+**Status:** priority 2 is materially advanced by implementation and native hosted-runner tests, but remains partially complete pending the SDK/version matrix and independent review. The exact-head evidence above must not be described as universal filesystem certification.
