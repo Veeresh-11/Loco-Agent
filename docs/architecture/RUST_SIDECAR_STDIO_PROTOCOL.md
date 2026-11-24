@@ -1,6 +1,6 @@
 # Rust Sidecar stdio Protocol
 
-**Status:** Proposed v1 contract; implementation not yet present  
+**Status:** V1 contract plus Rust child-side prototype; TypeScript parent integration pending  
 **Date:** 2026-11-24  
 **Dependency:** PR #91 local storage and IPC security boundary
 
@@ -84,3 +84,20 @@ The machine-readable contract is `contracts/sidecar-stdio.schema.json`.
 6. Keep privileged operations disabled until authenticated approval, IPC threat review, controlled-write implementation, and end-to-end security review are complete.
 
 This contract deliberately exposes proposal evaluation only. It is not a stable public API or a production authorization boundary.
+
+
+## Rust child-side implementation checkpoint
+
+The Rust binary target `loco-authority` now implements the child side of this v1 protocol:
+
+- Performs the initial hello handshake and advertises only `proposal_evaluation`.
+- Accepts sequential evaluate requests and returns the existing Rust `SecurityDecision` DTO, correlated by requestId.
+- Accepts graceful shutdown and acknowledges before exiting.
+- Reads at most 12 MiB plus one byte per frame, rejects unterminated/oversized/blank/non-UTF-8/invalid JSON frames, and accepts CRLF.
+- Writes protocol messages only to stdout; diagnostics go to stderr.
+- Rejects duplicate/invalid request IDs, unknown message fields, unsupported protocol versions, and evaluate-before-handshake. The proposal DTO now rejects unknown top-level/action fields during deserialization.
+- Caps process lifetime at 4,096 request identifiers/requests to bound replay-tracking memory.
+
+Rust integration tests cover handshake/evaluate/shutdown, correlation, evaluate-before-handshake, unknown proposal fields, duplicate IDs, and oversized frames.
+
+The child process cannot enforce a handshake timeout while blocked on stdin; the parent must enforce handshake and request deadlines and terminate/reap the child. EOF exits cleanly. Malformed frames and fatal protocol violations exit nonzero with stderr-only diagnostics. The TypeScript process launcher, packaging of per-platform binaries, parent-side framing, restart budget, and end-to-end cancellation/crash tests are not implemented yet. Therefore this is not yet an integrated sidecar service and cannot be used to authorize privileged operations.
