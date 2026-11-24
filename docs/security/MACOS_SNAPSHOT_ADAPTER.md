@@ -261,10 +261,11 @@ On macOS 26.7.2 (build 25G332, arm64), both `getattrlistbulk` and `getattrlistat
 | `/Users` | `/System/Volumes/Data/Users` |
 | `/Applications` | `/System/Volumes/Data/Applications` |
 | `/Library` | `/System/Volumes/Data/Library` |
+| `/private` | `/System/Volumes/Data/private` |
 | `/System` | `/System` |
 | `/usr` | `/usr` |
 
-The probe asserts all five values, so it distinguishes the three actual firmlink mappings from two ordinary directory controls. The `SF_FIRMLINK` bit remains absent; this path attribute is a separate native signal and does not treat `SF_NOUNLINK` as equivalent.
+The probe asserts all six values, so it distinguishes the four actual firmlink mappings from two ordinary directory controls. The `SF_FIRMLINK` bit remains absent; this path attribute is a separate native signal and does not treat `SF_NOUNLINK` as equivalent.
 
 XNU's `attrlist_build_path` routes this attribute through `build_path(..., BUILDPATH_NO_FIRMLINK)`. The vnode path builder explicitly avoids firmlink redirection while reconstructing the path:
 - https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_attrlist.c
