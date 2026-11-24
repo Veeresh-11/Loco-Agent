@@ -314,6 +314,9 @@ static int has_suffix(const char *value, const char *suffix) {
            strcmp(value + value_len - suffix_len, suffix) == 0;
 }
 
+static int same_fsid(fsid_t left, fsid_t right);
+static void print_fsid(const char *label, fsid_t value);
+
 static void print_path_api_flags(int rootfd, const char *path) {
     // Compare path-based stat flags with getattrlist results. Firmlinks are not
     // POSIX symlinks, so AT_SYMLINK_NOFOLLOW is diagnostic only, not a boundary.
