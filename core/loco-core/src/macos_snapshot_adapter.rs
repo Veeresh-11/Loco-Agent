@@ -534,7 +534,8 @@ mod tests {
   let path_ref_offset = flags_offset + 4;
   let path_ref_end = path_ref_offset + std::mem::size_of::<libc::attrreference_t>();
   let name_offset = path_ref_end;
-  let path_offset = name_offset + name.len();
+  let unaligned_path_offset = name_offset + name.len();
+  let path_offset = (unaligned_path_offset + 3) & !3;
   let record_len = path_offset + path.len();
   let mut record = vec![0u8; record_len];
   record[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
