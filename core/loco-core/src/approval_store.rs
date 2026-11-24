@@ -7,7 +7,7 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::approval_binding::{action_digest, verify_approval_binding, ApprovalChallenge, ApprovalError};
@@ -51,6 +51,7 @@ fn is_valid_challenge_id(challenge_id: &str) -> bool {
 }
 
 static PROCESS_EPOCH: OnceLock<Result<String, String>> = OnceLock::new();
+static MONOTONIC_DEADLINES: OnceLock<Mutex<HashMap<String, Duration>>> = OnceLock::new();
 
 fn process_epoch() -> Result<&'static str, StoreError> {
     match PROCESS_EPOCH.get_or_init(|| generate_challenge_id().map_err(|error| error.to_string())) {
@@ -63,7 +64,6 @@ pub struct ApprovalStore {
     conn: Connection,
     clock: Arc<dyn ApprovalClock>,
     process_epoch: String,
-    monotonic_deadlines: HashMap<String, Duration>,
 }
 
 impl ApprovalStore {
@@ -130,7 +130,7 @@ impl ApprovalStore {
             params![process_epoch],
         )?;
         tx.commit()?;
-        Ok(Self { conn, clock, process_epoch, monotonic_deadlines: HashMap::new() })
+        Ok(Self { conn, clock, process_epoch })
     }
 
     fn ensure_active_epoch(tx: &rusqlite::Transaction<'_>, expected_epoch: &str) -> Result<(), StoreError> {
@@ -177,7 +177,9 @@ impl ApprovalStore {
             params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         tx.commit()?;
-        self.monotonic_deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
+        MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .insert(challenge.challenge_id.clone(), monotonic_deadline);
         Ok(challenge)
     }
 
@@ -193,7 +195,9 @@ impl ApprovalStore {
         }
         let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
-        let monotonic_deadline = self.monotonic_deadlines.get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;
+        let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;
         if monotonic_now >= monotonic_deadline {
             return Err(StoreError::AlreadyConsumedOrExpired);
         }
@@ -228,7 +232,9 @@ impl ApprovalStore {
         )?;
         if changed != 1 { return Err(StoreError::AlreadyConsumedOrExpired); }
         tx.commit()?;
-        self.monotonic_deadlines.remove(challenge_id);
+        MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
+            .remove(challenge_id);
         Ok(())
     }
 
