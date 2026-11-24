@@ -170,7 +170,11 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
   .ok_or_else(invalid)?;
  let name_start = usize::try_from(name_start_signed).map_err(|_| invalid())?;
  let name_len = name_ref.attr_length as usize;
- let minimum_name_start = name_ref_end;
+ // All fixed fields (name ref, flags, and extended-path ref) precede the
+ // variable payload area. Do not let the name alias either later field.
+ let minimum_name_start = name_ref_end
+  .checked_add(4 + reference_size)
+  .ok_or_else(invalid)?;
  let name_end = name_start.checked_add(name_len).ok_or_else(invalid)?;
  if name_start < minimum_name_start || name_len < 2 || name_len > 256
   || name_end > record_len
@@ -615,6 +619,7 @@ mod tests {
   let parsed = parse_bulk_entry_record(&record).unwrap();
   assert_eq!(parsed.name, b"Users");
   assert_eq!(parsed.flags, 0x0010_8000);
+  assert_eq!(parsed.flags & ATTR_CMN_FLAGS_SF_FIRMLINK, 0);
   assert_eq!(parsed.no_firmlink_path, PathBuf::from("/System/Volumes/Data/Users"));
  }
 
@@ -633,6 +638,29 @@ mod tests {
   let declared = (overrun.len() as u32).saturating_add(1);
   overrun[..4].copy_from_slice(&declared.to_ne_bytes());
   assert!(parse_bulk_entry_record(&overrun).is_err());
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_rejects_name_payload_overlapping_later_fields() {
+  let mut record = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
+  let header_size = 4 + std::mem::size_of::<libc::attribute_set_t>();
+  let name_ref_offset = header_size + 4;
+  let mut name_ref = unsafe {
+   std::ptr::read_unaligned(
+    record.as_ptr().add(name_ref_offset).cast::<libc::attrreference_t>()
+   )
+  };
+  // The name points into the following ATTR_CMN_FLAGS/extended-path reference
+  // bytes, which happen to look like a short NUL-terminated name.
+  name_ref.attr_dataoffset = 12;
+  name_ref.attr_length = 2;
+  unsafe {
+   std::ptr::write_unaligned(
+    record.as_mut_ptr().add(name_ref_offset).cast::<libc::attrreference_t>(),
+    name_ref,
+   );
+  }
+  assert!(parse_bulk_entry_record(&record).is_err());
  }
 
  #[test]
