@@ -90,6 +90,22 @@ Both Windows jobs passed 121 unit tests (0 failed, 1 ignored), then separately r
 
 This is evidence for the two listed hosted Windows Server builds and their NTFS fixtures only. It does not resolve the `OBJ_DONT_REPARSE` documentation mismatch, and it does not establish compatibility for other Windows builds, architectures, or filesystems.
 
+## Native Windows SDK compile-time ABI verification (2026-11-24)
+
+The source-level layout audit is now backed by a C11 compile-time probe, `scripts/windows-ffi-abi-probe.c`, which includes the installed SDK's actual `windows.h` and `winternl.h` declarations. The workflow compiles it with the x64 MSVC toolchain on both explicit Windows runner generations.
+
+The probe uses `_Static_assert` for:
+- x64 sizes, alignments, and field offsets of `UNICODE_STRING`, `OBJECT_ATTRIBUTES`, `IO_STATUS_BLOCK`, `FILETIME`, `BY_HANDLE_FILE_INFORMATION`, and `FILE_ID_INFO`;
+- `OBJ_DONT_REPARSE == 0x1000` and its inclusion in `OBJ_VALID_ATTRIBUTES`;
+- `FileIdInfo == 18`; and
+- assignment of the SDK's `NtCreateFile` declaration to the full expected `NTAPI` function-pointer signature.
+
+Rust Core Tests [run #45358148067](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45358148067) passed all nine matrix jobs. The native ABI compile step passed on:
+- Windows Server 2022 runner: Windows SDK `10.0.26100.0`, MSVC `19.44.35230.0` (VS 2022).
+- Windows Server 2025 runner: Windows SDK `10.0.26100.0`, MSVC `19.52.37029.0` (VS 18).
+
+The full Rust tests also passed on both Windows jobs. This is compile-time evidence for these two installed x64 SDK/toolchain combinations; it is not a formal Microsoft guarantee for all Windows versions or proof of runtime behavior for every filesystem/filter driver. In particular, it does not resolve the separate documentation-scope caveat for using `OBJ_DONT_REPARSE` with user-mode, handle-relative `NtCreateFile`.
+
 ## Sources
 
 - Microsoft [`UNICODE_STRING`](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_unicode_string) — field types and byte-count semantics.

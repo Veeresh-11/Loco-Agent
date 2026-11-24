@@ -5,6 +5,7 @@ on:
     paths:
       - "core/loco-core/**"
       - "scripts/macos-*.c"
+      - "scripts/windows-*.c"
       - ".github/workflows/rust-core-tests.yml"
   push:
     branches:
@@ -72,6 +73,31 @@ jobs:
             Size = $volume.Size
             AllocationUnitSize = $volume.AllocationUnitSize
           } | Format-List
+      - name: Verify Windows SDK native FFI ABI declarations
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe not found: $vswhere"
+          }
+          $vsPath = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) {
+            throw 'Visual Studio x64 C/C++ build tools were not found on the hosted runner'
+          }
+          $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) {
+            throw "vcvars64.bat not found: $vcvars"
+          }
+          $source = (Resolve-Path 'scripts/windows-ffi-abi-probe.c').Path
+          $object = Join-Path $env:RUNNER_TEMP 'windows-ffi-abi-probe.obj'
+          $command = 'call "' + $vcvars + '" >nul && echo WindowsSdkDir=!WindowsSdkDir! && echo WindowsSDKVersion=!WindowsSDKVersion! && cl.exe /Bv /nologo /W4 /WX /std:c11 /c "' + $source + '" /Fo"' + $object + '"'
+          Write-Output '=== Compile x64 Windows SDK ABI probe ==='
+          & cmd.exe /d /v:on /c $command
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows SDK ABI probe compilation failed with exit code $LASTEXITCODE"
+          }
       - name: Prepare real Linux bind mount fixture
         if: runner.os == 'Linux'
         shell: bash
