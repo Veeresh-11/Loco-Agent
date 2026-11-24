@@ -106,6 +106,25 @@ Rust Core Tests [run #45358148067](https://github.com/Veeresh-11/Loco-Agent/acti
 
 The full Rust tests also passed on both Windows jobs. This is compile-time evidence for these two installed x64 SDK/toolchain combinations; it is not a formal Microsoft guarantee for all Windows versions or proof of runtime behavior for every filesystem/filter driver. In particular, it does not resolve the separate documentation-scope caveat for using `OBJ_DONT_REPARSE` with user-mode, handle-relative `NtCreateFile`.
 
+## Native `OBJ_DONT_REPARSE` runtime status probe (2026-11-24)
+
+A test-only direct `NtCreateFile` probe now records the raw NTSTATUS for handle-relative opens with and without `OBJ_DONT_REPARSE`. The fixture uses a real NTFS junction and verifies its target is traversable through the ordinary Win32 path API before interpreting the native statuses.
+
+Rust Core Tests [run #45362986206](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45362986206) passed all nine matrix jobs; Contract Validation [run #45362986234](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45362986234) passed. The raw probe output was identical on both Windows builds:
+
+| Probe | Windows Server 2022 | Windows Server 2025 |
+|---|---:|---:|
+| Ordinary directory with `OBJ_DONT_REPARSE` | `0x00000000` (success) | `0x00000000` (success) |
+| Ordinary file with `OBJ_DONT_REPARSE` | `0x00000000` (success) | `0x00000000` (success) |
+| Final junction, no flag | `0x00000000` (success) | `0x00000000` (success) |
+| Final junction, `OBJ_DONT_REPARSE` | `0xC000050B` | `0xC000050B` |
+| Intermediate junction, no flag | `0x00000000` (success) | `0x00000000` (success) |
+| Intermediate junction, `OBJ_DONT_REPARSE` | `0xC000050B` | `0xC000050B` |
+
+The flagged denial value `0xC000050B` equals `STATUS_REPARSE_POINT_ENCOUNTERED`. The Win32 path control independently read the outside sentinel through the junction, confirming that the junction fixture itself was active. The raw native baseline also succeeded for both final and intermediate junction paths without the flag.
+
+This is direct runtime evidence for the exact user-mode, handle-relative `NtCreateFile` call shape on Windows Server 2022 build 20348 and Windows Server 2025 build 26100, both x64/NTFS. It materially narrows the earlier uncertainty about whether the flag is honored by this call shape on these builds. It still does not create a universal or version-stable Microsoft API contract, nor does it cover other Windows releases, architectures, filesystems, or filter drivers. Retain the documentation caveat and fail-closed production behavior pending broader authoritative clarification and independent security review.
+
 ## Sources
 
 - Microsoft [`UNICODE_STRING`](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_unicode_string) — field types and byte-count semantics.
