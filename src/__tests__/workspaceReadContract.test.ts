@@ -28,8 +28,11 @@ describe('workspace read request v1 contract', () => {
 
   test('rejects unknown or missing fields and unsupported versions', () => {
     expect(validateWorkspaceReadRequest({ ...valid, execute: true })).toBe(false);
-    const { workspaceId: _workspaceId, ...missing } = valid;
-    expect(validateWorkspaceReadRequest(missing)).toBe(false);
+    expect(validateWorkspaceReadRequest({
+      contractVersion: valid.contractVersion,
+      relativePath: valid.relativePath,
+      maxBytes: valid.maxBytes
+    })).toBe(false);
     expect(validateWorkspaceReadRequest({ ...valid, contractVersion: '2.0' })).toBe(false);
   });
 
