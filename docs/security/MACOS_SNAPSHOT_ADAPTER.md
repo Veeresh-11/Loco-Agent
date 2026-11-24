@@ -133,3 +133,26 @@ This source trace supports the observed behavior: the command asks for a name-ca
 A public WebKit WebProcess sandbox profile has a command allowlist for `system-fcntl` that includes `F_GETPATH` but does not list `F_GETPATH_NOFIRMLINK`: https://github.com/WebKit/WebKit/blob/main/Source/WebKit/WebProcess/com.apple.WebProcess.sb.in. This is not proof that every App Sandbox profile denies command 102, but it is concrete evidence that sandbox policy may be command-specific and that success in an unsandboxed GitHub Actions runner cannot establish availability in LOCO's eventual process sandbox. Apple's App Sandbox documentation also explains that operations outside granted capabilities are prohibited: https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox.
 
 **Required before production use:** run a signed, representative sandboxed LOCO helper under the actual intended entitlements/profile; record whether command 102 is allowed, and fail closed if unavailable. Do not add a broad sandbox exception solely to make the diagnostic pass without a security review. Keep path-length handling fail-closed because the documented buffer is `MAXPATHLEN`.
+
+
+### Command-specific Seatbelt policy experiment (PR #102, run #45337196884)
+
+A second native helper runs under a deliberately restrictive Seatbelt profile. The profile explicitly denies the `system-fcntl` operation class and then allows only `F_GETPATH`. It opens a temporary directory descriptor and verifies:
+- `F_GETPATH` succeeds under the profile;
+- `F_GETPATH_NOFIRMLINK` fails with `EPERM` or `EACCES`.
+
+The exact macOS runner output was:
+
+```
+sandbox_probe getpath=success nofirmlink_result=denied_or_failed nofirmlink_errno=1
+```
+
+The first profile iteration omitted the explicit `(deny system-fcntl)` rule; both commands then succeeded. The test was corrected to deny the operation class before allowing the one command. The corrected profile passed on the next exact head.
+
+The latest CI uses the absolute system binary `/usr/bin/sandbox-exec` rather than resolving it through `PATH`. This is a CI-only diagnostic harness; LOCO does not depend on `sandbox-exec` at runtime.
+
+**Interpretation:** Seatbelt can distinguish the two fcntl commands, and a profile that permits `F_GETPATH` may still deny `F_GETPATH_NOFIRMLINK`. This confirms the sandbox compatibility concern is real.
+
+**Deployment gap:** review of the current extension package plus PR #93 (Rust child process) and PR #94 (TypeScript parent client) found no LOCO-owned `.entitlements` file or declared App Sandbox profile. The sidecar is designed to be spawned by the VS Code extension host and inherits the host process's sandbox context. Until the supported VS Code distribution/deployment model and its signing/entitlements are selected, there is no representative LOCO sandbox profile to test. The custom Seatbelt test must not be presented as proof of behavior under every VS Code host.
+
+Before using command 102 in production, test the packaged sidecar inside each supported host/deployment configuration. If the command is denied, fail closed or retain only the already-validated distinct-volume guard; do not weaken the host sandbox to force success.
