@@ -9,6 +9,16 @@ use crate::snapshot_payload::{build_snapshot_contract,CapturedWorkspaceSnapshot,
 pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
+fn filesystem_id(file:&File)->Result<[i32;2],MacOsSnapshotAdapterError>{
+ use std::os::fd::AsRawFd;
+ let mut stat:libc::statfs=unsafe{std::mem::zeroed()};
+ if unsafe{libc::fstatfs(file.as_raw_fd(),&mut stat)}!=0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok(stat.f_fsid.val)
+}
+
+#[cfg(target_os="macos")]
 fn filesystem_name(file:&File)->Result<String,MacOsSnapshotAdapterError>{
  use std::ffi::CStr;
  use std::os::fd::AsRawFd;
@@ -36,7 +46,7 @@ fn open_dir(parent:&File,name:&str)->Result<File,MacOsSnapshotAdapterError>{
  Ok(file)
 }
 
-pub struct MacOsWorkspaceSnapshotAdapter { root:File, root_device:u64, workspace_id:String, canonical_root:PathBuf }
+pub struct MacOsWorkspaceSnapshotAdapter { root:File, root_device:u64, root_filesystem_id:[i32;2], workspace_id:String, canonical_root:PathBuf }
 impl MacOsWorkspaceSnapshotAdapter {
  /// Opens an absolute workspace path from /, one component at a time.
  /// O_NOFOLLOW rejects symlinks; the retained final descriptor is the capability.
@@ -67,7 +77,8 @@ impl MacOsWorkspaceSnapshotAdapter {
    return Err(MacOsSnapshotAdapterError::InvalidRoot);
   }
   let meta=current.metadata().map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
-  Ok(Self{root:current,root_device:meta.dev(),workspace_id,canonical_root:canonical})
+  let root_filesystem_id=filesystem_id(&current)?;
+  Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root:canonical})
  }
  pub fn root_path(&self)->&Path{&self.canonical_root}
 }
@@ -83,7 +94,9 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
     .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    let child=File::from(fd);
    let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
-   if !m.is_dir()||m.dev()!=self.root_device{return Err(SnapshotPayloadError::AcquisitionFailed)}
+   if !m.is_dir()||m.dev()!=self.root_device
+    || filesystem_id(&child).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? != self.root_filesystem_id
+   {return Err(SnapshotPayloadError::AcquisitionFailed)}
    parent=child;
   }
   let fd=openat(&parent,parts[parts.len()-1],OFlags::RDONLY|OFlags::CLOEXEC|OFlags::NOFOLLOW|OFlags::NONBLOCK,Mode::empty())
@@ -91,7 +104,9 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
   let mut file=File::from(fd);
   let before=file.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
   if !before.is_file(){return Err(SnapshotPayloadError::InvalidFileType)}
-  if before.dev()!=self.root_device{return Err(SnapshotPayloadError::AcquisitionFailed)}
+  if before.dev()!=self.root_device
+   || filesystem_id(&file).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? != self.root_filesystem_id
+  {return Err(SnapshotPayloadError::AcquisitionFailed)}
   if before.nlink()!=1{return Err(SnapshotPayloadError::HardLinkNotAllowed)}
   let limit=MAX_SNAPSHOT_BYTES.min(request.max_bytes());
   if before.len()>limit as u64{return Err(SnapshotPayloadError::LimitExceeded)}
@@ -149,10 +164,46 @@ mod tests {
   );
  }
 
- // Firmlink containment is intentionally not claimed by this adapter yet.
- // The hosted runner exposes firmlink paths in /usr/share/firmlinks but its
- // ATTR_CMN_FLAGS output did not provide SF_FIRMLINK for those entries.
- // Track native detection and a deterministic acceptance test in issue #74.
+ // On current macOS, the hosted System and Data APFS volumes share st_dev,
+ // but fstatfs on retained handles reports distinct f_fsid values. Firmlinks
+ // bridge those volumes, so reject a descendant whose handle-derived volume
+ // identity differs from the retained workspace root. This is a volume
+ // boundary check, not a claim to identify every firmlink independently.
+ #[test]
+ fn rejects_system_to_data_firmlink_by_handle_volume_identity() {
+  use std::os::unix::fs::MetadataExt;
+
+  let home=PathBuf::from(std::env::var("HOME").expect("macOS CI home directory"));
+  assert!(home.starts_with("/Users/"),"test requires hosted macOS user home on Data volume");
+  let data_dir=File::open("/Users").unwrap();
+  let system_root=File::open("/").unwrap();
+  assert_eq!(filesystem_name(&system_root).unwrap(),"apfs");
+  assert_eq!(filesystem_name(&data_dir).unwrap(),"apfs");
+  assert_eq!(system_root.metadata().unwrap().dev(),data_dir.metadata().unwrap().dev(),
+   "fixture should preserve the known same-st_dev condition");
+  assert_ne!(filesystem_id(&system_root).unwrap(),filesystem_id(&data_dir).unwrap(),
+   "fixture must expose distinct System and Data volume identities");
+
+  let probe=tempfile::tempdir_in(&home).unwrap();
+  std::fs::write(probe.path().join("sentinel.txt"),b"data-volume-sentinel").unwrap();
+  let relative=probe.path().join("sentinel.txt").strip_prefix("/").unwrap()
+   .to_str().unwrap().to_owned();
+
+  // Construct a root-anchored adapter only inside this test. Production root
+  // admission still rejects /; this exercises the actual /Users mapping.
+  let root_meta=system_root.metadata().unwrap();
+  let root_filesystem_id=filesystem_id(&system_root).unwrap();
+  let adapter=MacOsWorkspaceSnapshotAdapter {
+   root:system_root,
+   root_device:root_meta.dev(),
+   root_filesystem_id,
+   workspace_id:"system-root-test".into(),
+   canonical_root:PathBuf::from("/"),
+  };
+  assert_eq!(adapter.capture(&SnapshotCaptureRequest::new(relative,128).unwrap()),
+   Err(SnapshotPayloadError::AcquisitionFailed),
+   "capture must reject the System-to-Data firmlink before acquiring content");
+ }
 
  #[test] fn captures_regular_and_empty_files(){
   let d=tempfile::tempdir().unwrap(); std::fs::write(d.path().join("a"),b"macOS capture").unwrap(); std::fs::write(d.path().join("e"),b"").unwrap();
