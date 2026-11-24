@@ -156,3 +156,18 @@ The latest CI uses the absolute system binary `/usr/bin/sandbox-exec` rather tha
 **Deployment gap:** review of the current extension package plus PR #93 (Rust child process) and PR #94 (TypeScript parent client) found no LOCO-owned `.entitlements` file or declared App Sandbox profile. The sidecar is designed to be spawned by the VS Code extension host and inherits the host process's sandbox context. Until the supported VS Code distribution/deployment model and its signing/entitlements are selected, there is no representative LOCO sandbox profile to test. The custom Seatbelt test must not be presented as proof of behavior under every VS Code host.
 
 Before using command 102 in production, test the packaged sidecar inside each supported host/deployment configuration. If the command is denied, fail closed or retain only the already-validated distinct-volume guard; do not weaken the host sandbox to force success.
+
+
+### Official VS Code host scope and actual sandbox decision
+
+The current LOCO package targets a VS Code extension (`engines.vscode`) and PRs #93/#94 design the Rust authority as a child process spawned directly by the extension host. There is no LOCO-owned macOS app bundle or entitlements file in the reviewed package/sidecar changes.
+
+A current Microsoft VS Code upstream issue states that the official VS Code macOS app is not App Sandbox-enabled (`com.apple.security.app-sandbox` is absent): https://github.com/microsoft/vscode/issues/307364. This is consistent with Apple's guidance that App Sandbox is an explicit code-signing entitlement and that embedded child tools inherit a sandbox only when launched from a sandboxed app with the appropriate helper configuration: https://developer.apple.com/documentation/xcode/embedding-a-helper-tool-in-a-sandboxed-app.
+
+**Initial support boundary:** treat the official Microsoft VS Code desktop distribution as the baseline host. Do not assume the same result for VSCodium, Cursor, other VS Code forks, App Store distributions, remote extension hosts, or enterprise-wrapped builds. The runtime capability must still be probed and failures must be explicit. If a supported host imposes a sandbox that denies command 102, the adapter must fail closed for any operation that requires firmlink detection; it must not weaken the host sandbox.
+
+The custom Seatbelt CI helper is only a negative test of command-specific denial, not a substitute for inspecting the actual host's code-signing entitlements and exercising the packaged sidecar in that host. Apple documents `codesign -dvvv --entitlements - <app>` as a way to inspect whether App Sandbox is enabled: https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox.
+
+### Pinned sandbox test exact-head result
+
+The workflow now invokes `/usr/bin/sandbox-exec` by absolute path. Latest head `dcc7495ee0c954758130412a2c782e6b62e4bfe3` passed Ubuntu, Windows, and macOS in [run #45337375932](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45337375932). The sandbox helper verifies that command 50 succeeds and command 102 is denied with `EPERM` under the explicit command allowlist. The test uses no production runtime dependency on `sandbox-exec`.
