@@ -16,10 +16,10 @@ const RESERVED_WINDOWS_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])
 export function isSafePortableRelativePath(path: string): boolean {
   if (!path || path.startsWith('/') || /[\\:\0]/.test(path)) return false;
   return path.split('/').every(component => {
-    // eslint-disable-next-line no-control-regex -- reject portable-path control bytes.
     if (!component || component === '.' || component === '..' ||
-        component.endsWith('.') || component.endsWith(' ') ||
-        /[\x00-\x1f<>"|?*]/.test(component)) return false;
+        component.endsWith('.') || component.endsWith(' ')) return false;
+    // eslint-disable-next-line no-control-regex -- reject portable-path control bytes.
+    if (/[\x00-\x1f<>"|?*]/.test(component)) return false;
     const stem = component.split('.')[0];
     return !RESERVED_WINDOWS_NAMES.test(stem);
   });
