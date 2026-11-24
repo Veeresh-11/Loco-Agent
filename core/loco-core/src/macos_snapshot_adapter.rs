@@ -315,6 +315,31 @@ mod tests {
  }
 
  #[test]
+ fn extended_nofirmlink_attribute_distinguishes_firmlink_entries_before_open() {
+  let root=File::open("/").unwrap();
+  assert_eq!(
+   preflight_entry_path(&root,"Users"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"Applications"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"Library"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"System").unwrap(),
+   PathBuf::from("/System")
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"usr").unwrap(),
+   PathBuf::from("/usr")
+  );
+ }
+
+ #[test]
  fn root_and_descendant_use_nofirmlink_descriptor_paths() {
   let d=tempfile::tempdir().unwrap();
   std::fs::create_dir(d.path().join("nested")).unwrap();
@@ -406,8 +431,8 @@ mod tests {
    canonical_root:PathBuf::from("/"),
   };
   assert_eq!(adapter.capture(&SnapshotCaptureRequest::new(&relative,128).unwrap()),
-   Err(SnapshotPayloadError::AcquisitionFailed),
-   "capture must reject the System-to-Data firmlink before acquiring content");
+   Err(SnapshotPayloadError::FirmlinkBoundary),
+   "capture must reject the System-to-Data firmlink before opening its target");
  }
 
  #[test] fn captures_regular_and_empty_files(){
