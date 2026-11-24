@@ -171,3 +171,22 @@ The custom Seatbelt CI helper is only a negative test of command-specific denial
 ### Pinned sandbox test exact-head result
 
 The workflow now invokes `/usr/bin/sandbox-exec` by absolute path. Latest head `dcc7495ee0c954758130412a2c782e6b62e4bfe3` passed Ubuntu, Windows, and macOS in [run #45337375932](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45337375932). The sandbox helper verifies that command 50 succeeds and command 102 is denied with `EPERM` under the explicit command allowlist. The test uses no production runtime dependency on `sandbox-exec`.
+
+
+### Parent-entry metadata probe — no pre-open signal found (run #45339440539)
+
+A follow-up probe requested `ATTR_CMN_FSID`, `ATTR_CMN_FILEID`, `ATTR_CMN_PARENTID`, and `ATTR_CMN_FLAGS` through both `getattrlistbulk` and `getattrlistat(FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH)` for `/Users`, `/Applications`, and `/Library`. It compared those returned values with the root directory and a separately opened target descriptor.
+
+On macOS 26.7.2 (build 25G332, arm64), both APIs returned the target's FSID and file ID, not a distinct parent-volume entry identity. The parent ID was `2`, which also matched the root inode value and did not distinguish the firmlink. The flags remained `0x00100000` (`SF_NOUNLINK`), not `SF_FIRMLINK`.
+
+Representative `/Users` output:
+
+```
+getattrlistat_entry_metadata path=Users root_ino=2 entry_fileid=18483 entry_parentid=2 flags=0x00100000 root_fsid=16777232:26 entry_fsid=16777226:26 parent_matches_root=yes
+getattrlistat_target_metadata path=Users target_ino=18483 target_fsid=16777226:26 entry_fsid_matches_target=yes
+bulk_identity name=Users root_ino=2 entry_fileid=18483 entry_parentid=2 target_ino=18483 flags=0x00100000 root_fsid=16777232:26 entry_fsid=16777226:26 target_fsid=16777226:26 parent_matches_root=yes entry_fsid_matches_root=no entry_fsid_matches_target=yes
+```
+
+The exact-head Rust Core Tests run [#45339440539](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45339440539) passed Ubuntu, Windows, and macOS. The probe therefore confirms that these two metadata APIs, with these attributes and no-follow options, do not expose a distinct pre-open firmlink entry identity on this runner.
+
+**Decision:** do not use `ATTR_CMN_FSID`, `ATTR_CMN_FILEID`, or `ATTR_CMN_PARENTID` from these calls as a pre-open firmlink signal. The `F_GETPATH_NOFIRMLINK` adapter check remains a post-open, pre-content supplementary containment signal only. Issue #74's requirement for a reliable signal read without traversing the target remains unresolved; seek authoritative Apple DTS guidance or another native entry-level API/fixture.
