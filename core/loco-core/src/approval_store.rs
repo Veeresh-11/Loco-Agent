@@ -423,6 +423,20 @@ mod tests {
     }
 
     #[test]
+    fn oversized_existing_database_fails_initialization_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("oversized.sqlite");
+        {
+            let conn = Connection::open(&database).unwrap();
+            conn.execute("CREATE TABLE oversized(payload BLOB NOT NULL)", []).unwrap();
+            let payload = vec![0x33; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
+            conn.execute("INSERT INTO oversized(payload) VALUES (?1)", params![payload]).unwrap();
+        }
+        let result = ApprovalStore::open(&database);
+        assert!(matches!(result, Err(StoreError::StorageLimitExceeded)));
+    }
+
+    #[test]
     fn database_page_limit_rejects_growth_past_configured_ceiling() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("page-limit.sqlite");
