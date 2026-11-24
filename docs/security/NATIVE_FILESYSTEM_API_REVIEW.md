@@ -134,3 +134,60 @@ PR #70 adds a Windows CI fixture that creates and attaches a VHDX, formats its p
 This is distinct from the existing junction test: it uses a real secondary volume mountpoint rather than a junction to another directory on the same volume. The workflow explicitly invokes the ignored test and detaches the VHDX in an always-run cleanup step. Treat this as executed native evidence only after the exact-head Windows CI job passes.
 
 The test covers the hosted runner's NTFS behavior only. It does not expand the allowlist or validate ReFS, FAT/exFAT, removable/network filesystems, or all Windows storage/filter-driver combinations.
+
+
+## Follow-up native mount evidence (2026-11-23)
+
+- **Windows secondary NTFS volume:** PR #70 implementation head `f07175b81f7e6c0526f08c829adb18b6db22dc43`; Rust matrix run `45186946850` and Contract Validation `45186946764` passed. The Windows runner created a separate NTFS VHDX mounted beneath the workspace; the capture traversal test and cleanup passed.
+- **Linux same-device bind mount:** PR #71 implementation head `dc5f51419261011d4971076693457bcec7562e17`; Rust matrix run `45187459253` and Contract Validation `45187459247` passed. Ubuntu created a real bind mount whose device identity matched the workspace; the explicit `RESOLVE_NO_XDEV` rejection test passed.
+- **Linux distinct ext4 mount:** PR #72 initial implementation head `b6d17385bedc767dd940f5a4347b62151a29f7b9` passed Rust matrix run `45187940996` and Contract Validation `45187941018`. Current PR #72 head `70b592b976def580fdcafcb0ff0d097a6311d2a9` was revalidated in Rust matrix run `45188239997` and Contract Validation run `45188239539`; all Ubuntu, Windows, and macOS jobs passed. Ubuntu created and mounted an ext4 loop image with a distinct device identity; capture failed closed as required.
+- **macOS nested APFS volume:** rerun in PR #72's matrix; the APFS sparse-image fixture and dedicated mount-boundary test passed.
+
+These are exact hosted CI environment results, not universal platform guarantees. Linux's bind-mount test proves a case that `st_dev` alone cannot distinguish; `RESOLVE_NO_XDEV` is the enforcement tested. The ext4 loop mount tests a different-device crossing. The Windows result is limited to NTFS and the macOS result to APFS. Firmlinks, HFS+, ReFS, FAT/exFAT, network/removable filesystems, and broader native OS/storage combinations remain outside this evidence.
+
+
+## Consolidated native validation matrix — 2026-11-24
+
+The following records the implementation and hosted-runner evidence accumulated after the source-level review. Passing CI validates the named runner and fixture only; it is not a certification of every release, filesystem, driver, or mount namespace.
+
+| Review area | Implemented control / policy | Native evidence | Current disposition |
+|---|---|---|---|
+| Linux resolution and mount boundary | `openat2`, Linux 5.6+, `BENEATH \| NO_SYMLINKS \| NO_MAGICLINKS \| NO_XDEV` for descendants; no path fallback; workspace root may itself be on a separate mount | PR #63 exact-head Rust/contract runs #45181351164 / #45181351240; PR #71 real same-device bind mount #45187459253; PR #72 real ext4 loop mount #45188239997 | Hosted bind and distinct-device mount fixtures pass. Strict policy intentionally rejects all descendant mount crossings, including bind mounts. Kernel/version matrix beyond hosted Ubuntu remains open. |
+| Linux read completeness | Require captured byte count to equal initial handle size; reject short/over-length results | PR #62 exact-head Rust/contract runs #45180875554 / #45180875545 | Implemented with deterministic helper coverage; metadata-before/after remains non-atomic. |
+| Windows ABI | Compile-time x64 size/alignment/offset assertions for manually declared native structures; compile-time exclusion of non-x86_64 targets | PR #64 exact-head Rust/contract runs #45181579566 / #45181579594 | x64 only. x86 and ARM64 are unsupported. Independent comparison with supported Windows SDK headers remains required. |
+| Windows reparse and sharing behavior | `OBJ_DONT_REPARSE` plus post-open reparse checks; strict sharing with no weaker-sharing/path retry | PR #58 symlink tests executed in the PR #65 matrix; PR #65 pre-existing incompatible writer test passed on Windows in run #45181874421 | Directory/final symlink, junction and pre-existing share-conflict tests pass on hosted Windows. This does not cover every reparse tag, filter driver, or storage stack. |
+| Windows file identity | `GetFileInformationByHandleEx(FileIdInfo)`; 64-bit volume serial + 128-bit file ID; no legacy fallback | PR #66 exact-head Rust/contract runs #45182566472 / #45182566468; Windows test confirms stable identity for repeated opens and distinct IDs for distinct files | Implemented for x64. IDs are handle-derived filesystem identifiers, not permanent/global approval identifiers. Windows 8 / Server 2012 or later is the documented API baseline; unsupported filesystems fail closed. |
+| Windows filesystem admission | Canonical volume-GUID root, fixed-volume check, explicit NTFS allowlist | PR #67 exact-head Rust/contract runs #45182767243 / #45182767334; hosted Windows root test passes | NTFS only. ReFS, FAT/exFAT, network/removable and unknown filesystems remain unsupported. |
+| Windows nested volume boundary | Reject traversal into a real secondary NTFS VHDX mounted below workspace | PR #70 exact-head Rust/contract runs #45186946850 / #45186946764; dedicated ignored test explicitly executed and passed in Windows job #45188239997 | Hosted secondary-NTFS volume mountpoint fixture passes; no allowlist expansion. |
+| macOS filesystem admission | Query retained root descriptor with `fstatfs`; admit APFS only | PR #68 exact-head Rust/contract runs #45184396095 / #45184396003 | APFS only. HFS+, network/removable and other filesystems remain unsupported/unverified. |
+| macOS nested mount boundary | Component-wise `openat(O_NOFOLLOW)`; compare descendant device identity with retained root | PR #69 implementation run #45185300723; dedicated APFS sparse-image test reran and passed in macOS job #45188239997 | Hosted nested-APFS volume fixture passes. Firmlinks are not established by this different-device test; see issue #74. |
+| Cross-platform metadata/read semantics | Handle identity and metadata revalidation before/after bounded reads; exact byte count and digest | PRs #58–#72 exact-head matrices; current PR #72 Rust matrix #45188239997 and contract #45188239539 pass | Best-effort mutation detection only; not an atomic content snapshot. Approval enforcement must reacquire and revalidate immediately before an operation. |
+
+### Exact hosted runner versions recorded by PR #72 follow-up CI
+
+The workflow now records the OS/kernel build and the runner workspace filesystem on each platform. Exact head `6acb108a3a6342a3e3c64b1e39a699ede48dbc1e` passed Rust Core Tests run [#45342704201](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45342704201) and Contract Validation run [#45342704159](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45342704159).
+
+| Hosted runner | Recorded environment | Native fixtures executed |
+|---|---|---|
+| `ubuntu-latest` | Ubuntu 26.04.1 LTS; kernel `7.0.0-1020-azure`; runner temp path on ext4 | Real same-device bind mount and distinct-device ext4 loop mount; both explicit rejection tests passed |
+| `macos-latest` | macOS 26.7.2; build `25G332` | Nested APFS sparse-image mount; explicit rejection test passed |
+| `windows-latest` | Windows Server 2025 Datacenter; version `10.0.26100`, build `26100`, 64-bit; runner temp volume NTFS | Pre-existing incompatible writer, real secondary NTFS VHDX mountpoint; both explicit tests passed |
+
+The hosted-runner labels remain moving targets. These records improve reproducibility for this run but do not constitute a pinned multi-version support matrix.
+
+### Supported prototype baseline
+
+- **Linux:** kernel 5.6+ with `openat2` and the required resolution flags; descendant mount and bind-mount crossings rejected. Hosted Ubuntu tested with a same-device bind mount and a distinct ext4 loop mount.
+- **macOS:** APFS workspace roots only for the current snapshot prototype; hosted nested APFS mount crossing tested. The separate firmlink entry-signal question remains unresolved in issue #74.
+- **Windows:** x64 only, Windows 8 / Windows Server 2012 or later for `FileIdInfo`, fixed canonical volume-GUID roots, NTFS only; hosted symlink/reparse, sharing, identity and secondary NTFS volume mount tests pass.
+
+### Remaining priority-2 gates
+
+1. Independent review of the Windows x64 FFI declarations against the exact supported Windows SDK headers and native flags/status handling.
+2. Pin and test explicit OS/kernel build versions rather than relying only on moving GitHub-hosted runner labels (`ubuntu-latest`, `macos-latest`, `windows-latest`).
+3. Decide whether additional Linux filesystems and mount namespaces are supported; current ext4 fixture is one hosted-runner case.
+4. Keep HFS+, ReFS, FAT/exFAT, network/removable filesystems, x86/ARM64 Windows, and untested macOS releases explicitly unsupported until separate fixtures and review exist.
+5. Keep the macOS firmlink pre-open entry signal separate from the nested-volume `st_dev` result; the latter does not close issue #74.
+6. Obtain independent security review of the full adapter stack before changing draft/merge readiness.
+
+**Disposition:** the high-priority implementation gaps identified by F-01, F-02, F-03, F-05, F-06 and F-07 have corresponding code/policy changes and hosted CI evidence; F-04/F-08 have targeted native fixtures on the named runner. Priority 2 is materially advanced but remains **partially complete** until the SDK/version matrix and independent review gates are satisfied.

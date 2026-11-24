@@ -511,4 +511,37 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "requires a distinct filesystem mounted by the Linux CI workflow"]
+    fn rejects_ci_prepared_distinct_filesystem_mount_crossing() {
+        use std::os::unix::fs::MetadataExt;
+
+        let workspace = std::path::PathBuf::from(
+            std::env::var("LOCO_LINUX_LOOP_MOUNT_WORKSPACE")
+                .expect("Linux loop-mount fixture workflow must set LOCO_LINUX_LOOP_MOUNT_WORKSPACE"),
+        );
+        let mountpoint = workspace.join("mounted");
+        assert_ne!(
+            std::fs::metadata(&workspace).unwrap().dev(),
+            std::fs::metadata(&mountpoint).unwrap().dev(),
+            "fixture must be mounted from a distinct filesystem device"
+        );
+        assert_eq!(
+            std::fs::read(mountpoint.join("secret.txt")).unwrap(),
+            b"distinct-filesystem-sentinel",
+            "fixture must contain the mounted filesystem sentinel"
+        );
+
+        let adapter = LinuxWorkspaceSnapshotAdapter::new(
+            std::fs::canonicalize(&workspace).unwrap(),
+            "linux-distinct-mount-workspace",
+        )
+        .unwrap();
+        assert_eq!(
+            adapter.capture(&SnapshotCaptureRequest::new("mounted/secret.txt", 128).unwrap()),
+            Err(SnapshotPayloadError::AcquisitionFailed),
+            "RESOLVE_NO_XDEV must reject traversal into a distinct mounted filesystem"
+        );
+    }
+
 }
