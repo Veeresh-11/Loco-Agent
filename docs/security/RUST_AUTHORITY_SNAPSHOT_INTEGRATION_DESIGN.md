@@ -115,3 +115,16 @@ Consequently, the approval prototype is not yet in the production request path. 
 7. Obtain independent security review before considering any executor.
 
 **Acceptance criterion for this milestone:** the sidecar can register a selected workspace root, retain it in Rust, capture a file through the platform adapter, and bind an approval challenge to that capture — while still performing no file read on behalf of a proposal, no writes, and no command execution.
+
+## 7. Implementation checkpoint — native adapter factory
+
+The process-local registry and platform adapter factory are now implemented as separate Rust APIs:
+
+- `workspace_factory::create_workspace_adapter(selected_root, workspace_id)` dispatches to the native adapter for the current platform.
+- `WorkspaceRegistry::register_selected_workspace(selected_root, workspace_id)` constructs the adapter first, then transfers ownership to the bounded registry and returns an opaque process-local handle.
+- Linux and macOS use their existing native root acquisition constructors. macOS remains restricted to APFS.
+- Windows resolves a selected drive path through Win32 volume APIs to a volume-GUID root and a relative workspace path, then opens components through retained handles. UNC/network paths and unsupported path forms fail closed.
+- The factory and registry do not add stdio messages. The authority process still accepts only handshake, proposal evaluation, and shutdown.
+- The factory's selected-root argument must be supplied by an explicit host workspace-selection flow. This API does not itself authenticate the host process or prove that a user selected the path.
+
+The factory milestone remains unvalidated until its new cross-platform CI matrix passes. It does not close the independent security-review or platform-authenticator gates, and it does not authorize file writes, patch application, or command execution.
