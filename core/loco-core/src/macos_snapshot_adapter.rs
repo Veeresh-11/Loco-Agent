@@ -660,7 +660,7 @@ mod tests {
   let valid = synthetic_bulk_entry_record(b"System\0", b"/System\0", 0, 0);
   let common = libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
   for (commonattr, forkattr) in [
-   (libc::ATTR_CMN_NAME | ATTR_CMN_FLAGS, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
+   (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
    (common, 0),
    (libc::ATTR_CMN_NAME | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
    (libc::ATTR_CMN_NAME | libc::ATTR_CMN_FLAGS | ATTR_CMN_ERROR, libc::ATTR_CMNEXT_NOFIRMLINKPATH),
