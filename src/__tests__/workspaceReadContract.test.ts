@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   isSafePortableRelativePath,
   MAX_WORKSPACE_READ_BYTES,
@@ -11,6 +13,12 @@ describe('workspace read request v1 contract', () => {
     relativePath: 'src/main.rs',
     maxBytes: 1024
   };
+
+  test('accepts the shared cross-language JSON fixture', () => {
+    const fixturePath = join(process.cwd(), 'contracts', 'examples', 'workspace-read-request-v1.json');
+    const fixture: unknown = JSON.parse(readFileSync(fixturePath, 'utf8'));
+    expect(validateWorkspaceReadRequest(fixture)).toBe(true);
+  });
 
   test('accepts a valid request and inclusive byte boundaries', () => {
     expect(validateWorkspaceReadRequest(valid)).toBe(true);
