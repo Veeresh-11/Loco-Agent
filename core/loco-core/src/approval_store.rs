@@ -228,7 +228,7 @@ mod tests {
     fn expired_challenge_rejected_using_internal_time() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        store.issue(&action, 10).unwrap();
+        let challenge = store.issue(&action, 10).unwrap();
         clock.set(110);
         assert!(matches!(
             store.consume(&challenge.challenge_id, &action),
@@ -240,7 +240,7 @@ mod tests {
     fn action_mismatch_does_not_consume() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        store.issue(&action, 30).unwrap();
+        let challenge = store.issue(&action, 30).unwrap();
         let modified = ProposedAction::RunCommand {
             executable: "echo".into(), args: vec!["changed".into()],
             working_directory: Some(".".into()), timeout_ms: Some(1000),
