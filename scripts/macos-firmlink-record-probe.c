@@ -183,6 +183,186 @@ static void print_path_api_flags(int rootfd, const char *path) {
     close(childfd);
 }
 
+static int probe_nested_firmlink(const char *parent_path, const char *entry_name, const char *expected_path) {
+    int dirfd = open(parent_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) {
+        printf("nested_firmlink parent=%s name=%s open_error=%d\n", parent_path, entry_name, errno);
+        return 1;
+    }
+
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME |
+                       ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
+    attrs.forkattr = ATTR_CMNEXT_NOFIRMLINKPATH;
+
+    unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
+    for (;;) {
+        int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer),
+                                    FSOPT_ATTR_CMN_EXTENDED);
+        if (count < 0) {
+            printf("nested_firmlink parent=%s name=%s bulk_error=%d\n", parent_path, entry_name, errno);
+            close(dirfd);
+            return 1;
+        }
+        if (count == 0) break;
+
+        size_t cursor = 0;
+        for (int i = 0; i < count; ++i) {
+            if (cursor + sizeof(uint32_t) + sizeof(attribute_set_t) > sizeof(buffer)) {
+                printf("nested_firmlink parent=%s name=%s truncated_header\n", parent_path, entry_name);
+                close(dirfd);
+                return 1;
+            }
+            uint32_t record_len = 0;
+            attribute_set_t returned;
+            memcpy(&record_len, buffer + cursor, sizeof(record_len));
+            if (record_len < sizeof(uint32_t) + sizeof(returned) ||
+                record_len > sizeof(buffer) - cursor) {
+                printf("nested_firmlink parent=%s name=%s invalid_record_length=%u\n",
+                       parent_path, entry_name, record_len);
+                close(dirfd);
+                return 1;
+            }
+
+            const unsigned char *record = buffer + cursor;
+            memcpy(&returned, record + sizeof(record_len), sizeof(returned));
+            size_t offset = sizeof(record_len) + sizeof(returned);
+            int32_t entry_error = 0;
+            if (returned.commonattr & ATTR_CMN_ERROR) {
+                if (offset + sizeof(entry_error) > record_len) {
+                    printf("nested_firmlink parent=%s name=%s truncated_entry_error\n", parent_path, entry_name);
+                    close(dirfd);
+                    return 1;
+                }
+                memcpy(&entry_error, record + offset, sizeof(entry_error));
+                offset += sizeof(entry_error);
+            }
+            if (entry_error != 0 || !(returned.commonattr & ATTR_CMN_NAME) ||
+                !(returned.commonattr & ATTR_CMN_FLAGS) ||
+                !(returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH)) {
+                cursor += record_len;
+                continue;
+            }
+
+            attrreference_t name_ref;
+            if (offset + sizeof(name_ref) > record_len) {
+                printf("nested_firmlink parent=%s name=%s truncated_name_ref\n", parent_path, entry_name);
+                close(dirfd);
+                return 1;
+            }
+            memcpy(&name_ref, record + offset, sizeof(name_ref));
+            size_t name_ref_end = offset + sizeof(name_ref);
+            int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+            if (name_start < 0 || name_ref.attr_length < 2 ||
+                name_ref.attr_length > NAME_MAX + 1 ||
+                (uint64_t)name_start + name_ref.attr_length > record_len ||
+                record[name_start + name_ref.attr_length - 1] != '\0') {
+                printf("nested_firmlink parent=%s name=%s invalid_name_ref\n", parent_path, entry_name);
+                close(dirfd);
+                return 1;
+            }
+
+            char name[NAME_MAX + 1];
+            memcpy(name, record + (size_t)name_start, name_ref.attr_length);
+            if (memchr(name, '\0', name_ref.attr_length) != name + name_ref.attr_length - 1) {
+                printf("nested_firmlink parent=%s name=%s invalid_name\n", parent_path, entry_name);
+                close(dirfd);
+                return 1;
+            }
+            if (strcmp(name, entry_name) != 0) {
+                cursor += record_len;
+                continue;
+            }
+
+            offset = name_ref_end;
+            if (offset + sizeof(uint32_t) + sizeof(attrreference_t) > record_len) {
+                printf("nested_firmlink parent=%s name=%s truncated_fixed_fields\n", parent_path, entry_name);
+                close(dirfd);
+                return 1;
+            }
+            uint32_t flags = 0;
+            memcpy(&flags, record + offset, sizeof(flags));
+            offset += sizeof(flags);
+            attrreference_t path_ref;
+            memcpy(&path_ref, record + offset, sizeof(path_ref));
+            size_t path_ref_end = offset + sizeof(path_ref);
+            int64_t path_start = (int64_t)offset + (int64_t)path_ref.attr_dataoffset;
+            if (path_start < 0 || path_start < (int64_t)path_ref_end ||
+                path_ref.attr_length < 2 || path_ref.attr_length > PATH_MAX ||
+                (uint64_t)path_start + path_ref.attr_length > record_len ||
+                name_start < (int64_t)path_ref_end ||
+                (uint64_t)name_start + name_ref.attr_length > (uint64_t)path_start ||
+                record[path_start + path_ref.attr_length - 1] != '\0' ||
+                memchr(record + (size_t)path_start, '\0', path_ref.attr_length) !=
+                    record + (size_t)path_start + path_ref.attr_length - 1) {
+                printf("nested_firmlink parent=%s name=%s invalid_path_ref_or_overlap\n", parent_path, entry_name);
+                close(dirfd);
+                return 1;
+            }
+
+            const char *resolved_path = (const char *)(record + (size_t)path_start);
+            if (strcmp(resolved_path, expected_path) != 0) {
+                printf("nested_firmlink parent=%s name=%s flags=0x%08x path=%s expected=%s match=no\n",
+                       parent_path, entry_name, flags, resolved_path, expected_path);
+                close(dirfd);
+                return 1;
+            }
+            printf("nested_firmlink parent=%s name=%s flags=0x%08x nofirmlink_path=%s expected=%s match=yes\n",
+                   parent_path, entry_name, flags, resolved_path, expected_path);
+            close(dirfd);
+            return 0;
+        }
+    }
+
+    printf("nested_firmlink parent=%s name=%s not_found_in_bulk_listing\n", parent_path, entry_name);
+    close(dirfd);
+    return 1;
+}
+
+static int probe_nested_system_library_firmlinks(void) {
+    FILE *map = fopen("/usr/share/firmlinks", "r");
+    if (map == NULL) {
+        printf("nested_firmlink map_open_error=%d\n", errno);
+        return 1;
+    }
+
+    char line[PATH_MAX * 2];
+    char source[PATH_MAX];
+    char target[PATH_MAX];
+    const char prefix[] = "/System/Library/";
+    size_t tested = 0;
+    while (fgets(line, sizeof(line), map) != NULL) {
+        if (sscanf(line, "%1023s %1023s", source, target) != 2) continue;
+        if (strncmp(source, prefix, sizeof(prefix) - 1) != 0) continue;
+        char *last_slash = strrchr(source, '/');
+        if (last_slash == NULL || last_slash == source || last_slash[1] == '\0') continue;
+        *last_slash = '\0';
+        const char *parent_path = source;
+        const char *name = last_slash + 1;
+
+        char expected_path[PATH_MAX];
+        int written = snprintf(expected_path, sizeof(expected_path),
+                               "/System/Volumes/Data/%s", target);
+        if (written < 0 || (size_t)written >= sizeof(expected_path)) {
+            printf("nested_firmlink parent=%s name=%s expected_path_too_long\n",
+                   parent_path, name);
+            fclose(map);
+            return 1;
+        }
+        if (probe_nested_firmlink(parent_path, name, expected_path) != 0) {
+            fclose(map);
+            return 1;
+        }
+        tested++;
+    }
+
+    fclose(map);
+    printf("nested_firmlink entries_tested=%zu\n", tested);
+    return tested > 0 ? 0 : 1;
+}
+
 int main(void) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
@@ -236,5 +416,8 @@ int main(void) {
     print_path_api_flags(dirfd, "private");
 
     close(dirfd);
+    if (probe_nested_system_library_firmlinks() != 0) {
+        return 7;
+    }
     return 0;
 }
