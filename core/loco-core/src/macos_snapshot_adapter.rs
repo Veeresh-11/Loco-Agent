@@ -96,12 +96,9 @@ fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotA
 }
 
 #[cfg(target_os="macos")]
-const ATTR_CMN_ERROR: u32 = 0x2000_0000;
-
 #[cfg(target_os="macos")]
 fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
  use std::os::fd::AsRawFd;
- use std::ffi::OsString;
  use std::ffi::OsString;
  use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
@@ -183,7 +180,7 @@ fn bulk_entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<
     .checked_add(name_ref.attr_dataoffset as isize)
     .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
    let name_len = name_ref.attr_length as usize;
-   if name_start < 0 || name_len < 1 ||
+   if name_start < 0 || name_len < 1 || name_len > libc::NAME_MAX as usize + 1 ||
       (name_start as usize).checked_add(name_len).filter(|end| *end <= record_len).is_none() {
     return Err(MacOsSnapshotAdapterError::InvalidRoot);
    }
