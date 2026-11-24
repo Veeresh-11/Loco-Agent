@@ -4,7 +4,7 @@
 
 ## Exact CI run
 
-Rust Core Tests [run #45353310385](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45353310385) completed successfully on all six jobs for the PR #113 environment-capture change. The explicit Windows/macOS matrix [run #45354176701](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354176701) completed successfully on all seven jobs. The expanded Linux/Windows/macOS matrix [run #45354964372](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354964372) completed successfully on all nine jobs: Ubuntu 22.04/24.04/26.04, Windows Server 2022/2025, macOS 15 arm64/Intel, and macOS 26 arm64/Intel. The native Windows SDK ABI probe also passed on both Windows runner generations in [run #45358148067](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45358148067). The new Linux tmpfs workspace-root case passed on all three Ubuntu runners in [run #45358763942](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45358763942); the other six matrix jobs are still completing at this document update.
+Rust Core Tests [run #45353310385](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45353310385) completed successfully on all six jobs for the PR #113 environment-capture change. The explicit Windows/macOS matrix [run #45354176701](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354176701) completed successfully on all seven jobs. The expanded Linux/Windows/macOS matrix [run #45354964372](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354964372) completed successfully on all nine jobs: Ubuntu 22.04/24.04/26.04, Windows Server 2022/2025, macOS 15 arm64/Intel, and macOS 26 arm64/Intel. The native Windows SDK ABI probe also passed on both Windows runner generations in [run #45358148067](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45358148067). The positive Linux tmpfs workspace-root case passed on all three Ubuntu runners in [run #45358956133](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45358956133). After merging the nested tmpfs test and positive tmpfs-root test into PR #112's feature branch, the exact combined head passed all nine jobs in [run #45359453083](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45359453083); Contract Validation [run #45359454019](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45359454019) also passed.
 
 ## Runner environments observed
 
@@ -24,13 +24,14 @@ The Linux `findmnt` filesystem type (`ext4`) is the specific mount type. The `st
 
 ## Native filesystem fixtures exercised
 
-| Platform | Fixture | Result in run #45353310385 |
+| Platform | Fixture / native probe | Validation evidence |
 |---|---|---|
 | Ubuntu 22.04/24.04/26.04 | Bind-mounted directory placed beneath a workspace, with a sentinel outside the workspace | Setup, boundary verification, and cleanup passed on all three explicit runners in run #45354964372 |
 | Ubuntu 22.04/24.04/26.04 | 128 MiB ext4 filesystem image loop-mounted beneath a workspace, with a sentinel on the mounted filesystem | Setup, distinct-filesystem boundary verification, and cleanup passed on all three explicit runners in run #45354964372 |
-| Ubuntu 22.04/24.04/26.04 | 16 MiB tmpfs mounted beneath the ext4 workspace, with a sentinel on the tmpfs mount | Setup, `RESOLVE_NO_XDEV` rejection, and cleanup passed on all three runners in Rust Core Tests run #45356622561 |
-| Ubuntu 22.04/24.04/26.04 | 16 MiB tmpfs mounted as the workspace root, with a direct-child sentinel | Root admission, exact-byte snapshot capture, payload validation, and unmount cleanup passed on all three runners in Rust Core Tests run #45358763942 |
+| Ubuntu 22.04/24.04/26.04 | 16 MiB tmpfs mounted beneath the ext4 workspace, with a sentinel on the tmpfs mount | Setup, `RESOLVE_NO_XDEV` rejection, and cleanup passed on all three runners in Rust Core Tests run #45356798536; all nine combined jobs later passed in #45359453083 |
+| Ubuntu 22.04/24.04/26.04 | 16 MiB tmpfs mounted as the workspace root, with a direct-child sentinel | Root admission, exact-byte snapshot capture, payload validation, and unmount cleanup passed on all three runners in Rust Core Tests run #45358956133; all nine combined jobs later passed in #45359453083 |
 | Windows Server 2022 and 2025 | Secondary NTFS VHDX volume mounted at a directory beneath a workspace | Setup, volume-boundary verification, and cleanup passed on both explicit runner labels in run #45354176701 |
+| Windows Server 2022 and 2025 | C11 compile-time ABI probe against installed `windows.h` / `winternl.h` | All x64 layout assertions, `OBJ_DONT_REPARSE` valid-mask check, `FileIdInfo` enum value, and `NtCreateFile` signature passed with SDK 10.0.26100.0 in run #45358148067 |
 | macOS 15 and 26, arm64 and Intel | Native bulk firmlink metadata and `O_RESOLVE_BENEATH` probes | Passed on all four listed runner builds |
 | macOS 15 and 26, arm64 and Intel | Separate APFS volume mounted beneath a workspace | Setup, nested-volume boundary verification, and detach passed on all four runners |
 | macOS 15 and 26, arm64 and Intel | Restrictive sandbox capability-loss probe and opened-handle System/Data identity regression | Passed; the latter is separately documented in [the macOS support matrix](MACOS_SNAPSHOT_SUPPORT_MATRIX.md) |
