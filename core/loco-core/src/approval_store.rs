@@ -108,7 +108,8 @@ impl ApprovalStore {
         let has_epoch: bool = {
             let mut statement = conn.prepare("PRAGMA table_info(approval_challenges)")?;
             let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-            columns.filter_map(Result::ok).any(|name| name == "process_epoch")
+            let found = columns.filter_map(Result::ok).any(|name| name == "process_epoch");
+            found
         };
         if !has_epoch {
             conn.execute(
@@ -130,13 +131,13 @@ impl ApprovalStore {
         Ok(Self { conn, clock, process_epoch })
     }
 
-    fn ensure_active_epoch(&self, tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    fn ensure_active_epoch(tx: &rusqlite::Transaction<'_>, expected_epoch: &str) -> Result<(), StoreError> {
         let active: String = tx.query_row(
             "SELECT process_epoch FROM approval_runtime WHERE singleton_id=1",
             [],
             |row| row.get(0),
         )?;
-        if active != self.process_epoch {
+        if active != expected_epoch {
             return Err(StoreError::StaleRuntime);
         }
         Ok(())
@@ -165,7 +166,7 @@ impl ApprovalStore {
             expires_at_unix,
         };
         let tx = self.conn.unchecked_transaction()?;
-        self.ensure_active_epoch(&tx)?;
+        Self::ensure_active_epoch(&tx, &self.process_epoch)?;
         tx.execute(
             "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
              VALUES (?1, ?2, ?3, NULL, ?4)",
