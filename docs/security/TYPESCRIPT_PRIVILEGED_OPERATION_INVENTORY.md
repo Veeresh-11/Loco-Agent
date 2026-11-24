@@ -138,3 +138,12 @@ The following additional paths were inspected after the original inventory. They
 This source audit covers the inspected TypeScript extension entry point, agent, RAG engine, webview host, provider manager, history store, and secret helper. It does not establish a complete dependency-level audit of every provider implementation, VS Code internals, native modules, or any future Python service. Any new direct filesystem/process API must be reviewed and added to this inventory. No static regression gate has been added yet.
 
 The live implementation is unchanged. In particular, this document does not claim that the Rust sidecar controls editor-context reads, RAG indexing, Git process creation, patch writes, or history export.
+
+
+## Static regression gate — 2026-11-24
+
+The Node-based AST guard at \`scripts/check-privileged-operations.js\` scans every non-declaration TypeScript source file under \`src/\` for direct imports of Node filesystem/process modules, direct calls to common filesystem APIs, VS Code workspace filesystem calls, and child-process launch calls. The TypeScript CI workflow runs it on Node 20 and Node 22.
+
+The current explicitly reviewed exception is \`src/extension.ts\` calling \`vscode.workspace.fs.writeFile\` after the user selects a destination in the history-export save dialog. This is a user-directed export, not an agent-selected patch target. Keep this exception narrow; any other direct filesystem or process operation fails CI until reviewed and documented.
+
+This first guard is intentionally a direct-source regression check, not a complete taint analysis or dependency audit. Aliased/dynamically loaded APIs, reflective calls, APIs in dependencies, VS Code internals, and non-TypeScript code remain outside its proof. A passing check must not be interpreted as proof that the live task path is enforced by Rust.
