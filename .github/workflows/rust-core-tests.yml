@@ -76,6 +76,27 @@ jobs:
           "$RUNNER_TEMP/loco-firmlink-record-probe"
           clang -Wall -Wextra -Werror scripts/macos-apfs-volume-identity-probe.c -o "$RUNNER_TEMP/loco-apfs-volume-identity-probe"
           "$RUNNER_TEMP/loco-apfs-volume-identity-probe"
+      - name: Verify command-specific macOS sandbox fcntl policy
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/sandbox-exec
+          workspace="$RUNNER_TEMP/loco-sandbox-workspace"
+          mkdir -p "$workspace"
+          clang -Wall -Wextra -Werror scripts/macos-fcntl-sandbox-probe.c -o "$RUNNER_TEMP/loco-fcntl-sandbox-probe"
+          profile="$(cat <<'PROFILE'
+          (version 1)
+          (deny default)
+          (allow file-read*)
+          (allow file-write*)
+          (allow process-exec)
+          (allow sysctl-read)
+          (deny system-fcntl)
+          (allow system-fcntl (fcntl-command F_GETPATH))
+          PROFILE
+          )"
+          /usr/bin/sandbox-exec -p "$profile" "$RUNNER_TEMP/loco-fcntl-sandbox-probe" "$workspace"
       - name: Prepare nested APFS volume fixture
         if: runner.os == 'macOS'
         shell: bash

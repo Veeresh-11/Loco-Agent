@@ -50,3 +50,228 @@ Rust Core Tests run [45334961812](https://github.com/Veeresh-11/Loco-Agent/actio
 This closes the current diagnostic comparison of the available BSD `stat` and getattrlist surfaces on this hosted image, but it does not explain the discrepancy with Apple's documented contract. Apple's `getattrlistbulk(2)` manual states that a firmlink directory entry has `SF_FIRMLINK` in `ATTR_CMN_FLAGS`, and Apple's public `FileFlags.firmlink` documentation identifies the corresponding C constant. See [XNU getattrlistbulk(2)](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlistbulk.2) and [Apple FileFlags.firmlink](https://developer.apple.com/documentation/system/fileflags/firmlink).
 
 **Next evidence gate:** obtain an authoritative Apple DTS / Developer Forums explanation for why the documented flag is absent on this live runner, or obtain a reproducible Apple-provided OS firmlink fixture. A user-created APFS volume image is not accepted as a substitute. Until then, keep issue #74 open and treat general firmlink containment as unsupported/unverified. The tested `f_fsid` distinct-volume boundary remains a narrower, independently validated control.
+
+
+### Follow-up candidate — descriptor path without firmlink resolution (PR #102)
+
+The BSD stat-surface probe did not expose `SF_FIRMLINK`, so a separate native diagnostic now compares `fcntl(F_GETPATH)` with `fcntl(F_GETPATH_NOFIRMLINK)` on the retained root descriptor and each opened mapped-directory descriptor. Apple's XNU public `sys/fcntl.h` defines `F_GETPATH_NOFIRMLINK` as command 102 with the comment “return the full path without firmlinks of the fd”: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/fcntl.h. An Apple Developer Forums discussion reports that, for an open descriptor reached via `/Users/<user>`, `F_GETPATH` returned `/Users/<user>` while `F_GETPATH_NOFIRMLINK` returned `/System/Volumes/Data/Users/<user>`: https://developer.apple.com/forums/thread/120665.
+
+This is a promising handle-associated diagnostic surface and is being tested on the actual hosted runner. It is not yet accepted as a security boundary: the public behavioral guarantees, sandbox behavior, path-length handling, rename/concurrency semantics, and whether its output can safely establish descendant containment still require authoritative confirmation and adversarial tests. Do not use a path-string comparison as production authorization. PR #102 is stacked on PR #100 and remains draft pending exact-head native results.
+
+
+### Exact-head descriptor-path result (PR #102, 2026-11-24)
+
+The exact-head macOS job in Rust Core Tests run [45335594962](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45335594962) successfully compiled the probe with `clang -Wall -Wextra -Werror` and executed it on macOS 26.7.2 (build 25G332, arm64). For the retained descriptors opened at the root entries, the observed values were:
+
+| Entry | `F_GETPATH` | `F_GETPATH_NOFIRMLINK` |
+|---|---|---|
+| `/` | `/` | `/` |
+| `/Users` | `/Users` | `/System/Volumes/Data/Users` |
+| `/Applications` | `/Applications` | `/System/Volumes/Data/Applications` |
+| `/Library` | `/Library` | `/System/Volumes/Data/Library` |
+
+This is direct evidence that the API exposes a non-firmlinked path for these opened firmlink directory descriptors on this runner, unlike the tested `st_flags` and getattrlist flag surfaces. Apple's macOS `fcntl(2)` manual describes `F_GETPATH_NOFIRMLINK` as returning the non-firmlinked path and requires a buffer of at least `MAXPATHLEN`: https://man.freebsd.org/cgi/man.cgi?manpath=macOS+26.7&query=fcntl&sektion=2. The XNU header defines command 102: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/fcntl.h.
+
+The Apple Developer Forums discussion that identified this command also notes that it only works on open files and that paths longer than `MAXPATHLEN` are a limitation; the author explicitly asks whether it works in a sandbox, without a confirmed answer in that discussion: https://developer.apple.com/forums/thread/120665. Therefore sandbox availability and error behavior remain open compatibility questions.
+
+**Security interpretation:** the descriptor-associated output is materially stronger diagnostic evidence than a path-based lookup, but the result is still a pathname string. It is not an atomic ancestry proof and must not replace handle-relative operations or mount identity checks. A string prefix comparison alone is not accepted for authorization.
+
+### Rename and replacement experiment
+
+The probe now also opens a temporary directory, records both descriptor paths, renames that directory while keeping the descriptor open, creates a replacement directory at the original name, and queries the original and replacement descriptors independently. It records whether the original descriptor retains its device/inode identity and whether the replacement has a distinct identity. This experiment is intended to establish whether the path strings track the opened vnode across rename/replacement; it does not claim concurrent-race safety.
+
+The rename experiment was added after run #45335594962, so it still requires a fresh exact-head macOS run. Keep PR #102 and issue #74 open until that evidence is reviewed and sandbox/compatibility and security semantics are resolved.
+
+
+### Descriptor-path rename/replacement fixture (PR #102 follow-up)
+
+A new native CI experiment now opens a temporary directory by descriptor, captures both path forms, renames the directory while retaining the original descriptor, creates a different directory at the old pathname, and then queries both descriptors. The probe asserts:
+- the original descriptor's device/inode identity remains unchanged across the rename;
+- both path APIs report the moved name for the retained descriptor;
+- both path APIs report the original name for the replacement descriptor; and
+- the replacement descriptor has a distinct device/inode identity.
+
+The assertions deliberately require a NUL-terminated result in a `MAXPATHLEN`-sized buffer. This follows the macOS `fcntl(2)` manual's documented buffer requirement. This fixture is a sequential rename/replacement test, not a concurrent-race proof. The latest assertion-bearing source commit is `b63b8ca309850ffb615704ccfde728e0f2dd09d3`; exact-head macOS CI is still required before recording its outcome.
+
+
+### Exact-head rename/replacement result (run #45336024346)
+
+The assertion-bearing head `81dc3e6eba2e0ff8d7f097f3f85935e0819390bc` passed the full Rust Core Tests matrix on Ubuntu, Windows, and macOS. The macOS native diagnostic step completed successfully on macOS 26.7.2 (build 25G332, arm64). Its logs show:
+- Before rename, both path APIs returned the temporary directory's `.../before` path.
+- After renaming the opened directory to `.../after` and creating a replacement at the old `.../before` path, the retained descriptor returned `/private/tmp/.../after` through `F_GETPATH` and `/System/Volumes/Data/private/tmp/.../after` through `F_GETPATH_NOFIRMLINK`.
+- A separately opened descriptor for the replacement returned the `.../before` path through both APIs.
+- The original descriptor's device/inode identity remained unchanged; the replacement descriptor had a distinct identity.
+
+This demonstrates sequential rename/replacement tracking for this runner and fixture. It does not establish behavior under concurrent rename races, sandbox restrictions, or all filesystem implementations. Continue to treat path output as diagnostic evidence, not as an atomic authorization check.
+
+
+### Concurrent rename stress result (PR #102, run #45336267947)
+
+The bounded stress experiment ran on the macOS 26.7.2 (build 25G332, arm64) hosted runner. One writer thread alternated a retained directory between `left` and `right` for 2,000 rename cycles while the main thread made 4,000 paired `F_GETPATH` / `F_GETPATH_NOFIRMLINK` observations on the same open descriptor. The exact log result was:
+
+```
+rename_race iterations=4000 path_errors=0 unexpected_paths=0 writer_error=0 writer_errno=0 join_error=0 identity_same=yes
+```
+
+The native diagnostic step and full Rust Core Tests matrix passed on Ubuntu, Windows, and macOS in [run #45336267947](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45336267947). The concurrent test observed no API errors, paths outside the two expected names, writer errors, join errors, or descriptor identity changes.
+
+**Scope:** this is bounded empirical coverage on one hosted macOS image. It does not prove all scheduler interleavings, all filesystems/OS versions, sandbox compatibility, or an atomic ancestry guarantee. A pair of path queries is not itself atomic; each result may reflect a different instant during concurrent renames. Keep the signal diagnostic until the adapter can preserve handle-relative authority and fail closed without relying on string-prefix checks.
+
+
+### Kernel implementation and sandbox compatibility review (2026-11-24)
+
+A source trace of Apple's public XNU tree clarifies what the fcntl command actually asks the kernel to do:
+
+1. `bsd/kern/kern_descrip.c` handles both `F_GETPATH` and `F_GETPATH_NOFIRMLINK` in the same vnode-descriptor branch. For the latter it calls `vn_getpath_ext(..., VN_GETPATH_NO_FIRMLINK)`, with a `MAXPATHLEN` buffer. Source: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_descrip.c
+2. `bsd/vfs/vfs_subr.c` maps `VN_GETPATH_NO_FIRMLINK` to `BUILDPATH_NO_FIRMLINK`. Because the fcntl caller does not pass `VN_GETPATH_FSENTER`, the path builder also uses `BUILDPATH_NO_FS_ENTER`; it reconstructs from the kernel's name cache rather than entering the filesystem. Source: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_subr.c
+3. `bsd/vfs/vfs_cache.c` shows the path reconstruction running under the shared name-cache lock, which stabilizes vnode parent and mount-covered chains during that reconstruction. The same file documents `BUILDPATH_CHECK_MOVED` as returning `EAGAIN` for a parent-move condition, but the fcntl call's flags do **not** request `VN_GETPATH_CHECK_MOVED`. Sources: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_cache.c
+
+This source trace supports the observed behavior: the command asks for a name-cache-derived descriptor path with firmlink redirection disabled. It does **not** turn the returned string into a retained ancestry capability. The kernel lock protects reconstruction while the syscall runs; it does not hold the namespace stable for a later filesystem operation after the syscall returns. The bounded stress test is empirical support for expected behavior, not a proof of every race or interleaving.
+
+#### Sandbox caveat
+
+A public WebKit WebProcess sandbox profile has a command allowlist for `system-fcntl` that includes `F_GETPATH` but does not list `F_GETPATH_NOFIRMLINK`: https://github.com/WebKit/WebKit/blob/main/Source/WebKit/WebProcess/com.apple.WebProcess.sb.in. This is not proof that every App Sandbox profile denies command 102, but it is concrete evidence that sandbox policy may be command-specific and that success in an unsandboxed GitHub Actions runner cannot establish availability in LOCO's eventual process sandbox. Apple's App Sandbox documentation also explains that operations outside granted capabilities are prohibited: https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox.
+
+**Required before production use:** run a signed, representative sandboxed LOCO helper under the actual intended entitlements/profile; record whether command 102 is allowed, and fail closed if unavailable. Do not add a broad sandbox exception solely to make the diagnostic pass without a security review. Keep path-length handling fail-closed because the documented buffer is `MAXPATHLEN`.
+
+
+### Command-specific Seatbelt policy experiment (PR #102, run #45337196884)
+
+A second native helper runs under a deliberately restrictive Seatbelt profile. The profile explicitly denies the `system-fcntl` operation class and then allows only `F_GETPATH`. It opens a temporary directory descriptor and verifies:
+- `F_GETPATH` succeeds under the profile;
+- `F_GETPATH_NOFIRMLINK` fails with `EPERM` or `EACCES`.
+
+The exact macOS runner output was:
+
+```
+sandbox_probe getpath=success nofirmlink_result=denied_or_failed nofirmlink_errno=1
+```
+
+The first profile iteration omitted the explicit `(deny system-fcntl)` rule; both commands then succeeded. The test was corrected to deny the operation class before allowing the one command. The corrected profile passed on the next exact head.
+
+The latest CI uses the absolute system binary `/usr/bin/sandbox-exec` rather than resolving it through `PATH`. This is a CI-only diagnostic harness; LOCO does not depend on `sandbox-exec` at runtime.
+
+**Interpretation:** Seatbelt can distinguish the two fcntl commands, and a profile that permits `F_GETPATH` may still deny `F_GETPATH_NOFIRMLINK`. This confirms the sandbox compatibility concern is real.
+
+**Deployment gap:** review of the current extension package plus PR #93 (Rust child process) and PR #94 (TypeScript parent client) found no LOCO-owned `.entitlements` file or declared App Sandbox profile. The sidecar is designed to be spawned by the VS Code extension host and inherits the host process's sandbox context. Until the supported VS Code distribution/deployment model and its signing/entitlements are selected, there is no representative LOCO sandbox profile to test. The custom Seatbelt test must not be presented as proof of behavior under every VS Code host.
+
+Before using command 102 in production, test the packaged sidecar inside each supported host/deployment configuration. If the command is denied, fail closed or retain only the already-validated distinct-volume guard; do not weaken the host sandbox to force success.
+
+
+### Official VS Code host scope and actual sandbox decision
+
+The current LOCO package targets a VS Code extension (`engines.vscode`) and PRs #93/#94 design the Rust authority as a child process spawned directly by the extension host. There is no LOCO-owned macOS app bundle or entitlements file in the reviewed package/sidecar changes.
+
+A current Microsoft VS Code upstream issue states that the official VS Code macOS app is not App Sandbox-enabled (`com.apple.security.app-sandbox` is absent): https://github.com/microsoft/vscode/issues/307364. This is consistent with Apple's guidance that App Sandbox is an explicit code-signing entitlement and that embedded child tools inherit a sandbox only when launched from a sandboxed app with the appropriate helper configuration: https://developer.apple.com/documentation/xcode/embedding-a-helper-tool-in-a-sandboxed-app.
+
+**Initial support boundary:** treat the official Microsoft VS Code desktop distribution as the baseline host. Do not assume the same result for VSCodium, Cursor, other VS Code forks, App Store distributions, remote extension hosts, or enterprise-wrapped builds. The runtime capability must still be probed and failures must be explicit. If a supported host imposes a sandbox that denies command 102, the adapter must fail closed for any operation that requires firmlink detection; it must not weaken the host sandbox.
+
+The custom Seatbelt CI helper is only a negative test of command-specific denial, not a substitute for inspecting the actual host's code-signing entitlements and exercising the packaged sidecar in that host. Apple documents `codesign -dvvv --entitlements - <app>` as a way to inspect whether App Sandbox is enabled: https://developer.apple.com/documentation/security/protecting-user-data-with-app-sandbox.
+
+### Pinned sandbox test exact-head result
+
+The workflow now invokes `/usr/bin/sandbox-exec` by absolute path. Latest head `dcc7495ee0c954758130412a2c782e6b62e4bfe3` passed Ubuntu, Windows, and macOS in [run #45337375932](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45337375932). The sandbox helper verifies that command 50 succeeds and command 102 is denied with `EPERM` under the explicit command allowlist. The test uses no production runtime dependency on `sandbox-exec`.
+
+
+### Parent-entry metadata probe — no pre-open signal found (run #45339440539)
+
+A follow-up probe requested `ATTR_CMN_FSID`, `ATTR_CMN_FILEID`, `ATTR_CMN_PARENTID`, and `ATTR_CMN_FLAGS` through both `getattrlistbulk` and `getattrlistat(FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH)` for `/Users`, `/Applications`, and `/Library`. It compared those returned values with the root directory and a separately opened target descriptor.
+
+On macOS 26.7.2 (build 25G332, arm64), both APIs returned the target's FSID and file ID, not a distinct parent-volume entry identity. The parent ID was `2`, which also matched the root inode value and did not distinguish the firmlink. The flags remained `0x00100000` (`SF_NOUNLINK`), not `SF_FIRMLINK`.
+
+Representative `/Users` output:
+
+```
+getattrlistat_entry_metadata path=Users root_ino=2 entry_fileid=18483 entry_parentid=2 flags=0x00100000 root_fsid=16777232:26 entry_fsid=16777226:26 parent_matches_root=yes
+getattrlistat_target_metadata path=Users target_ino=18483 target_fsid=16777226:26 entry_fsid_matches_target=yes
+bulk_identity name=Users root_ino=2 entry_fileid=18483 entry_parentid=2 target_ino=18483 flags=0x00100000 root_fsid=16777232:26 entry_fsid=16777226:26 target_fsid=16777226:26 parent_matches_root=yes entry_fsid_matches_root=no entry_fsid_matches_target=yes
+```
+
+The exact-head Rust Core Tests run [#45339440539](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45339440539) passed Ubuntu, Windows, and macOS. The probe therefore confirms that these two metadata APIs, with these attributes and no-follow options, do not expose a distinct pre-open firmlink entry identity on this runner.
+
+**Decision:** do not use `ATTR_CMN_FSID`, `ATTR_CMN_FILEID`, or `ATTR_CMN_PARENTID` from these calls as a pre-open firmlink signal. The `F_GETPATH_NOFIRMLINK` adapter check remains a post-open, pre-content supplementary containment signal only. Issue #74's requirement for a reliable signal read without traversing the target remains unresolved; seek authoritative Apple DTS guidance or another native entry-level API/fixture.
+
+
+### Legacy `getdirentriesattr` candidate — unsupported on hosted APFS (run #45339809143)
+
+The documented legacy directory enumeration API `getdirentriesattr(2)` is described by its manual as returning `SF_FIRMLINK` for a firmlink entry and entry attributes rather than target attributes. It is deprecated since macOS 10.10 and only supported by some volume implementations. Manual: https://keith.github.io/xcode-man-pages/getdirentriesattr.2.html
+
+The native probe attempted it on the hosted macOS root volume with `ATTR_CMN_NAME | ATTR_CMN_FLAGS`. It returned:
+
+```
+getdirentriesattr error=45 unsupported_on_volume
+```
+
+The exact-head Rust Core Tests run [#45339809143](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45339809143) passed on Ubuntu, Windows, and macOS. The API is therefore unavailable on the APFS runner used for the macOS acceptance tests and cannot be used as the supported APFS pre-open signal. The probe records the unsupported result without failing the build.
+
+**Decision:** do not use `getdirentriesattr` in the adapter. The pre-open firmlink-entry signal remains unresolved on the tested APFS environment.
+
+
+### Extended common no-firmlink path attribute probe (run #45340410986)
+
+XNU defines `ATTR_CMNEXT_NOFIRMLINKPATH` in the extended common-attribute bitmap (`attrlist.forkattr` with `FSOPT_ATTR_CMN_EXTENDED`). The XNU implementation computes it from the vnode with `attrlist_build_path(..., BUILDPATH_NO_FIRMLINK)`; the manual describes it as the path of the filesystem object with firmlinks removed. It is not a boolean firmlink-entry flag.
+
+The native probe requested this attribute through both `getattrlistat` and `getattrlistbulk`. On macOS 26.7.2 (build 25G332, arm64), both returned the Data-volume target path for all three root entries:
+
+```
+bulk_extended name=Library flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Library
+bulk_extended name=Users flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Users
+bulk_extended name=Applications flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Applications
+extended_nofirmlink path=Users flags=0x00100000 resolved_path=/System/Volumes/Data/Users
+extended_nofirmlink path=Applications flags=0x00100000 resolved_path=/System/Volumes/Data/Applications
+extended_nofirmlink path=Library flags=0x00100000 resolved_path=/System/Volumes/Data/Library
+```
+
+The same bulk records still report `SF_NOUNLINK`, not `SF_FIRMLINK`; the separate identity probe shows their FSID/file ID match the opened Data-volume targets. The extended path therefore confirms the canonical no-firmlink path of the returned vnode, but does not expose a distinct entry identity or a documented pre-traversal signal. It must not be treated as proof that APFS returned the firmlink placeholder rather than the target vnode.
+
+The XNU `getattrlistbulk(2)` manual says a firmlink directory entry should have `SF_FIRMLINK` and that bulk attributes should describe the firmlink rather than its target. The hosted runner's observed target identity/path remains inconsistent with that documented behavior. `getdirentriesattr(2)` is not a fallback: the volume returns `ENOTSUP` (45), which the manual explicitly documents for unsupported volumes.
+
+**Decision:** keep `ATTR_CMNEXT_NOFIRMLINKPATH` as diagnostic evidence only. It is a path of the vnode returned by the API, not a pre-open entry-level firmlink bit. The acceptance requirement for a reliable signal read without traversing the target remains unresolved. Exact-head Rust Core Tests [#45340410986](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45340410986) passed Ubuntu, Windows, and macOS.
+
+
+### Bulk extended-path controls and exact-head result (run #45340686612)
+
+The native bulk probe now checks three mapped entries and two stable ordinary-directory controls. On macOS 26.7.2 (build 25G332, arm64), `ATTR_CMNEXT_NOFIRMLINKPATH` returned:
+
+```
+bulk_extended name=usr flags=0x00088000 nofirmlink_path=/usr expected=/usr match=yes
+bulk_extended name=Library flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Library expected=/System/Volumes/Data/Library match=yes
+bulk_extended name=System flags=0x00080000 nofirmlink_path=/System expected=/System match=yes
+bulk_extended name=private flags=0x00108000 nofirmlink_path=/System/Volumes/Data/private expected=/System/Volumes/Data/private match=yes
+bulk_extended name=Users flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Users expected=/System/Volumes/Data/Users match=yes
+bulk_extended name=Applications flags=0x00100000 nofirmlink_path=/System/Volumes/Data/Applications expected=/System/Volumes/Data/Applications match=yes
+bulk_extended mapped_entries_found=4 normal_entries_found=2
+```
+
+The `/private` entry is itself listed in `/usr/share/firmlinks` as `/private\tprivate`; it is a directory, not a POSIX symlink (`fstatat(AT_SYMLINK_NOFOLLOW)` reports mode `040755` and `S_ISLNK=no`). A follow-up `getattrlistat` request with `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH` still returns the firmlink directory, and `ATTR_CMNEXT_NOFIRMLINKPATH` reports `/System/Volumes/Data/private`. This confirms that `FSOPT_NOFOLLOW_ANY` prevents symbolic-link traversal but does not block firmlinks. The `/System` and `/usr` controls return their expected unchanged paths; all four mapped entries return their Data-volume no-firmlink paths.
+
+This gives a reproducible *pre-application-open path observation* during directory enumeration, but the returned value remains a path for the vnode produced by the filesystem's bulk operation. Public XNU source documents the intended `SF_FIRMLINK` entry flag and firmlink-entry metadata behavior, while the hosted APFS runner still reports target FSIDs/file IDs and `SF_NOUNLINK`. Without APFS implementation source or an Apple-provided same-volume fixture, we cannot prove that the bulk call observes the firmlink entry without internally traversing to its target. Do not promote the path comparison to the authorization boundary.
+
+The exact head [5c56d25](https://github.com/Veeresh-11/Loco-Agent/commit/5c56d25557c0c0ddf160a4466e4554191a46741c) passed Ubuntu, Windows, and macOS in [run #45341558203](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45341558203). macOS recorded 96 unit tests passed and one ignored nested-volume fixture.
+
+
+### Extended common attribute — pre-open firmlink path signal validated (PR #103)
+
+A native probe now requests `ATTR_CMNEXT_NOFIRMLINKPATH` in the extended common-attribute namespace using `FSOPT_ATTR_CMN_EXTENDED`. For the parent-relative `getattrlistat` query it also uses `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH`. The query is performed before opening the child descriptor.
+
+On macOS 26.7.2 (build 25G332, arm64), both `getattrlistbulk` and `getattrlistat` returned the following exact paths:
+
+| Entry | Firmlink-free path |
+|---|---|
+| `/Users` | `/System/Volumes/Data/Users` |
+| `/Applications` | `/System/Volumes/Data/Applications` |
+| `/Library` | `/System/Volumes/Data/Library` |
+| `/private` | `/System/Volumes/Data/private` |
+| `/System` | `/System` |
+| `/usr` | `/usr` |
+
+The probe asserts all six values, so it distinguishes the four actual firmlink mappings from two ordinary directory controls. The `SF_FIRMLINK` bit remains absent; this path attribute is a separate native signal and does not treat `SF_NOUNLINK` as equivalent.
+
+XNU's `attrlist_build_path` routes this attribute through `build_path(..., BUILDPATH_NO_FIRMLINK)`. The vnode path builder explicitly avoids firmlink redirection while reconstructing the path:
+- https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_attrlist.c
+- https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_cache.c
+- https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/attr.h
+
+PR #103 consumes the attribute before each descendant `openat`, compares the returned path to the parent's firmlink-free path plus the child name, and returns `FirmlinkBoundary` on mismatch. It then cross-checks the opened descriptor with `F_GETPATH_NOFIRMLINK` and retains the `f_fsid`/handle-relative checks. The macOS regression tests verify pre-open denial, ordinary-directory acceptance, a workspace rooted beneath `/Users`, malformed-record rejection, and concurrent queries without shared directory offsets.
+
+This is a pre-open metadata/path query: it does not acquire the target file descriptor or read target content. The kernel still resolves the requested directory entry and reconstructs its vnode path; the claim is not that the kernel performs zero namei/vnode traversal.
