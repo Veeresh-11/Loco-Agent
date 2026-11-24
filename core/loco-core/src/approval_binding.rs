@@ -110,7 +110,6 @@ pub fn verify_approval_binding(
 mod tests {
     use super::*;
     use crate::snapshot_payload::build_snapshot_contract;
-    use crate::workspace_snapshot::{SnapshotFileKind, SNAPSHOT_CONTRACT_VERSION};
     use std::time::Duration;
 
     fn sample() -> ProposedAction {
