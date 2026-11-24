@@ -44,7 +44,7 @@ fn descriptor_path_no_firmlink(file: &File) -> Result<PathBuf, MacOsSnapshotAdap
 #[cfg(target_os="macos")]
 const FSOPT_RESOLVE_BENEATH: libc::c_ulong = 0x1000;
 
-#[cfg(target_os="macos")]
+#[cfg(all(target_os="macos", test))]
 fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotAdapterError> {
  use std::ffi::OsString;
  use std::os::unix::ffi::OsStringExt;
