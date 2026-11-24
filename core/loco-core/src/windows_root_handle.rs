@@ -1020,7 +1020,7 @@ mod tests {
         // Confirm that the fixture itself is a working NTFS junction through
         // the ordinary Win32 path API before interpreting native NTSTATUS values.
         assert_eq!(
-            std::fs::read(workspace.path().join(r"junction\target.txt")).unwrap(),
+            std::fs::read(workspace.path().join("junction").join("target.txt")).unwrap(),
             b"outside-junction-sentinel"
         );
 
