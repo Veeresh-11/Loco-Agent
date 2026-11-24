@@ -23,7 +23,7 @@ This roadmap preserves the requested order. Work on a later priority may exist a
 
 **Tracking issue:** [#74](https://github.com/Veeresh-11/Loco-Agent/issues/74)
 
-Relevant PRs: #73, #75, #76, #77, #78, #100.
+Relevant PRs: #73, #75, #76, #77, #78, #100, #102. PR #102 probes descriptor-derived `F_GETPATH` versus `F_GETPATH_NOFIRMLINK` output and is pending exact-head macOS validation.
 
 ### Established evidence
 - The macOS 26.7.2 hosted runner (build 25G332, arm64) lists mappings such as `/Users`, `/Applications`, and `/Library` in the system firmlink map.
