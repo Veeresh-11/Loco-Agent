@@ -275,6 +275,58 @@ static int probe_bulk_entry_identity(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static int probe_extended_nofirmlink_path_at(int rootfd, const char *path) {
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_FLAGS;
+    attrs.forkattr = ATTR_CMNEXT_NOFIRMLINKPATH;
+
+    unsigned char buffer[PATH_MAX + 512] __attribute__((aligned(8)));
+    memset(buffer, 0, sizeof(buffer));
+    if (getattrlistat(rootfd, path, &attrs, buffer, sizeof(buffer),
+                      FSOPT_ATTR_CMN_EXTENDED | FSOPT_RESOLVE_BENEATH) != 0) {
+        printf("extended_nofirmlink path=%s error=%d\n", path, errno);
+        return 1;
+    }
+
+    uint32_t record_len = 0;
+    attribute_set_t returned;
+    memcpy(&record_len, buffer, sizeof(record_len));
+    memcpy(&returned, buffer + sizeof(record_len), sizeof(returned));
+    size_t offset = sizeof(record_len) + sizeof(returned);
+    if (!(returned.commonattr & ATTR_CMN_FLAGS) ||
+        !(returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH) ||
+        record_len < offset + sizeof(uint32_t) + sizeof(attrreference_t) ||
+        record_len > sizeof(buffer)) {
+        printf("extended_nofirmlink path=%s missing_attrs returned_common=0x%08x "
+               "returned_extended=0x%08x length=%u\n",
+               path, returned.commonattr, returned.forkattr, record_len);
+        return 1;
+    }
+
+    uint32_t flags = 0;
+    memcpy(&flags, buffer + offset, sizeof(flags));
+    offset += sizeof(flags);
+    attrreference_t path_ref;
+    memcpy(&path_ref, buffer + offset, sizeof(path_ref));
+    int64_t path_start = (int64_t)offset + (int64_t)path_ref.attr_dataoffset;
+    if (path_ref.attr_length == 0 ||
+        path_start < 0 ||
+        (uint64_t)path_start + path_ref.attr_length > record_len ||
+        path_ref.attr_length > PATH_MAX ||
+        buffer[path_start + path_ref.attr_length - 1] != '\0') {
+        printf("extended_nofirmlink path=%s invalid_path_ref\n", path);
+        return 1;
+    }
+
+    printf("extended_nofirmlink path=%s flags=0x%08x resolved_path=%s "
+           "path_bytes=%u\n",
+           path, flags, (char *)(buffer + (size_t)path_start),
+           path_ref.attr_length);
+    return 0;
+}
+
 static int probe_getdirentriesattr_firmlink_flags(void) {
     int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirfd < 0) {
@@ -894,6 +946,11 @@ int main(void) {
     close(dirfd);
     if (probe_bulk_entry_identity() != 0) {
         return 4;
+    }
+    if (probe_extended_nofirmlink_path_at(rootfd, "Users") != 0 ||
+        probe_extended_nofirmlink_path_at(rootfd, "Applications") != 0 ||
+        probe_extended_nofirmlink_path_at(rootfd, "Library") != 0) {
+        return 5;
     }
     if (probe_getdirentriesattr_firmlink_flags() != 0) {
         return 5;
