@@ -4,13 +4,15 @@
 
 ## Exact CI run
 
-Rust Core Tests [run #45353310385](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45353310385) completed successfully on all six jobs for the PR #113 environment-capture change. The subsequent explicit OS matrix [run #45354176701](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354176701) completed successfully on all seven jobs (Ubuntu, Windows Server 2022, Windows Server 2025, macOS 15 arm64/Intel, and macOS 26 arm64/Intel). The latter tested PR #114 head `4848f5affe1c2a0e6871b9f6f69ce47fae379ab5`. All native diagnostic steps, platform-specific fixtures, core unit tests, and fixture cleanup steps completed successfully.
+Rust Core Tests [run #45353310385](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45353310385) completed successfully on all six jobs for the PR #113 environment-capture change. The explicit Windows/macOS matrix [run #45354176701](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354176701) completed successfully on all seven jobs. The expanded Linux/Windows/macOS matrix [run #45354964372](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354964372) completed successfully on all nine jobs: Ubuntu 22.04/24.04/26.04, Windows Server 2022/2025, macOS 15 arm64/Intel, and macOS 26 arm64/Intel. All native diagnostic steps, platform-specific fixtures, core unit tests, and fixture cleanup steps completed successfully.
 
 ## Runner environments observed
 
 | Runner | OS / build | Architecture | Workspace temporary filesystem |
 |---|---|---|---|
-| `ubuntu-latest` | Ubuntu 26.04.1 LTS; kernel `7.0.0-1020-azure` | `x86_64` | `findmnt` reports `ext4` on `/dev/nvme0n1p1`; `stat -f` reports the generic `ext2/ext3` statfs family; block size 4096 |
+| `ubuntu-22.04` | Ubuntu 22.04.5 LTS; kernel `6.8.0-1070-azure` | `x86_64` | `findmnt` reports `ext4` on `/dev/sda1`; `stat -f` reports the generic `ext2/ext3` statfs family; block size 4096 |
+| `ubuntu-24.04` | Ubuntu 24.04.5 LTS; kernel `7.0.0-1014-aws` | `x86_64` | `findmnt` reports `ext4` on `/dev/mapper/cow-root`; `stat -f` reports the generic `ext2/ext3` statfs family; block size 4096 |
+| `ubuntu-26.04` | Ubuntu 26.04.1 LTS; kernel `7.0.0-1020-azure` | `x86_64` | `findmnt` reports `ext4` on `/dev/nvme0n1p1`; `stat -f` reports the generic `ext2/ext3` statfs family; block size 4096 |
 | `windows-2022` | Microsoft Windows Server 2022 Datacenter, version `10.0.20348`, build `20348`; PowerShell `7.6.10` | `X64` | Drive `D:`, NTFS, label `Temporary Storage`, allocation unit 4096 bytes |
 | `windows-2025` | Microsoft Windows Server 2025 Datacenter, version `10.0.26100`, build `26100`; PowerShell `7.6.10` | `X64` | Drive `D:`, NTFS, label `Temporary Storage`, allocation unit 4096 bytes |
 | `macos-15` | macOS `15.8.2`, build `24H232` | `arm64` | APFS native probes and nested APFS fixture passed; the workspace volume is hosted runner-managed |
@@ -24,8 +26,8 @@ The Linux `findmnt` filesystem type (`ext4`) is the specific mount type. The `st
 
 | Platform | Fixture | Result in run #45353310385 |
 |---|---|---|
-| Linux | Bind-mounted directory placed beneath a workspace, with a sentinel outside the workspace | Setup, boundary verification, and cleanup passed |
-| Linux | 128 MiB ext4 filesystem image loop-mounted beneath a workspace, with a sentinel on the mounted filesystem | Setup, distinct-filesystem boundary verification, and cleanup passed |
+| Ubuntu 22.04/24.04/26.04 | Bind-mounted directory placed beneath a workspace, with a sentinel outside the workspace | Setup, boundary verification, and cleanup passed on all three explicit runners in run #45354964372 |
+| Ubuntu 22.04/24.04/26.04 | 128 MiB ext4 filesystem image loop-mounted beneath a workspace, with a sentinel on the mounted filesystem | Setup, distinct-filesystem boundary verification, and cleanup passed on all three explicit runners in run #45354964372 |
 | Windows Server 2022 and 2025 | Secondary NTFS VHDX volume mounted at a directory beneath a workspace | Setup, volume-boundary verification, and cleanup passed on both explicit runner labels in run #45354176701 |
 | macOS 15 and 26, arm64 and Intel | Native bulk firmlink metadata and `O_RESOLVE_BENEATH` probes | Passed on all four listed runner builds |
 | macOS 15 and 26, arm64 and Intel | Separate APFS volume mounted beneath a workspace | Setup, nested-volume boundary verification, and detach passed on all four runners |
@@ -33,8 +35,8 @@ The Linux `findmnt` filesystem type (`ext4`) is the specific mount type. The `st
 
 ## Interpretation and limits
 
-- These runs prove the workflow diagnostics and listed fixtures execute successfully on these exact hosted runner images. Linux remains on `ubuntu-latest`; Windows now uses explicit `windows-2022` and `windows-2025` labels. Do not infer an immutable OS support promise beyond the recorded builds.
-- Linux's loop-mounted ext4 fixture is a separate filesystem boundary test. It does not constitute a broad matrix of Linux filesystem types, kernel versions, mount options, or namespace configurations.
+- These runs prove the workflow diagnostics and listed fixtures execute successfully on these exact hosted runner images. Linux now uses explicit `ubuntu-22.04`, `ubuntu-24.04`, and `ubuntu-26.04` labels; Windows uses explicit `windows-2022` and `windows-2025` labels. Do not infer an immutable OS support promise beyond the recorded builds.
+- Linux's three hosted images reported kernels 6.8.0-1070-azure, 7.0.0-1014-aws, and 7.0.0-1020-azure respectively; Ubuntu 22.04's runner did not use the distribution's 5.15 GA kernel. The loop-mounted ext4 fixture is a separate filesystem boundary test. This is not a broad matrix of Linux filesystem types, kernel versions, mount options, or namespace configurations.
 - Windows validation covers Windows Server 2022 build 20348 and Windows Server 2025 build 26100, both x64 with NTFS VHDX mountpoint fixtures. ReFS, FAT variants, network filesystems, other Windows builds, and other architectures remain untested here.
 - macOS evidence is limited to the exact OS builds and architectures listed above. The System/Data firmlink conclusions remain scoped as stated in [the macOS support matrix](MACOS_SNAPSHOT_SUPPORT_MATRIX.md); this document does not broaden those security claims.
 - Passing CI is not independent security review and does not authorize production enablement or merging the security stack.
