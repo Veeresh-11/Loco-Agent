@@ -419,7 +419,7 @@ static int probe_bulk_extended_nofirmlink_paths(void) {
     return found == 3 && normal_found == 2 ? 0 : 1;
 }
 
-static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const char *expected_path) {
+static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const char *expected_path, uint64_t lookup_options) {
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
@@ -429,7 +429,7 @@ static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const
     unsigned char buffer[PATH_MAX + 512] __attribute__((aligned(8)));
     memset(buffer, 0, sizeof(buffer));
     if (getattrlistat(rootfd, path, &attrs, buffer, sizeof(buffer),
-                      FSOPT_ATTR_CMN_EXTENDED | FSOPT_RESOLVE_BENEATH) != 0) {
+                      FSOPT_ATTR_CMN_EXTENDED | lookup_options) != 0) {
         printf("extended_nofirmlink path=%s error=%d\n", path, errno);
         return 1;
     }
@@ -467,9 +467,10 @@ static int probe_extended_nofirmlink_path_at(int rootfd, const char *path, const
     const char *resolved_path = (char *)(buffer + (size_t)path_start);
     int matches = expected_path == NULL || strcmp(resolved_path, expected_path) == 0;
     printf("extended_nofirmlink path=%s flags=0x%08x resolved_path=%s expected=%s match=%s "
-           "path_bytes=%u\n",
+           "path_bytes=%u lookup_options=0x%llx\n",
            path, flags, resolved_path, expected_path == NULL ? "(unspecified)" : expected_path,
-           matches ? "yes" : "no", path_ref.attr_length);
+           matches ? "yes" : "no", path_ref.attr_length,
+           (unsigned long long)lookup_options);
     return matches ? 0 : 1;
 }
 
@@ -1102,13 +1103,13 @@ int main(void) {
         close(dirfd);
         return 5;
     }
-    if (probe_extended_nofirmlink_path_at(dirfd, ".", "/") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "Users", "/System/Volumes/Data/Users") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "Applications", "/System/Volumes/Data/Applications") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "Library", "/System/Volumes/Data/Library") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "System", "/System") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr") != 0 ||
-        probe_extended_nofirmlink_path_at(dirfd, "private", "/System/Volumes/Data/private") != 0) {
+    if (probe_extended_nofirmlink_path_at(dirfd, ".", "/", FSOPT_RESOLVE_BENEATH) != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Users", "/System/Volumes/Data/Users", FSOPT_RESOLVE_BENEATH) != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Applications", "/System/Volumes/Data/Applications", FSOPT_RESOLVE_BENEATH) != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "Library", "/System/Volumes/Data/Library", FSOPT_RESOLVE_BENEATH) != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "System", "/System", FSOPT_RESOLVE_BENEATH) != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "usr", "/usr", FSOPT_RESOLVE_BENEATH) != 0 ||
+        probe_extended_nofirmlink_path_at(dirfd, "private", NULL, FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH) != 0) {
         close(dirfd);
         return 5;
     }
