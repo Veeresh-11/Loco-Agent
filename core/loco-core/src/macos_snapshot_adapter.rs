@@ -791,32 +791,32 @@ mod tests {
  fn bulk_preflight_rejects_nested_system_data_firmlinks() {
   let firmlinks = std::fs::read_to_string("/usr/share/firmlinks")
    .expect("macOS system firmlink map");
-  let nested_names = firmlinks.lines().filter_map(|line| {
+  let nested_entries = firmlinks.lines().filter_map(|line| {
    let mut fields = line.split_whitespace();
    let source = fields.next()?;
    fields.next()?;
-   let name = source.strip_prefix("/System/Library/")?;
-   if name.is_empty() || name.contains('/') {
-    None
-   } else {
-    Some(name.to_owned())
+   let source_path = Path::new(source);
+   if !source_path.starts_with("/System/Library") {
+    return None;
    }
+   let parent_path = source_path.parent()?.to_path_buf();
+   let name = source_path.file_name()?.to_str()?.to_owned();
+   Some((parent_path, name))
   }).collect::<Vec<_>>();
   assert!(
-   !nested_names.is_empty(),
-   "runner must provide a nested /System/Library firmlink fixture"
+   !nested_entries.is_empty(),
+   "runner must provide nested /System/Library firmlink fixtures"
   );
 
-  let parent = File::open("/System/Library").unwrap();
-  assert_eq!(
-   descriptor_path_no_firmlink(&parent).unwrap(),
-   PathBuf::from("/System/Library")
-  );
-  for name in nested_names {
+  for (parent_path, name) in nested_entries {
+   let parent = File::open(&parent_path)
+    .unwrap_or_else(|error| panic!("open nested firmlink parent {}: {error}", parent_path.display()));
    assert_eq!(
     preflight_entry_path(&parent, &name),
     Err(SnapshotPayloadError::FirmlinkBoundary),
-    "nested system/data firmlink must be rejected before open: {name}"
+    "nested system/data firmlink must be rejected before open: {}/{}",
+    parent_path.display(),
+    name
    );
   }
  }
