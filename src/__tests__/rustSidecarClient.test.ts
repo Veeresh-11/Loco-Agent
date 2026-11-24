@@ -73,14 +73,16 @@ describe('RustSidecarClient', () => {
   });
 
   it('exposes optional runtime capabilities and clears them on shutdown', async () => {
-    child.capabilities.push('macos_fcntl_getpath_nofirmlink');
+    child.capabilities.push('macos_fcntl_getpath_nofirmlink', 'macos_attr_cmnex_nofirmlinkpath');
     expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
     await client.start();
     expect(client.hasCapability('proposal_evaluation')).toBe(true);
     expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(true);
+    expect(client.hasCapability('macos_attr_cmnex_nofirmlinkpath')).toBe(true);
     expect(client.hasCapability('unknown_capability')).toBe(false);
     await client.shutdown();
     expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
+    expect(client.hasCapability('macos_attr_cmnex_nofirmlinkpath')).toBe(false);
   });
 
   it('fails closed when the sidecar advertises malformed capabilities', async () => {
