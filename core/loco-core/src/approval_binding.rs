@@ -67,7 +67,7 @@ pub fn snapshot_binding_digest(
     encode_string(&mut encoded, &snapshot.contract_version);
     encode_string(&mut encoded, &snapshot.workspace_id);
     encode_string(&mut encoded, &snapshot.relative_path);
-    encoded.push(match snapshot.file_kind {
+    encoded.push(match &snapshot.file_kind {
         SnapshotFileKind::RegularFile => 0x01,
         _ => return Err(ApprovalError::InvalidSnapshot),
     });
