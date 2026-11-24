@@ -248,3 +248,29 @@ The `/private` entry is itself listed in `/usr/share/firmlinks` as `/private\tpr
 This gives a reproducible *pre-application-open path observation* during directory enumeration, but the returned value remains a path for the vnode produced by the filesystem's bulk operation. Public XNU source documents the intended `SF_FIRMLINK` entry flag and firmlink-entry metadata behavior, while the hosted APFS runner still reports target FSIDs/file IDs and `SF_NOUNLINK`. Without APFS implementation source or an Apple-provided same-volume fixture, we cannot prove that the bulk call observes the firmlink entry without internally traversing to its target. Do not promote the path comparison to the authorization boundary.
 
 The exact head [5c56d25](https://github.com/Veeresh-11/Loco-Agent/commit/5c56d25557c0c0ddf160a4466e4554191a46741c) passed Ubuntu, Windows, and macOS in [run #45341558203](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45341558203). macOS recorded 96 unit tests passed and one ignored nested-volume fixture.
+
+
+### Extended common attribute — pre-open firmlink path signal validated (PR #103)
+
+A native probe now requests `ATTR_CMNEXT_NOFIRMLINKPATH` in the extended common-attribute namespace using `FSOPT_ATTR_CMN_EXTENDED`. For the parent-relative `getattrlistat` query it also uses `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH`. The query is performed before opening the child descriptor.
+
+On macOS 26.7.2 (build 25G332, arm64), both `getattrlistbulk` and `getattrlistat` returned the following exact paths:
+
+| Entry | Firmlink-free path |
+|---|---|
+| `/Users` | `/System/Volumes/Data/Users` |
+| `/Applications` | `/System/Volumes/Data/Applications` |
+| `/Library` | `/System/Volumes/Data/Library` |
+| `/System` | `/System` |
+| `/usr` | `/usr` |
+
+The probe asserts all five values, so it distinguishes the three actual firmlink mappings from two ordinary directory controls. The `SF_FIRMLINK` bit remains absent; this path attribute is a separate native signal and does not treat `SF_NOUNLINK` as equivalent.
+
+XNU's `attrlist_build_path` routes this attribute through `build_path(..., BUILDPATH_NO_FIRMLINK)`. The vnode path builder explicitly avoids firmlink redirection while reconstructing the path:
+- https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_attrlist.c
+- https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_cache.c
+- https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/attr.h
+
+PR #103 consumes the attribute before each descendant `openat`, compares the returned path to the parent's firmlink-free path plus the child name, and returns `FirmlinkBoundary` on mismatch. It then cross-checks the opened descriptor with `F_GETPATH_NOFIRMLINK` and retains the `f_fsid`/handle-relative checks. The macOS regression tests verify pre-open denial, ordinary-directory acceptance, a workspace rooted beneath `/Users`, malformed-record rejection, and concurrent queries without shared directory offsets.
+
+This is a pre-open metadata/path query: it does not acquire the target file descriptor or read target content. The kernel still resolves the requested directory entry and reconstructs its vnode path; the claim is not that the kernel performs zero namei/vnode traversal.
