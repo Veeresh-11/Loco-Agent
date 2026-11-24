@@ -377,6 +377,10 @@ mod tests {
    Err(SnapshotPayloadError::FirmlinkBoundary)
   );
   assert_eq!(
+   preflight_entry_path(&root,"private"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
    preflight_entry_path(&root,"System").unwrap(),
    PathBuf::from("/System")
   );
