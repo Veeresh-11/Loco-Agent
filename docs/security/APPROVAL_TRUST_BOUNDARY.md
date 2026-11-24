@@ -143,3 +143,12 @@ This is a single-active-authority design: opening a second authority against the
 The follow-on approval-store change keeps a process-local monotonic deadline for each challenge issued by the current authority. Issuance records both the existing Unix expiry (for the persisted record and diagnostics) and a deadline derived from a monotonic elapsed-time source. Consumption requires both checks to pass. The monotonic deadline is held only in memory; a challenge without a matching in-memory deadline is rejected. The process epoch from PR #85 continues to invalidate all challenges across restart, so no monotonic clock value is persisted or compared across processes.
 
 This narrows reliance on wall-clock time during a process lifetime, but does not make the wall clock trusted against reboot/OS-level manipulation, does not protect SQLite against same-user tampering, and does not authenticate user approval. The challenge store remains a prototype and cannot authorize production writes or commands.
+
+
+## Persistent challenge retention and capacity — 2026-11-24
+
+The approval-store follow-up adds bounded persistent cleanup during challenge issuance. Each issuance uses an SQLite immediate write transaction to serialize cleanup, total-row accounting, and insertion across connections. A cleanup pass deletes at most 256 rows that are consumed, wall-clock-expired, or belong to a prior process epoch. The store caps the total persisted challenge-row count at 4,096; if the ceiling remains reached after one bounded cleanup pass, issuance fails closed with a persistent-capacity error. Later issuance attempts can continue draining stale rows in bounded batches.
+
+The in-memory monotonic deadline registry remains separately capped at 1,024 outstanding entries and prunes expired deadlines. The issuance lock order is SQLite write transaction followed by the shared deadline mutex, matching consumption's database-before-cache ordering to avoid lock inversion. A cache entry is inserted before transaction commit and removed if commit fails, so another connection cannot observe a committed row before its in-process deadline is available.
+
+These are row-count and per-operation cleanup bounds, not a byte-level SQLite/WAL quota or a full audit-retention policy. SQLite page reuse/checkpoint behavior, filesystem quota, database ACLs, same-user tampering, and audit-log retention remain separate work. The challenge store is still a prototype and cannot authorize production writes or commands.
