@@ -116,3 +116,20 @@ rename_race iterations=4000 path_errors=0 unexpected_paths=0 writer_error=0 writ
 The native diagnostic step and full Rust Core Tests matrix passed on Ubuntu, Windows, and macOS in [run #45336267947](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45336267947). The concurrent test observed no API errors, paths outside the two expected names, writer errors, join errors, or descriptor identity changes.
 
 **Scope:** this is bounded empirical coverage on one hosted macOS image. It does not prove all scheduler interleavings, all filesystems/OS versions, sandbox compatibility, or an atomic ancestry guarantee. A pair of path queries is not itself atomic; each result may reflect a different instant during concurrent renames. Keep the signal diagnostic until the adapter can preserve handle-relative authority and fail closed without relying on string-prefix checks.
+
+
+### Kernel implementation and sandbox compatibility review (2026-11-24)
+
+A source trace of Apple's public XNU tree clarifies what the fcntl command actually asks the kernel to do:
+
+1. `bsd/kern/kern_descrip.c` handles both `F_GETPATH` and `F_GETPATH_NOFIRMLINK` in the same vnode-descriptor branch. For the latter it calls `vn_getpath_ext(..., VN_GETPATH_NO_FIRMLINK)`, with a `MAXPATHLEN` buffer. Source: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_descrip.c
+2. `bsd/vfs/vfs_subr.c` maps `VN_GETPATH_NO_FIRMLINK` to `BUILDPATH_NO_FIRMLINK`. Because the fcntl caller does not pass `VN_GETPATH_FSENTER`, the path builder also uses `BUILDPATH_NO_FS_ENTER`; it reconstructs from the kernel's name cache rather than entering the filesystem. Source: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_subr.c
+3. `bsd/vfs/vfs_cache.c` shows the path reconstruction running under the shared name-cache lock, which stabilizes vnode parent and mount-covered chains during that reconstruction. The same file documents `BUILDPATH_CHECK_MOVED` as returning `EAGAIN` for a parent-move condition, but the fcntl call's flags do **not** request `VN_GETPATH_CHECK_MOVED`. Sources: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/vfs/vfs_cache.c
+
+This source trace supports the observed behavior: the command asks for a name-cache-derived descriptor path with firmlink redirection disabled. It does **not** turn the returned string into a retained ancestry capability. The kernel lock protects reconstruction while the syscall runs; it does not hold the namespace stable for a later filesystem operation after the syscall returns. The bounded stress test is empirical support for expected behavior, not a proof of every race or interleaving.
+
+#### Sandbox caveat
+
+A public WebKit WebProcess sandbox profile has a command allowlist for `system-fcntl` that includes `F_GETPATH` but does not list `F_GETPATH_NOFIRMLINK`: https://github.com/WebKit/WebKit/blob/main/Source/WebKit/WebProcess/com.apple.WebProcess.sb.in. This is not proof that every App Sandbox profile denies command 102, but it is concrete evidence that sandbox policy may be command-specific and that success in an unsandboxed GitHub Actions runner cannot establish availability in LOCO's eventual process sandbox. Apple's App Sandbox documentation also explains that operations outside granted capabilities are prohibited: https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox.
+
+**Required before production use:** run a signed, representative sandboxed LOCO helper under the actual intended entitlements/profile; record whether command 102 is allowed, and fail closed if unavailable. Do not add a broad sandbox exception solely to make the diagnostic pass without a security review. Keep path-length handling fail-closed because the documented buffer is `MAXPATHLEN`.
