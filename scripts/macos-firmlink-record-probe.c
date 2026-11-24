@@ -122,6 +122,11 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 
 
 static void print_path_api_flags(int rootfd, const char *path) {
+#ifndef FSOPT_RESOLVE_BENEATH
+    (void)rootfd;
+    printf("getattrlistat path=%s options=RESOLVE_BENEATH_UNAVAILABLE_IN_SDK\\n", path);
+    return;
+#else
     struct attrlist attrs;
     memset(&attrs, 0, sizeof(attrs));
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
@@ -181,6 +186,7 @@ static void print_path_api_flags(int rootfd, const char *path) {
         }
     }
     close(childfd);
+#endif
 }
 
 static int probe_nested_firmlink(const char *parent_path, const char *entry_name, const char *expected_path) {
