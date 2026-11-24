@@ -60,7 +60,7 @@ Relevant work: PRs #44–#72, especially #49–#61 and #62–#72.
 - Windows: PR #64 adds x64 ABI layout assertions and explicitly excludes x86/ARM64. PR #65's incompatible pre-existing writer-handle test passed in Windows run #45181874421. PR #66 uses `FileIdInfo` (64-bit volume serial plus 128-bit file ID) with no legacy fallback; its Windows test passed in #45182566472. PR #67 admits NTFS only; #45182767243 passed. PR #70's real secondary NTFS VHDX mountpoint test passed in #45186946850 and reran in #45188239997.
 - macOS: PR #68 admits APFS only through `fstatfs`; PR #69's nested APFS sparse-image mount test passed in #45185300723 and reran in #45188239997.
 - Windows symlink/reparse coverage from PR #58 was exercised in the PR #65 Windows run; the directory-symlink, final-file-symlink, junction and post-open checks passed.
-- The latest pre-diagnostic PR #72 head `70b592b976def580fdcafcb0ff0d097a6311d2a9` passed the full Rust matrix #45188239997 and contract validation #45188239539. The PR #72 follow-up now records OS/kernel and workspace-filesystem details in CI; exact-head validation is running.
+- PR #72's latest code/workflow head `6acb108a3a6342a3e3c64b1e39a699ede48dbc1e` passed the full Rust matrix #45342704201 and contract validation #45342704159. The follow-up CI now records runner versions: Ubuntu 26.04.1/kernel 7.0.0-1020-azure with ext4 temp storage; macOS 26.7.2 build 25G332; Windows Server 2025 Datacenter build 26100 x64 with NTFS temp storage. The subsequent PR #72 commit `a816d32c01b9bc910d0345f7648b74e823299e69` only adds those observed version details to the review document.
 
 ### Narrow prototype support baseline
 
