@@ -62,16 +62,19 @@ However, Microsoft's user-mode `NtCreateFile` reference describes the `OBJECT_AT
 This discrepancy must remain visible:
 - The general flag definition supports the intended semantics.
 - The user-mode function page does not clearly list this flag among the accepted values.
-- The current hosted Windows Server 2025 runner empirically accepts the flag for the tested NTFS reparse scenarios, but one runner build does not resolve the documentation gap across Windows versions.
+- The hosted Windows Server 2022 (build 20348) and Windows Server 2025 (build 26100) runners both empirically passed the tested NTFS reparse scenarios with this flag. This broadens the runtime evidence to two Windows Server generations but does not reconcile the published documentation gap or establish behavior on every Windows release/filesystem.
 - The code also checks the returned handle's reparse attribute. That is defense in depth, but a post-open check alone must not be described as proof that no reparse traversal occurred before the handle was returned.
 
 **Required before broad support claims:** run the reparse denial probes on at least two explicit Windows Server runner generations, retain the raw NTSTATUS values for ordinary directory, symlink, and junction controls, and obtain authoritative clarification or a separately documented supported contract for the user-mode call. Until then, keep the Windows path fail closed and do not weaken or remove the flag as a workaround.
 
 ## Native CI evidence currently available
 
-Rust Core Tests [run #45353310385](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45353310385) passed all six jobs. The Windows job reported Microsoft Windows Server 2025 Datacenter, version `10.0.26100`, build `26100`, architecture `X64`, and NTFS for the runner temporary volume.
+Rust Core Tests [run #45354176701](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45354176701) passed all seven jobs (Ubuntu, Windows Server 2022, Windows Server 2025, macOS 15 arm64/Intel, and macOS 26 arm64/Intel).
 
-The Windows job passed 121 unit tests (0 failed, 1 ignored), then separately ran the ignored real-secondary-NTFS-volume fixture and passed it (1 passed). The logs show these named reparse tests passed:
+- Windows Server 2022 Datacenter: version `10.0.20348`, build `20348`, x64, PowerShell `7.6.10`, NTFS temporary volume.
+- Windows Server 2025 Datacenter: version `10.0.26100`, build `26100`, x64, PowerShell `7.6.10`, NTFS temporary volume.
+
+Both Windows jobs passed 121 unit tests (0 failed, 1 ignored), then separately ran the ignored real-secondary-NTFS-volume fixture and passed it (1 passed each). The logs show these named reparse tests passed on both builds:
 - `rejects_directory_symlink_when_creation_is_permitted`
 - `rejects_ntfs_junction_mount_point_reparse_tag`
 - `snapshot_adapter_rejects_final_file_symlink_reparse_tag`
@@ -79,7 +82,7 @@ The Windows job passed 121 unit tests (0 failed, 1 ignored), then separately ran
 - `snapshot_adapter_rejects_intermediate_ntfs_junction`
 - `intermediate_junction_replacement_race_never_captures_outside_bytes`
 
-This is evidence for that hosted Windows Server 2025 build and its NTFS fixture only. The Windows Server 2022 matrix added alongside this audit is intended to broaden the OS-build evidence; until it passes, it is pending.
+This is evidence for the two listed hosted Windows Server builds and their NTFS fixtures only. It does not resolve the `OBJ_DONT_REPARSE` documentation mismatch, and it does not establish compatibility for other Windows builds, architectures, or filesystems.
 
 ## Sources
 
