@@ -88,6 +88,15 @@ describe('RustSidecarClient', () => {
     await expect(client.start()).rejects.toThrow(/handshake/i);
   });
 
+  it('clears runtime capabilities when the sidecar exits unexpectedly', async () => {
+    child.capabilities.push('macos_fcntl_getpath_nofirmlink');
+    await client.start();
+    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(true);
+    child.exitCode = 2;
+    child.emit('exit', 2, null);
+    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
+  });
+
   it('fails closed on a mismatched response ID', async () => {
     child.mode = 'wrong-id';
     await expect(client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' }))
