@@ -150,6 +150,7 @@ jobs:
           capabilities = messages[0]["server"]["capabilities"]
           assert "proposal_evaluation" in capabilities, capabilities
           assert "macos_fcntl_getpath_nofirmlink" not in capabilities, capabilities
+          assert "macos_attr_cmnex_nofirmlinkpath" in capabilities, capabilities
           assert messages[1]["messageType"] == "shutdown", messages
           '
       - name: Verify real Windows volume mount boundary
