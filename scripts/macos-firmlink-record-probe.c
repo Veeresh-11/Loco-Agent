@@ -1063,20 +1063,24 @@ int main(void) {
         return 3;
     }
 
-    close(dirfd);
     if (probe_bulk_entry_identity() != 0) {
+        close(dirfd);
         return 4;
     }
     if (probe_bulk_extended_nofirmlink_paths() != 0) {
+        close(dirfd);
         return 5;
     }
     if (probe_extended_nofirmlink_path_at(dirfd, "Users") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Applications") != 0 ||
         probe_extended_nofirmlink_path_at(dirfd, "Library") != 0) {
+        close(dirfd);
         return 5;
     }
     if (probe_getdirentriesattr_firmlink_flags() != 0) {
+        close(dirfd);
         return 5;
     }
+    close(dirfd);
     return 0;
 }
