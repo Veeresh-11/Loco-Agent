@@ -37,7 +37,7 @@ static int probe_openat_beneath(const char *source_path) {
 
     memcpy(parent_path, source_path, length + 1);
     char *slash = strrchr(parent_path, '/');
-    if (slash == NULL || slash == parent_path && slash[1] == '\0') {
+    if (slash == NULL || (slash == parent_path && slash[1] == '\0')) {
         printf("resolve_beneath source=%s invalid_parent\n", source_path);
         return 1;
     }
