@@ -185,7 +185,40 @@
           "$ref": "#/$defs/id"
         },
         "decision": {
-          "$ref": "security-decision.schema.json"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "contractVersion",
+            "proposalId",
+            "decision",
+            "reasonCode",
+            "message"
+          ],
+          "properties": {
+            "contractVersion": {
+              "const": "1.0"
+            },
+            "proposalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "decision": {
+              "enum": [
+                "deny",
+                "approval_required",
+                "allow"
+              ]
+            },
+            "reasonCode": {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]{1,64}$"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
         }
       }
     },
