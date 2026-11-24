@@ -18,6 +18,9 @@ pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
 pub const MAX_OUTSTANDING_APPROVAL_CHALLENGES: usize = 1024;
 pub const MAX_PERSISTED_APPROVAL_CHALLENGES: u64 = 4096;
 pub const APPROVAL_RETENTION_BATCH_SIZE: u64 = 256;
+pub const MAX_APPROVAL_DATABASE_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_APPROVAL_WAL_BYTES: u64 = 1024 * 1024;
+pub const APPROVAL_WAL_AUTOCHECKPOINT_PAGES: u32 = 128;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -28,6 +31,7 @@ pub enum StoreError {
     InvalidChallenge,
     CapacityExceeded,
     PersistentCapacityExceeded,
+    StorageLimitExceeded,
     Binding(ApprovalError),
     Clock(ApprovalClockError),
     AlreadyConsumedOrExpired,
@@ -100,6 +104,27 @@ fn persistent_capacity_reached(tx: &rusqlite::Transaction<'_>) -> Result<bool, S
     Ok(persisted_challenge_count(tx)? >= MAX_PERSISTED_APPROVAL_CHALLENGES)
 }
 
+/// Apply SQLite page and journal bounds to one connection. The database
+/// page ceiling is hard; the WAL journal limit is enforced when SQLite can
+/// reset/truncate the WAL after checkpointing (long-lived readers can delay it).
+fn configure_storage_limits(conn: &Connection) -> Result<(), StoreError> {
+    let page_size: u64 = conn.pragma_query_value(None, "page_size", |row| row.get(0))?;
+    if page_size == 0 {
+        return Err(StoreError::StorageLimitExceeded);
+    }
+    let max_pages = (MAX_APPROVAL_DATABASE_BYTES / page_size).max(1);
+    conn.pragma_update(None, "max_page_count", max_pages)?;
+    conn.pragma_update(None, "journal_size_limit", MAX_APPROVAL_WAL_BYTES)?;
+    conn.pragma_update(None, "wal_autocheckpoint", APPROVAL_WAL_AUTOCHECKPOINT_PAGES)?;
+
+    let page_count: u64 = conn.pragma_query_value(None, "page_count", |row| row.get(0))?;
+    let configured_max: u64 = conn.pragma_query_value(None, "max_page_count", |row| row.get(0))?;
+    if page_count > max_pages || configured_max > max_pages {
+        return Err(StoreError::StorageLimitExceeded);
+    }
+    Ok(())
+}
+
 pub struct ApprovalStore {
     conn: Connection,
     clock: Arc<dyn ApprovalClock>,
@@ -127,9 +152,10 @@ impl ApprovalStore {
         process_epoch: String,
     ) -> Result<Self, StoreError> {
         conn.busy_timeout(Duration::from_secs(5))?;
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        configure_storage_limits(&conn)?;
         conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA foreign_keys = ON;
+            "PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS approval_challenges (
                 challenge_id TEXT PRIMARY KEY,
                 action_digest TEXT NOT NULL,
@@ -379,6 +405,51 @@ mod tests {
             store.consume(&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
+    }
+
+    #[test]
+    fn file_store_configures_database_and_wal_limits() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("bounded.sqlite");
+        let store = ApprovalStore::open(&database).unwrap();
+        let page_size: u64 = store.conn.pragma_query_value(None, "page_size", |row| row.get(0)).unwrap();
+        let max_pages: u64 = store.conn.pragma_query_value(None, "max_page_count", |row| row.get(0)).unwrap();
+        let journal_limit: u64 = store.conn.pragma_query_value(None, "journal_size_limit", |row| row.get(0)).unwrap();
+        let autocheckpoint: u32 = store.conn.pragma_query_value(None, "wal_autocheckpoint", |row| row.get(0)).unwrap();
+        assert!(max_pages * page_size <= MAX_APPROVAL_DATABASE_BYTES);
+        assert!(max_pages * page_size + page_size > MAX_APPROVAL_DATABASE_BYTES);
+        assert_eq!(journal_limit, MAX_APPROVAL_WAL_BYTES);
+        assert_eq!(autocheckpoint, APPROVAL_WAL_AUTOCHECKPOINT_PAGES);
+    }
+
+    #[test]
+    fn oversized_existing_database_fails_initialization_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("oversized.sqlite");
+        {
+            let conn = Connection::open(&database).unwrap();
+            conn.execute("CREATE TABLE oversized(payload BLOB NOT NULL)", []).unwrap();
+            let payload = vec![0x33u8; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
+            conn.execute("INSERT INTO oversized(payload) VALUES (?1)", params![payload]).unwrap();
+        }
+        let result = ApprovalStore::open(&database);
+        assert!(matches!(result, Err(StoreError::StorageLimitExceeded)));
+    }
+
+    #[test]
+    fn database_page_limit_rejects_growth_past_configured_ceiling() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("page-limit.sqlite");
+        let store = ApprovalStore::open(&database).unwrap();
+        let result = store.conn.execute(
+            "CREATE TABLE storage_pressure(payload BLOB NOT NULL)", [],
+        );
+        assert!(result.is_ok());
+        let payload = vec![0x5au8; (MAX_APPROVAL_DATABASE_BYTES + 1024 * 1024) as usize];
+        let insert = store.conn.execute(
+            "INSERT INTO storage_pressure(payload) VALUES (?1)", params![payload],
+        );
+        assert!(insert.is_err(), "SQLite must reject writes beyond max_page_count");
     }
 
     #[test]

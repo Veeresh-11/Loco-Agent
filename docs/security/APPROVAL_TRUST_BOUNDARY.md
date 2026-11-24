@@ -152,3 +152,14 @@ The approval-store follow-up adds bounded persistent cleanup during challenge is
 The in-memory monotonic deadline registry remains separately capped at 1,024 outstanding entries and prunes expired deadlines. The issuance lock order is SQLite write transaction followed by the shared deadline mutex, matching consumption's database-before-cache ordering to avoid lock inversion. A cache entry is inserted before transaction commit and removed if commit fails, so another connection cannot observe a committed row before its in-process deadline is available.
 
 These are row-count and per-operation cleanup bounds, not a byte-level SQLite/WAL quota or a full audit-retention policy. SQLite page reuse/checkpoint behavior, filesystem quota, database ACLs, same-user tampering, and audit-log retention remain separate work. The challenge store is still a prototype and cannot authorize production writes or commands.
+
+
+## SQLite database and WAL resource bounds — 2026-11-24
+
+The next storage-hardening checkpoint configures a 16 MiB maximum SQLite main-database size using `PRAGMA max_page_count`, calculated from the database's actual page size. Initialization fails closed if an existing database is already larger than the configured page ceiling or SQLite cannot apply the ceiling. This bounds the main database file's page allocation; writes that need more pages fail with SQLite's full-database error.
+
+The connection also sets `PRAGMA journal_size_limit=1048576` (1 MiB) and `PRAGMA wal_autocheckpoint=128` pages. These are WAL-retention/checkpoint controls, not a hard bound on instantaneous WAL growth: SQLite documents that checkpoint completion/reset can be delayed by long-lived readers, and journal_size_limit truncates the WAL only when SQLite resets it after checkpointing. The 128-page auto-checkpoint threshold is per connection and is configured on each approval-store connection. A pinned reader, unavailable checkpoint, filesystem exhaustion, or WAL growth beyond the target remains possible; callers must handle SQLite I/O/full/busy errors as failures, never bypass the store or disable journaling to recover.
+
+The configured main-database cap is a page-based ceiling, so the effective byte limit is rounded down to a whole page. This does not bound filesystem allocation metadata, WAL shared-memory sidecar size, temporary files, backup copies, or total application storage. A true hard quota for the complete database/WAL/SHM set requires an OS/filesystem quota or a dedicated storage boundary, and remains future work. No `journal_mode=OFF` or unsafe durability downgrade is used. The approval store remains a prototype and cannot authorize production writes or commands.
+
+SQLite references: [PRAGMA max_page_count and journal_size_limit](https://www.sqlite.org/pragma.html), [WAL checkpointing and checkpoint starvation](https://www.sqlite.org/wal.html), and [SQLite database page-count limits](https://www.sqlite.org/limits.html).
