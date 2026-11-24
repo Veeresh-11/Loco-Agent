@@ -111,3 +111,14 @@ Rust does not automatically provide sandboxing. A Rust process can still contain
 - Dependency and supply-chain checks.
 - Manual VS Code Extension Development Host smoke test.
 - Security review of privileged interfaces before release.
+
+
+## Follow-up control design — local storage and IPC
+
+The detailed platform design and limitations are recorded in [LOCAL_STORAGE_AND_IPC_SECURITY_BOUNDARY.md](LOCAL_STORAGE_AND_IPC_SECURITY_BOUNDARY.md).
+
+- Approval DB/WAL settings are not an aggregate storage quota. A hard cap requires an OS/filesystem quota or dedicated bounded volume; application file-size checks are raceable.
+- Keep the approval store in a private per-user directory with verified restrictive ACLs/permissions, handle-based directory validation where supported, fail-closed recovery, and consistent SQLite backup semantics.
+- Prefer a parent-spawned sidecar over a discoverable local listener. Otherwise use native local IPC and verify kernel peer credentials (Linux SO_PEERCRED; macOS getpeereid and separately reviewed peer PID/XPC options; Windows named-pipe DACL, remote-client rejection, and token identity).
+- Peer UID/PID/session identity does not prove executable integrity, benign same-user code, or human approval. Treat all IPC payloads as untrusted and apply bounded framing, timeouts, request correlation, and resource limits.
+- No production IPC transport, aggregate quota, or storage ACL implementation is selected by this documentation checkpoint.
