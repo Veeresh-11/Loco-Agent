@@ -89,6 +89,189 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 }
 
 
+static int same_fsid(fsid_t left, fsid_t right) {
+    return left.val[0] == right.val[0] && left.val[1] == right.val[1];
+}
+
+static void print_fsid(const char *label, fsid_t value) {
+    printf("%s=%d:%d", label, value.val[0], value.val[1]);
+}
+
+/*
+ * getattrlistbulk documents that a firmlink directory entry's attributes are
+ * those of the entry, not the target. Compare that metadata with the parent
+ * directory and the opened target descriptor to test whether FSID/PARENTID
+ * can identify a firmlink before opening its target.
+ */
+static int probe_bulk_entry_identity(void) {
+    int rootfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (rootfd < 0) {
+        printf("bulk_identity root_open_error=%d\n", errno);
+        return 1;
+    }
+
+    struct stat root_stat;
+    struct statfs root_fs;
+    if (fstat(rootfd, &root_stat) != 0 || fstatfs(rootfd, &root_fs) != 0) {
+        printf("bulk_identity root_metadata_error=%d\n", errno);
+        close(rootfd);
+        return 1;
+    }
+
+    struct attrlist attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME |
+                       ATTR_CMN_FSID | ATTR_CMN_FLAGS |
+                       ATTR_CMN_FILEID | ATTR_CMN_PARENTID |
+                       ATTR_CMN_ERROR;
+
+    unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
+    for (;;) {
+        int count = getattrlistbulk(rootfd, &attrs, buffer, sizeof(buffer), 0);
+        if (count < 0) {
+            printf("bulk_identity getattrlistbulk_error=%d\n", errno);
+            close(rootfd);
+            return 1;
+        }
+        if (count == 0) {
+            break;
+        }
+
+        size_t cursor = 0;
+        for (int i = 0; i < count; ++i) {
+            if (cursor + sizeof(uint32_t) + sizeof(attribute_set_t) > sizeof(buffer)) {
+                printf("bulk_identity record_header_out_of_bounds\n");
+                close(rootfd);
+                return 1;
+            }
+
+            uint32_t record_len = 0;
+            memcpy(&record_len, buffer + cursor, sizeof(record_len));
+            if (record_len < sizeof(uint32_t) + sizeof(attribute_set_t) ||
+                record_len > sizeof(buffer) - cursor) {
+                printf("bulk_identity invalid_record_length=%u\n", record_len);
+                close(rootfd);
+                return 1;
+            }
+
+            const unsigned char *record = buffer + cursor;
+            attribute_set_t returned;
+            memcpy(&returned, record + sizeof(record_len), sizeof(returned));
+            size_t offset = sizeof(record_len) + sizeof(returned);
+            uint32_t entry_error = 0;
+            if (returned.commonattr & ATTR_CMN_ERROR) {
+                if (offset + sizeof(entry_error) > record_len) {
+                    printf("bulk_identity truncated_error\n");
+                    close(rootfd);
+                    return 1;
+                }
+                memcpy(&entry_error, record + offset, sizeof(entry_error));
+                offset += sizeof(entry_error);
+            }
+            if (entry_error != 0) {
+                cursor += record_len;
+                continue;
+            }
+
+            if (!(returned.commonattr & ATTR_CMN_NAME)) {
+                printf("bulk_identity missing_name_attr\n");
+                close(rootfd);
+                return 1;
+            }
+            attrreference_t name_ref;
+            if (offset + sizeof(name_ref) > record_len) {
+                printf("bulk_identity truncated_name_ref\n");
+                close(rootfd);
+                return 1;
+            }
+            memcpy(&name_ref, record + offset, sizeof(name_ref));
+            int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+            if (name_start < 0 || name_ref.attr_length == 0 ||
+                (uint64_t)name_start + name_ref.attr_length > record_len ||
+                name_ref.attr_length > NAME_MAX + 1) {
+                printf("bulk_identity invalid_name_ref\n");
+                close(rootfd);
+                return 1;
+            }
+            char name[NAME_MAX + 1];
+            memcpy(name, record + (size_t)name_start, name_ref.attr_length);
+            if (name[name_ref.attr_length - 1] != '\0') {
+                printf("bulk_identity nonterminated_name\n");
+                close(rootfd);
+                return 1;
+            }
+            offset += sizeof(name_ref);
+
+            fsid_t entry_fsid;
+            uint32_t flags = 0;
+            uint64_t fileid = 0;
+            uint64_t parentid = 0;
+            if (!(returned.commonattr & ATTR_CMN_FSID) ||
+                !(returned.commonattr & ATTR_CMN_FLAGS) ||
+                !(returned.commonattr & ATTR_CMN_FILEID) ||
+                !(returned.commonattr & ATTR_CMN_PARENTID) ||
+                offset + sizeof(entry_fsid) + sizeof(flags) +
+                        sizeof(fileid) + sizeof(parentid) > record_len) {
+                printf("bulk_identity missing_or_truncated_metadata name=%s\n", name);
+                close(rootfd);
+                return 1;
+            }
+            memcpy(&entry_fsid, record + offset, sizeof(entry_fsid));
+            offset += sizeof(entry_fsid);
+            memcpy(&flags, record + offset, sizeof(flags));
+            offset += sizeof(flags);
+            memcpy(&fileid, record + offset, sizeof(fileid));
+            offset += sizeof(fileid);
+            memcpy(&parentid, record + offset, sizeof(parentid));
+
+            if (strcmp(name, "Users") == 0 ||
+                strcmp(name, "Applications") == 0 ||
+                strcmp(name, "Library") == 0) {
+                int childfd = openat(rootfd, name,
+                                     O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+                if (childfd < 0) {
+                    printf("bulk_identity name=%s open_target_error=%d\n", name, errno);
+                    close(rootfd);
+                    return 1;
+                }
+                struct stat child_stat;
+                struct statfs child_fs;
+                if (fstat(childfd, &child_stat) != 0 ||
+                    fstatfs(childfd, &child_fs) != 0) {
+                    printf("bulk_identity name=%s target_metadata_error=%d\n", name, errno);
+                    close(childfd);
+                    close(rootfd);
+                    return 1;
+                }
+
+                printf("bulk_identity name=%s root_ino=%llu entry_fileid=%llu "
+                       "entry_parentid=%llu target_ino=%llu flags=0x%08x ",
+                       name, (unsigned long long)root_stat.st_ino,
+                       (unsigned long long)fileid,
+                       (unsigned long long)parentid,
+                       (unsigned long long)child_stat.st_ino, flags);
+                print_fsid("root_fsid", root_fs.f_fsid);
+                printf(" ");
+                print_fsid("entry_fsid", entry_fsid);
+                printf(" ");
+                print_fsid("target_fsid", child_fs.f_fsid);
+                printf(" parent_matches_root=%s entry_fsid_matches_root=%s "
+                       "entry_fsid_matches_target=%s\n",
+                       parentid == (uint64_t)root_stat.st_ino ? "yes" : "no",
+                       same_fsid(entry_fsid, root_fs.f_fsid) ? "yes" : "no",
+                       same_fsid(entry_fsid, child_fs.f_fsid) ? "yes" : "no");
+                close(childfd);
+            }
+
+            cursor += record_len;
+        }
+    }
+
+    close(rootfd);
+    return 0;
+}
+
 static int capture_descriptor_paths(int fd, const char *label,
                                       char visible_path[MAXPATHLEN],
                                       char nofirmlink_path[MAXPATHLEN]) {
@@ -551,5 +734,8 @@ int main(void) {
     }
 
     close(dirfd);
+    if (probe_bulk_entry_identity() != 0) {
+        return 4;
+    }
     return 0;
 }
