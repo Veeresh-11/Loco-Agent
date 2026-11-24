@@ -4,6 +4,7 @@
 //! bind an OS handle, or prevent concurrent filesystem mutation.
 
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use crate::workspace_snapshot::{WorkspaceSnapshot, SnapshotContractError};
 use crate::portable_path::is_safe_portable_relative_path;
 
@@ -16,7 +17,6 @@ pub enum SnapshotPayloadError {
     LengthMismatch,
     DigestMismatch,
     AcquisitionFailed,
-    FirmlinkBoundary,
     InvalidFileType,
     HardLinkNotAllowed,
 }
@@ -93,12 +93,25 @@ impl SnapshotCaptureRequest {
 pub struct CapturedWorkspaceSnapshot {
     snapshot: WorkspaceSnapshot,
     bytes: Vec<u8>,
+    captured_at_monotonic: Duration,
 }
 
 impl CapturedWorkspaceSnapshot {
-    pub fn new(snapshot: WorkspaceSnapshot, bytes: Vec<u8>) -> Result<Self, SnapshotPayloadError> {
+    pub(crate) fn new(snapshot: WorkspaceSnapshot, bytes: Vec<u8>) -> Result<Self, SnapshotPayloadError> {
+        Self::new_at(snapshot, bytes, crate::approval_clock::process_monotonic_now())
+    }
+
+    pub(crate) fn new_at(
+        snapshot: WorkspaceSnapshot,
+        bytes: Vec<u8>,
+        captured_at_monotonic: Duration,
+    ) -> Result<Self, SnapshotPayloadError> {
         validate_snapshot_payload(&snapshot, &bytes)?;
-        Ok(Self { snapshot, bytes })
+        Ok(Self { snapshot, bytes, captured_at_monotonic })
+    }
+
+    pub(crate) fn captured_at_monotonic(&self) -> Duration {
+        self.captured_at_monotonic
     }
 
     pub fn snapshot(&self) -> &WorkspaceSnapshot {

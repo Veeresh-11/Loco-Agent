@@ -26,6 +26,10 @@ pub struct SystemApprovalClock;
 static LAST_SEEN_UNIX: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
 static MONOTONIC_ORIGIN: OnceLock<Instant> = OnceLock::new();
 
+pub(crate) fn process_monotonic_now() -> Duration {
+    MONOTONIC_ORIGIN.get_or_init(Instant::now).elapsed()
+}
+
 fn enforce_non_decreasing(
     last_seen: &mut Option<u64>,
     now: u64,
@@ -49,7 +53,7 @@ impl ApprovalClock for SystemApprovalClock {
     }
 
     fn monotonic_now(&self) -> Result<Duration, ApprovalClockError> {
-        Ok(MONOTONIC_ORIGIN.get_or_init(Instant::now).elapsed())
+        Ok(process_monotonic_now())
     }
 }
 
