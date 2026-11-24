@@ -23,13 +23,26 @@ This is a control-plane protocol for proposal evaluation only. The current Rust 
 
 1. On launch, child waits for the first complete message and starts no work.
 2. Parent sends `hello` with protocolVersion `1.0`, requestId, and fixed client name plus extension version.
-3. Child responds with `hello` and supported capability list. V1 advertises only `proposal_evaluation`.
+3. Child responds with `hello` and its supported capability list. `proposal_evaluation` is always required. On macOS, the child additionally advertises `macos_fcntl_getpath_nofirmlink` only if it can open its current working directory and successfully query `F_GETPATH_NOFIRMLINK` on that descriptor.
 4. Parent must verify protocol version, expected server name, version presence, and requested capability before sending `evaluate`.
 5. Child accepts evaluation only after successful handshake. It validates the envelope and nested ActionProposal schema, evaluates using Rust policy, and returns a `decision` with the same requestId.
 6. Parent rejects mismatched/duplicate response IDs and unexpected response types. It never interprets a decision as permission to perform a privileged operation.
 7. Parent sends `shutdown`; child replies `shutdown` with accepted=true, flushes stdout, and exits. EOF, broken pipe, malformed frame, handshake timeout, or parent termination initiates bounded shutdown and cleanup.
 
 A protocol-version mismatch, malformed/oversized message, duplicate request ID, unknown message type, or request before handshake fails closed. No fallback to a local HTTP endpoint or direct TypeScript execution path is permitted.
+
+## Runtime capability semantics
+
+Capabilities are descriptive runtime feature probes, not authorization grants.
+
+- `proposal_evaluation`: the Rust policy evaluator is available.
+- `macos_fcntl_getpath_nofirmlink`: on macOS, the sidecar opened its current working directory and successfully queried command 102 (`F_GETPATH_NOFIRMLINK`) with a bounded `MAXPATHLEN` buffer during startup.
+- `macos_attr_cmnex_nofirmlinkpath`: on macOS, the sidecar successfully queried `ATTR_CMNEXT_NOFIRMLINKPATH` for its current working directory using `getattrlistat` with `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH | FSOPT_ATTR_CMN_EXTENDED`.
+- Both macOS capabilities are omitted on non-macOS systems and when their respective probes fail for any reason. The sidecar remains available for proposal evaluation.
+- The snapshot adapter requires the extended-attribute capability for its pre-open child-entry check and the fcntl capability for the post-open descriptor cross-check; if either is unavailable, workspace snapshot acquisition fails closed.
+- The capability is only a process/host availability signal. It does not guarantee that every later descriptor query succeeds, does not prove workspace ancestry, and does not authorize file access.
+- The macOS snapshot adapter must query every retained descriptor, compare its firmlink-free path against the retained root path using component-aware containment, preserve `f_fsid` checks and handle-relative opens, and fail closed if a query fails.
+- The TypeScript parent validates capability names and exposes them to future feature gates. Unknown well-formed capabilities are retained but never interpreted as permissions.
 
 ## Message types
 

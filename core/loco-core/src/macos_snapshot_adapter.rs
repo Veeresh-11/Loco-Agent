@@ -9,6 +9,164 @@ use crate::snapshot_payload::{build_snapshot_contract,CapturedWorkspaceSnapshot,
 pub enum MacOsSnapshotAdapterError { InvalidRoot, InvalidWorkspaceId }
 
 #[cfg(target_os="macos")]
+const F_GETPATH_NOFIRMLINK: libc::c_int = 102;
+
+/// Returns the kernel's descriptor path with firmlink redirection disabled.
+/// This is a path observation, not a capability or an atomic ancestry proof.
+#[cfg(target_os="macos")]
+fn descriptor_path_no_firmlink(file: &File) -> Result<PathBuf, MacOsSnapshotAdapterError> {
+ use std::ffi::OsString;
+ use std::os::fd::AsRawFd;
+ use std::os::unix::ffi::OsStringExt;
+
+ let mut buffer = vec![0u8; libc::PATH_MAX as usize];
+ if buffer.is_empty() {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let result = unsafe {
+  libc::fcntl(file.as_raw_fd(), F_GETPATH_NOFIRMLINK, buffer.as_mut_ptr())
+ };
+ if result != 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let end = buffer.iter().position(|byte| *byte == 0)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ if end == 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let path = PathBuf::from(OsString::from_vec(buffer[..end].to_vec()));
+ if !path.is_absolute() {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok(path)
+}
+
+#[cfg(target_os="macos")]
+const FSOPT_RESOLVE_BENEATH: libc::c_ulong = 0x1000;
+
+#[cfg(target_os="macos")]
+fn parse_nofirmlink_path_record(buffer: &[u8]) -> Result<PathBuf, MacOsSnapshotAdapterError> {
+ use std::ffi::OsString;
+ use std::os::unix::ffi::OsStringExt;
+
+ if buffer.len() < 4 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let record_len = u32::from_ne_bytes(buffer[..4].try_into().unwrap()) as usize;
+ let minimum_len = 4 + std::mem::size_of::<libc::attribute_set_t>() +
+                   std::mem::size_of::<libc::attrreference_t>();
+ if record_len > buffer.len() || record_len < minimum_len {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let returned = unsafe {
+  std::ptr::read_unaligned(buffer.as_ptr().add(4).cast::<libc::attribute_set_t>())
+ };
+ if returned.forkattr & libc::ATTR_CMNEXT_NOFIRMLINKPATH == 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+
+ let reference_offset = 4 + std::mem::size_of::<libc::attribute_set_t>();
+ let reference = unsafe {
+  std::ptr::read_unaligned(
+   buffer.as_ptr().add(reference_offset).cast::<libc::attrreference_t>()
+  )
+ };
+ let path_start = reference_offset as isize + reference.attr_dataoffset as isize;
+ let path_len = reference.attr_length as usize;
+ let minimum_path_start = reference_offset + std::mem::size_of::<libc::attrreference_t>();
+ let path_start = usize::try_from(path_start)
+  .map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
+ let path_end = path_start.checked_add(path_len)
+  .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
+ if path_start < minimum_path_start || path_len < 2 ||
+    path_end > record_len || path_len > libc::PATH_MAX as usize + 64 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let path_bytes = &buffer[path_start..path_end];
+ if path_bytes.last() != Some(&0) || path_bytes[..path_len - 1].contains(&0) {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ let path = PathBuf::from(OsString::from_vec(path_bytes[..path_len - 1].to_vec()));
+ if !path.is_absolute() || path.components().any(|part|
+  matches!(part, std::path::Component::CurDir | std::path::Component::ParentDir)
+ ) {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ Ok(path)
+}
+
+#[cfg(target_os="macos")]
+fn entry_path_no_firmlink(parent: &File, name: &std::ffi::OsStr) -> Result<PathBuf, MacOsSnapshotAdapterError> {
+ use std::ffi::CString;
+ use std::os::fd::AsRawFd;
+ use std::os::unix::ffi::OsStrExt;
+
+ let name = CString::new(name.as_bytes()).map_err(|_| MacOsSnapshotAdapterError::InvalidRoot)?;
+ let mut attrs: libc::attrlist = unsafe { std::mem::zeroed() };
+ attrs.bitmapcount = libc::ATTR_BIT_MAP_COUNT;
+ attrs.commonattr = libc::ATTR_CMN_RETURNED_ATTRS;
+ attrs.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
+
+ let mut buffer = vec![0u8; libc::PATH_MAX as usize + 64];
+ let options = (libc::FSOPT_NOFOLLOW_ANY as libc::c_ulong)
+  | (libc::FSOPT_ATTR_CMN_EXTENDED as libc::c_ulong)
+  | FSOPT_RESOLVE_BENEATH;
+ let result = unsafe {
+  libc::getattrlistat(
+   parent.as_raw_fd(),
+   name.as_ptr(),
+   (&mut attrs as *mut libc::attrlist).cast(),
+   buffer.as_mut_ptr().cast(),
+   buffer.len(),
+   options,
+  )
+ };
+ if result != 0 {
+  return Err(MacOsSnapshotAdapterError::InvalidRoot);
+ }
+ parse_nofirmlink_path_record(&buffer)
+}
+
+#[cfg(target_os="macos")]
+fn preflight_entry_path(parent: &File, name: &str) -> Result<PathBuf, SnapshotPayloadError> {
+ use std::ffi::OsStr;
+
+ let parent_path = descriptor_path_no_firmlink(parent)
+  .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+ let entry_path = entry_path_no_firmlink(parent, OsStr::new(name))
+  .map_err(|_| SnapshotPayloadError::AcquisitionFailed)?;
+ let expected_path = parent_path.join(name);
+ if entry_path != expected_path {
+  return Err(SnapshotPayloadError::FirmlinkBoundary);
+ }
+ Ok(entry_path)
+}
+
+#[cfg(target_os="macos")]
+pub fn attr_cmnex_nofirmlinkpath_available() -> bool {
+ use std::ffi::OsStr;
+ File::open(".")
+  .ok()
+  .and_then(|directory| entry_path_no_firmlink(&directory, OsStr::new(".")).ok())
+  .is_some()
+}
+
+#[cfg(target_os="macos")]
+fn path_is_within_root(root: &Path, candidate: &Path) -> bool {
+ candidate.starts_with(root)
+}
+
+/// Capability probe used by the sidecar handshake. The actual adapter repeats
+/// the query for each retained descriptor and fails closed on any error.
+#[cfg(target_os="macos")]
+pub fn fcntl_getpath_nofirmlink_available() -> bool {
+ File::open(".")
+  .ok()
+  .and_then(|file| descriptor_path_no_firmlink(&file).ok())
+  .is_some()
+}
+
+#[cfg(target_os="macos")]
 // Keep fsid_t opaque: compare the OS-provided volume identifier without decoding its private layout.
 fn filesystem_id(file:&File)->Result<[u8;8],MacOsSnapshotAdapterError>{
  use std::os::fd::AsRawFd;
@@ -64,7 +222,6 @@ impl MacOsWorkspaceSnapshotAdapter {
   let workspace_id=workspace_id.into();
   if workspace_id.trim().is_empty(){return Err(MacOsSnapshotAdapterError::InvalidWorkspaceId)}
   let mut current=File::open("/").map_err(|_|MacOsSnapshotAdapterError::InvalidRoot)?;
-  let mut canonical=PathBuf::from("/");
   let mut seen=false;
   for component in path.components(){
    match component {
@@ -72,7 +229,7 @@ impl MacOsWorkspaceSnapshotAdapter {
     Component::Normal(name)=>{
      let name=name.to_str().ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
      if name.is_empty()||name=="."||name==".."{return Err(MacOsSnapshotAdapterError::InvalidRoot)}
-     current=open_dir(&current,name)?; canonical.push(name); seen=true;
+     current=open_dir(&current,name)?; seen=true;
     },
     _=>return Err(MacOsSnapshotAdapterError::InvalidRoot),
    }
@@ -88,7 +245,8 @@ impl MacOsWorkspaceSnapshotAdapter {
   if root_filesystem_id.iter().all(|byte| *byte == 0) {
    return Err(MacOsSnapshotAdapterError::InvalidRoot);
   }
-  Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root:canonical})
+  let canonical_root=descriptor_path_no_firmlink(&current)?;
+  Ok(Self{root:current,root_device:meta.dev(),root_filesystem_id,workspace_id,canonical_root})
  }
  pub fn root_path(&self)->&Path{&self.canonical_root}
 }
@@ -100,19 +258,29 @@ impl WorkspaceSnapshotAdapter for MacOsWorkspaceSnapshotAdapter {
   if parts.is_empty()||parts.iter().any(|p|p.is_empty()||*p=="."||*p==".."){return Err(SnapshotPayloadError::AcquisitionFailed)}
   let mut parent=self.root.try_clone().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
   for part in &parts[..parts.len()-1]{
+   let expected_child_path=preflight_entry_path(&parent,part)?;
    let fd=openat(&parent,*part,OFlags::RDONLY|OFlags::DIRECTORY|OFlags::CLOEXEC|OFlags::NOFOLLOW,Mode::empty())
     .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    let child=File::from(fd);
    let m=child.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+   let child_path=descriptor_path_no_firmlink(&child).map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
    if !m.is_dir()||m.dev()!=self.root_device
     || filesystem_id(&child).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? != self.root_filesystem_id
+    || child_path!=expected_child_path
+    || !path_is_within_root(&self.canonical_root,&child_path)
    {return Err(SnapshotPayloadError::AcquisitionFailed)}
    parent=child;
   }
-  let fd=openat(&parent,parts[parts.len()-1],OFlags::RDONLY|OFlags::CLOEXEC|OFlags::NOFOLLOW|OFlags::NONBLOCK,Mode::empty())
+  let file_name=parts[parts.len()-1];
+  let expected_file_path=preflight_entry_path(&parent,file_name)?;
+  let fd=openat(&parent,file_name,OFlags::RDONLY|OFlags::CLOEXEC|OFlags::NOFOLLOW|OFlags::NONBLOCK,Mode::empty())
    .map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
   let mut file=File::from(fd);
   let before=file.metadata().map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+  let file_path=descriptor_path_no_firmlink(&file).map_err(|_|SnapshotPayloadError::AcquisitionFailed)?;
+  if file_path!=expected_file_path || !path_is_within_root(&self.canonical_root,&file_path){
+   return Err(SnapshotPayloadError::AcquisitionFailed);
+  }
   if !before.is_file(){return Err(SnapshotPayloadError::InvalidFileType)}
   if before.dev()!=self.root_device
    || filesystem_id(&file).map_err(|_|SnapshotPayloadError::AcquisitionFailed)? != self.root_filesystem_id
@@ -137,6 +305,32 @@ mod tests {
  use super::*;
  use crate::snapshot_payload::SnapshotCaptureRequest;
  use std::os::unix::fs::symlink;
+
+ fn synthetic_nofirmlink_record(path: &[u8]) -> Vec<u8> {
+  let returned_offset = 4;
+  let reference_offset = returned_offset + std::mem::size_of::<libc::attribute_set_t>();
+  let path_offset = reference_offset + std::mem::size_of::<libc::attrreference_t>();
+  let record_len = path_offset + path.len();
+  let mut buffer = vec![0u8; record_len];
+  buffer[..4].copy_from_slice(&(record_len as u32).to_ne_bytes());
+  let mut returned: libc::attribute_set_t = unsafe { std::mem::zeroed() };
+  returned.forkattr = libc::ATTR_CMNEXT_NOFIRMLINKPATH;
+  unsafe {
+   std::ptr::write_unaligned(
+    buffer.as_mut_ptr().add(returned_offset).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+   std::ptr::write_unaligned(
+    buffer.as_mut_ptr().add(reference_offset).cast::<libc::attrreference_t>(),
+    libc::attrreference_t {
+     attr_dataoffset: std::mem::size_of::<libc::attrreference_t>() as i32,
+     attr_length: path.len() as u32,
+    },
+   );
+  }
+  buffer[path_offset..].copy_from_slice(path);
+  buffer
+ }
  #[test]
  fn macos_workspace_root_is_on_apfs(){
   let d=tempfile::tempdir().unwrap();
@@ -145,6 +339,141 @@ mod tests {
   assert!(MacOsWorkspaceSnapshotAdapter::new(
    std::fs::canonicalize(d.path()).unwrap(),"workspace"
   ).is_ok());
+ }
+
+ #[test]
+ fn descriptor_path_resolves_users_firmlink_without_following_display_path() {
+  let users=File::open("/Users").unwrap();
+  let resolved=descriptor_path_no_firmlink(&users).unwrap();
+  assert!(resolved.is_absolute());
+  assert_ne!(resolved,PathBuf::from("/Users"));
+ }
+
+ #[test]
+ fn captures_workspace_root_through_users_firmlink() {
+  let home=PathBuf::from(std::env::var("HOME").expect("macOS CI home directory"));
+  assert!(home.starts_with("/Users/"));
+  let d=tempfile::tempdir_in(&home).unwrap();
+  std::fs::write(d.path().join("inside.txt"),b"inside-users-firmlink").unwrap();
+  let adapter=MacOsWorkspaceSnapshotAdapter::new(d.path(),"users-workspace").unwrap();
+  assert!(adapter.root_path().starts_with("/System/Volumes/Data/Users"));
+  let captured=adapter.capture(&SnapshotCaptureRequest::new("inside.txt",64).unwrap()).unwrap();
+  assert_eq!(captured.bytes(),b"inside-users-firmlink");
+ }
+
+ #[test]
+ fn extended_nofirmlink_attribute_distinguishes_firmlink_entries_before_open() {
+  let root=File::open("/").unwrap();
+  assert_eq!(
+   preflight_entry_path(&root,"Users"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"Applications"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"Library"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"private"),
+   Err(SnapshotPayloadError::FirmlinkBoundary)
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"System").unwrap(),
+   PathBuf::from("/System")
+  );
+  assert_eq!(
+   preflight_entry_path(&root,"usr").unwrap(),
+   PathBuf::from("/usr")
+  );
+ }
+
+ #[test]
+ fn nofirmlink_path_record_parser_fails_closed_on_malformed_records() {
+  let valid=synthetic_nofirmlink_record(b"/System/Volumes/Data/Users\0");
+  assert_eq!(
+   parse_nofirmlink_path_record(&valid).unwrap(),
+   PathBuf::from("/System/Volumes/Data/Users")
+  );
+
+  let mut truncated=valid.clone();
+  truncated.truncate(truncated.len()-1);
+  assert!(parse_nofirmlink_path_record(&truncated).is_err());
+
+  let mut missing_attr=valid.clone();
+  let mut returned=unsafe {
+   std::ptr::read_unaligned(
+    missing_attr.as_ptr().add(4).cast::<libc::attribute_set_t>()
+   )
+  };
+  returned.forkattr=0;
+  unsafe {
+   std::ptr::write_unaligned(
+    missing_attr.as_mut_ptr().add(4).cast::<libc::attribute_set_t>(),
+    returned,
+   );
+  }
+  assert!(parse_nofirmlink_path_record(&missing_attr).is_err());
+
+  let relative=synthetic_nofirmlink_record(b"relative/path\0");
+  assert!(parse_nofirmlink_path_record(&relative).is_err());
+
+  let unterminated=synthetic_nofirmlink_record(b"/tmp");
+  assert!(parse_nofirmlink_path_record(&unterminated).is_err());
+ }
+
+ #[test]
+ fn concurrent_preflight_path_queries_do_not_share_directory_offsets() {
+  use std::sync::Arc;
+  use std::thread;
+
+  let root=Arc::new(File::open("/").unwrap());
+  let workers=(0..6).map(|_| {
+   let root=Arc::clone(&root);
+   thread::spawn(move || {
+    for _ in 0..20 {
+     assert_eq!(
+      preflight_entry_path(&root,"System").unwrap(),
+      PathBuf::from("/System")
+     );
+     assert_eq!(
+      preflight_entry_path(&root,"Users"),
+      Err(SnapshotPayloadError::FirmlinkBoundary)
+     );
+    }
+   })
+  }).collect::<Vec<_>>();
+  for worker in workers {
+   worker.join().unwrap();
+  }
+ }
+
+ #[test]
+ fn root_and_descendant_use_nofirmlink_descriptor_paths() {
+  let d=tempfile::tempdir().unwrap();
+  std::fs::create_dir(d.path().join("nested")).unwrap();
+  std::fs::write(d.path().join("nested/file.txt"),b"contained").unwrap();
+  let root_file=File::open(d.path()).unwrap();
+  let expected_root=descriptor_path_no_firmlink(&root_file).unwrap();
+  let adapter=MacOsWorkspaceSnapshotAdapter::new(
+   std::fs::canonicalize(d.path()).unwrap(),"workspace"
+  ).unwrap();
+  assert_eq!(adapter.root_path(),expected_root);
+  let captured=adapter.capture(&SnapshotCaptureRequest::new("nested/file.txt",64).unwrap()).unwrap();
+  assert_eq!(captured.bytes(),b"contained");
+  let file=File::open(d.path().join("nested/file.txt")).unwrap();
+  let resolved_file=descriptor_path_no_firmlink(&file).unwrap();
+  assert!(path_is_within_root(adapter.root_path(),&resolved_file));
+ }
+
+ #[test]
+ fn nofirmlink_path_containment_uses_path_components_not_string_prefixes() {
+  let root=Path::new("/System/Volumes/Data/Users/runner/work");
+  assert!(path_is_within_root(root,Path::new("/System/Volumes/Data/Users/runner/work/src/main.rs")));
+  assert!(!path_is_within_root(root,Path::new("/System/Volumes/Data/Users/runner/work-other/secret")));
+  assert!(!path_is_within_root(root,Path::new("/System/Volumes/Data/Applications/secret")));
  }
 
  #[test]
@@ -213,8 +542,8 @@ mod tests {
    canonical_root:PathBuf::from("/"),
   };
   assert_eq!(adapter.capture(&SnapshotCaptureRequest::new(&relative,128).unwrap()),
-   Err(SnapshotPayloadError::AcquisitionFailed),
-   "capture must reject the System-to-Data firmlink before acquiring content");
+   Err(SnapshotPayloadError::FirmlinkBoundary),
+   "capture must reject the System-to-Data firmlink before opening its target");
  }
 
  #[test] fn captures_regular_and_empty_files(){

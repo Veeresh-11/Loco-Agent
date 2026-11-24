@@ -117,6 +117,15 @@ fn run() -> Result<(), String> {
                         .map_err(|e| e.to_string())?;
                     return Err("invalid parent metadata".into());
                 }
+                let mut capabilities = vec!["proposal_evaluation"];
+                #[cfg(target_os = "macos")]
+                if loco_core::macos_snapshot_adapter::fcntl_getpath_nofirmlink_available() {
+                    capabilities.push("macos_fcntl_getpath_nofirmlink");
+                }
+                #[cfg(target_os = "macos")]
+                if loco_core::macos_snapshot_adapter::attr_cmnex_nofirmlinkpath_available() {
+                    capabilities.push("macos_attr_cmnex_nofirmlinkpath");
+                }
                 write_message(&mut output, &json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "messageType": "hello",
@@ -124,7 +133,7 @@ fn run() -> Result<(), String> {
                     "server": {
                         "name": "loco-rust-authority",
                         "version": env!("CARGO_PKG_VERSION"),
-                        "capabilities": ["proposal_evaluation"]
+                        "capabilities": capabilities
                     }
                 })).map_err(|e| e.to_string())?;
                 handshaken = true;
