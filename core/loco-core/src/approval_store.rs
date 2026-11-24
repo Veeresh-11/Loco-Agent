@@ -62,6 +62,17 @@ fn process_epoch() -> Result<&'static str, StoreError> {
     }
 }
 
+fn prune_and_check_capacity(
+    deadlines: &mut HashMap<String, Duration>,
+    now: Duration,
+) -> Result<(), StoreError> {
+    deadlines.retain(|_, deadline| *deadline > now);
+    if deadlines.len() >= MAX_OUTSTANDING_APPROVAL_CHALLENGES {
+        return Err(StoreError::CapacityExceeded);
+    }
+    Ok(())
+}
+
 pub struct ApprovalStore {
     conn: Connection,
     clock: Arc<dyn ApprovalClock>,
@@ -168,10 +179,7 @@ impl ApprovalStore {
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
         let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
-        deadlines.retain(|_, deadline| *deadline > monotonic_now);
-        if deadlines.len() >= MAX_OUTSTANDING_APPROVAL_CHALLENGES {
-            return Err(StoreError::CapacityExceeded);
-        }
+        prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
@@ -335,18 +343,18 @@ mod tests {
     }
 
     #[test]
-    fn outstanding_challenge_cache_is_bounded() {
-        let (mut store, _) = test_store_at(100);
-        let action = sample_action();
-        let mut ids = Vec::with_capacity(MAX_OUTSTANDING_APPROVAL_CHALLENGES);
-        for _ in 0..MAX_OUTSTANDING_APPROVAL_CHALLENGES {
-            ids.push(store.issue(&action, MAX_APPROVAL_TTL_SECONDS).unwrap().challenge_id);
+    fn outstanding_challenge_cache_is_bounded_and_prunes_expired_entries() {
+        let mut deadlines = HashMap::new();
+        for index in 0..MAX_OUTSTANDING_APPROVAL_CHALLENGES {
+            deadlines.insert(index.to_string(), Duration::from_secs(30));
         }
-        assert!(matches!(store.issue(&action, 1), Err(StoreError::CapacityExceeded)));
-        for id in ids {
-            store.consume(&id, &action).unwrap();
-        }
-        assert!(store.issue(&action, 1).is_ok());
+        assert!(matches!(
+            prune_and_check_capacity(&mut deadlines, Duration::from_secs(0)),
+            Err(StoreError::CapacityExceeded)
+        ));
+        assert_eq!(deadlines.len(), MAX_OUTSTANDING_APPROVAL_CHALLENGES);
+        assert!(prune_and_check_capacity(&mut deadlines, Duration::from_secs(30)).is_ok());
+        assert!(deadlines.is_empty());
     }
 
     #[test]
