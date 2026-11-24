@@ -1,11 +1,11 @@
 # LOCO Agent — Development Status, Architecture, and Roadmap
 
-**Status snapshot:** 2026-11-23  
+**Status snapshot:** 2026-11-24  
 **Repository:** https://github.com/Veeresh-11/Loco-Agent  
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
-**Latest validated implementation in this follow-up:** PR #64 exact-head Rust matrix and Contract Validation passed. PR #65 exact-head Contract Validation passed; its Rust matrix was still running at the last check. PR #63 exact-head Rust matrix and Contract Validation passed. Recheck GitHub Actions before relying on this snapshot.  
-**Current follow-up branch:** `security/windows-ntfs-allowlist` (stacked on #66)
+**Latest validated implementation in this follow-up:** PR #77 exact-head Rust Core Tests and Contract Validation passed on 2026-11-24. Exact run IDs and tested native fixtures are recorded in the follow-up section below. Recheck GitHub Actions before relying on this snapshot.  
+**Current follow-up branch:** `docs/macos-volume-boundary-validation` (documentation follow-up stacked on PR #77)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -354,3 +354,33 @@ These results establish hosted-runner coverage for the specific NTFS, APFS, Linu
 PR #73 adds a macOS-native test for the hosted runner's `/Users` firmlink into the APFS Data volume. The first run showed `/` and the runner's home directory share the same `st_dev`, and `fstat` on the opened `/Users` handle did not expose the firmlink flag. The adapter now inspects the parent directory's entries with `getattrlistbulk`, requesting `ATTR_CMN_NAME` and `ATTR_CMN_FLAGS`, and rejects a child entry carrying Apple's `SF_FIRMLINK` bit before opening it. The test uses a test-only adapter rooted at `/` to require capture through a discovered firmlink entry to fail closed.
 
 The test-only root construction does not change production root admission: the adapter's public constructor still rejects `/` as a workspace root. This exercises the host's actual firmlink directory-entry metadata; exact-head macOS CI must confirm that `getattrlistbulk` returns the expected `SF_FIRMLINK` flag and that capture rejects the entry. It does not establish behavior for every firmlink, OS release, or APFS volume arrangement.
+
+## Follow-up status — 2026-11-24: macOS volume identity and exact-head CI
+
+### PR #77 validation
+
+PR #77 (`security/macos-firmlink-volume-identity`, based on PR #76) exact head `cfe0510ea6deff4f74476b622ceffd9d5d6da82b` completed successfully:
+
+- Rust Core Tests run [45322641807](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45322641807): Ubuntu, Windows, macOS all passed.
+- Contract Validation run [45322641628](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45322641628): passed.
+- GitGuardian Security Checks: passed on the exact head.
+- macOS executed native firmlink metadata diagnostics, core tests, and the nested APFS mount-boundary test.
+- Windows executed the real secondary NTFS volume mountpoint test.
+- Ubuntu executed real same-device bind-mount and distinct ext4 mount-boundary tests.
+
+The macOS adapter compares the handle-derived `f_fsid` of each opened descendant with the retained workspace-root identity, in addition to the existing `st_dev` checks. This is scoped to cross-volume traversal. The hosted runner's metadata APIs still return `SF_NOUNLINK`, not `SF_FIRMLINK`, for the mapped paths; same-volume firmlink detection remains unresolved. Do not describe this as universal firmlink protection.
+
+### Current PR stack and next milestones
+
+At this snapshot, PRs #6–#77 are open (72 PRs), with #73 and #75–#77 remaining draft investigation/implementation work. PR #77's CI success does not complete the overall security milestone or authorize merging the stack. Keep the PRs open/draft while the following work remains:
+
+1. Obtain independent review of cross-platform filesystem acquisition and native FFI assumptions.
+2. Complete authenticated approval evidence, trusted-time handling, atomic single-use consumption, and immediate target freshness revalidation.
+3. Implement controlled Rust writes and recovery semantics; do not let TypeScript/Python bypass Rust.
+4. Extract the Python AI service as proposal-only and add mock-provider, timeout, cancellation, and bounded-payload tests.
+5. Implement the TypeScript bridge, lifecycle/error handling, structured proposal/approval UX, and end-to-end integration tests.
+6. Complete adversarial integration, packaging, clean-machine installation, rollback, and release review.
+7. Resolve or explicitly retain the limitation for same-volume firmlink identification; do not close issue #74 merely because cross-volume identity checks pass.
+
+A documentation follow-up PR is being prepared on `docs/macos-volume-boundary-validation`, based on the validated #77 head. The working TypeScript extension on `main` remains the product baseline; no stacked security PR has been merged into `main`.
+
