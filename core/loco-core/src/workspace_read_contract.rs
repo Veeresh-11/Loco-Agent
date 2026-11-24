@@ -71,6 +71,14 @@ mod tests {
     }
 
     #[test]
+    fn shared_json_fixture_deserializes_and_validates() {
+        let fixture = include_str!("../../../contracts/examples/workspace-read-request-v1.json");
+        let request: WorkspaceReadRequest = serde_json::from_str(fixture).unwrap();
+        assert_eq!(request.validate_contract(), Ok(()));
+        assert_eq!(request.max_bytes, MAX_WORKSPACE_READ_REQUEST_BYTES);
+    }
+
+    #[test]
     fn accepts_valid_request_and_serializes_camel_case() {
         let request = valid();
         assert_eq!(request.validate_contract(), Ok(()));
