@@ -361,3 +361,5 @@ pub mod workspace_factory;
 pub mod authority_protocol_v2;
 
 pub mod authority_protocol_v2_session;
+
+pub mod authority_artifact_verification;
