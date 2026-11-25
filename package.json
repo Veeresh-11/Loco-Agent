@@ -5,71 +5,230 @@
   "version": "0.1.0",
   "publisher": "veeresh",
   "license": "MIT",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["AI", "Other"],
-  "keywords": ["ai", "assistant", "coding", "chat", "llm", "ollama", "openai"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "assistant",
+    "coding",
+    "chat",
+    "llm",
+    "ollama",
+    "openai"
+  ],
   "icon": "media/loco-agent-colored-128x128.png",
-  "activationEvents": ["onStartupFinished", "onCommand:loco.runAgent", "onCommand:loco.openAssistant", "onCommand:loco.openSettings", "onView:locoAgent.chatView"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:loco.runAgent",
+    "onCommand:loco.openAssistant",
+    "onCommand:loco.openSettings",
+    "onView:locoAgent.chatView"
+  ],
   "main": "./out/extension.js",
   "contributes": {
-    "viewsContainers": { "activitybar": [{ "id": "loco-sidebar", "title": "LOCO Agent", "icon": "media/loco-agent-colored-128x128.png" }] },
-    "views": { "loco-sidebar": [{ "id": "locoAgent.chatView", "name": "Assistant", "type": "webview" }] },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "loco-sidebar",
+          "title": "LOCO Agent",
+          "icon": "media/loco-agent-colored-128x128.png"
+        }
+      ]
+    },
+    "views": {
+      "loco-sidebar": [
+        {
+          "id": "locoAgent.chatView",
+          "name": "Assistant",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
-      {"command":"loco.runAgent","title":"LOCO: Run Agent"},
-      {"command":"loco.openAssistant","title":"LOCO: Open Assistant"},
-      {"command":"loco.openSettings","title":"LOCO: Open Settings"},
-      {"command":"loco.setLocalEndpoint","title":"LOCO: Set Local Endpoint"},
-      {"command":"loco.clearLocalEndpoint","title":"LOCO: Clear Local Endpoint"},
-      {"command":"loco.setApiKey","title":"LOCO: Set Cloud API Key"},
-      {"command":"loco.clearApiKey","title":"LOCO: Clear Cloud API Key"},
-      {"command":"loco.viewHistory","title":"LOCO: View History"},
-      {"command":"loco.exportHistory","title":"LOCO: Export History"},
-      {"command":"loco.clearHistory","title":"LOCO: Clear History"}
+      {
+        "command": "loco.runAgent",
+        "title": "LOCO: Run Agent"
+      },
+      {
+        "command": "loco.openAssistant",
+        "title": "LOCO: Open Assistant"
+      },
+      {
+        "command": "loco.openSettings",
+        "title": "LOCO: Open Settings"
+      },
+      {
+        "command": "loco.setLocalEndpoint",
+        "title": "LOCO: Set Local Endpoint"
+      },
+      {
+        "command": "loco.clearLocalEndpoint",
+        "title": "LOCO: Clear Local Endpoint"
+      },
+      {
+        "command": "loco.setApiKey",
+        "title": "LOCO: Set Cloud API Key"
+      },
+      {
+        "command": "loco.clearApiKey",
+        "title": "LOCO: Clear Cloud API Key"
+      },
+      {
+        "command": "loco.viewHistory",
+        "title": "LOCO: View History"
+      },
+      {
+        "command": "loco.exportHistory",
+        "title": "LOCO: Export History"
+      },
+      {
+        "command": "loco.clearHistory",
+        "title": "LOCO: Clear History"
+      }
     ],
     "configuration": {
-      "title":"LOCO Agent",
+      "title": "LOCO Agent",
       "properties": {
-        "loco.provider":{"type":"string","default":"local","enum":["local","openai","azure","ollama","gpt4all"],"description":"Preferred provider for prompt routing."},
-        "locoAgent.provider":{"type":"string","default":"local","enum":["local","openai","azure","ollama","gpt4all"],"description":"Deprecated alias for loco.provider."},
-        "locoAgent.endpoint":{"type":"string","default":"https://api.openai.com/v1","description":"Cloud AI provider endpoint."},
-        "loco.localEndpoint":{"type":"string","default":"","description":"Optional explicit local LLM endpoint; otherwise configured ports are probed."},
-        "locoAgent.localEndpoint":{"type":"string","default":"","description":"Deprecated alias for loco.localEndpoint."},
-        "locoAgent.localPorts":{"type":"array","default":[9000,9001,8080,7860,5005],"items":{"type":"number","minimum":1,"maximum":65535},"description":"Local HTTP ports probed for compatible language-model servers."},
-        "locoAgent.storeHistory":{"type":"boolean","default":true,"description":"Store chat history in the extension state."},
-        "locoAgent.pruneOnStartup":{"type":"boolean","default":true,"description":"Prune expired history when the extension activates."},
-        "locoAgent.pruneDays":{"type":"number","default":30,"minimum":1,"description":"Number of days to retain interaction history."},
-        "locoAgent.maxHistoryEntries":{"type":"number","default":1000,"minimum":1,"description":"Maximum number of history entries retained."},
-        "locoAgent.maxConcurrency":{"type":"number","default":2,"minimum":1,"maximum":16,"description":"Maximum number of LOCO tasks processed concurrently."},
-        "locoAgent.azureEndpoint":{"type":"string","default":"","description":"Azure OpenAI resource endpoint."},
-        "locoAgent.azureDeployment":{"type":"string","default":"","description":"Azure OpenAI deployment name."},
-        "locoAgent.azureApiVersion":{"type":"string","default":"2024-10-21","description":"Azure OpenAI REST API version."},
-        "locoAgent.model":{"type":"string","default":"gpt-4o-mini","description":"Model name used by compatible local and cloud providers."},
-        "locoAgent.localModel":{"type":"string","default":"llama3.1","description":"Model name sent to Ollama, LM Studio, GPT4All, and other local compatible servers."}
+        "loco.provider": {
+          "type": "string",
+          "default": "local",
+          "enum": [
+            "local",
+            "openai",
+            "azure",
+            "ollama",
+            "gpt4all"
+          ],
+          "description": "Preferred provider for prompt routing."
+        },
+        "locoAgent.provider": {
+          "type": "string",
+          "default": "local",
+          "enum": [
+            "local",
+            "openai",
+            "azure",
+            "ollama",
+            "gpt4all"
+          ],
+          "description": "Deprecated alias for loco.provider."
+        },
+        "locoAgent.endpoint": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "Cloud AI provider endpoint."
+        },
+        "loco.localEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Optional explicit local LLM endpoint; otherwise configured ports are probed."
+        },
+        "locoAgent.localEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Deprecated alias for loco.localEndpoint."
+        },
+        "locoAgent.localPorts": {
+          "type": "array",
+          "default": [
+            9000,
+            9001,
+            8080,
+            7860,
+            5005
+          ],
+          "items": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "description": "Local HTTP ports probed for compatible language-model servers."
+        },
+        "locoAgent.storeHistory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Store chat history in the extension state."
+        },
+        "locoAgent.pruneOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prune expired history when the extension activates."
+        },
+        "locoAgent.pruneDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Number of days to retain interaction history."
+        },
+        "locoAgent.maxHistoryEntries": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1,
+          "description": "Maximum number of history entries retained."
+        },
+        "locoAgent.maxConcurrency": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Maximum number of LOCO tasks processed concurrently."
+        },
+        "locoAgent.azureEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI resource endpoint."
+        },
+        "locoAgent.azureDeployment": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI deployment name."
+        },
+        "locoAgent.azureApiVersion": {
+          "type": "string",
+          "default": "2024-10-21",
+          "description": "Azure OpenAI REST API version."
+        },
+        "locoAgent.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "Model name used by compatible local and cloud providers."
+        },
+        "locoAgent.localModel": {
+          "type": "string",
+          "default": "llama3.1",
+          "description": "Model name sent to Ollama, LM Studio, GPT4All, and other local compatible servers."
+        }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish":"npm run compile",
-    "compile":"tsc -p ./",
-    "watch":"tsc -watch -p ./",
-    "pretest":"npm run compile",
-    "test":"jest",
-    "lint":"eslint src/core/rustSidecarClient.ts src/__tests__/rustSidecarClient.test.ts",
-    "lint:legacy":"eslint src --ext ts",
-    "package":"vsce package --allow-missing-repository"
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "jest",
+    "lint": "eslint src/core/rustSidecarClient.ts src/__tests__/rustSidecarClient.test.ts",
+    "lint:legacy": "eslint src --ext ts",
+    "package": "vsce package --allow-missing-repository"
   },
   "devDependencies": {
-    "@types/jest":"^29.5.0",
-    "@types/node":"^20.0.0",
-    "@types/vscode":"^1.85.0",
-    "@typescript-eslint/eslint-plugin":"^6.0.0",
-    "@typescript-eslint/parser":"^6.0.0",
-    "@vscode/vsce":"^3.7.1",
-    "eslint":"^8.40.0",
-    "jest":"^29.5.0",
-    "ts-jest":"^29.1.0",
-    "typescript":"^5.0.0"
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/vsce": "^3.7.1",
+    "eslint": "^8.40.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0"
   },
-  "dependencies":{"uuid":"^9.0.0"},
-  "overrides":{"handlebars":"4.7.10"}
+  "overrides": {
+    "handlebars": "4.7.10"
+  }
 }
