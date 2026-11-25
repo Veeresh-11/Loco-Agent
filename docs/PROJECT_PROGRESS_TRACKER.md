@@ -93,8 +93,8 @@
 2. **Review and reconcile A5 (#132–#138)**: protocol v2 DTOs, Rust handlers/session, TypeScript client and adversarial tests are implemented in the open draft stack; confirm dependencies and semantics before merge.
 3. **Continue A6**: after #150 CI, wire strict issue/consume messages to registry capture and registration-bound store APIs; ensure workspace revocation clears challenges.
 4. Add adversarial issue/consume, replay, concurrent-consume and lifecycle tests.
-6. Review and reconcile stacked PR dependencies before merging in order.
-7. Continue attestation and runtime-verification gates independently; no sidecar launch.
+5. Review and reconcile stacked PR dependencies before merging in order.
+6. Continue attestation and runtime-verification gates independently; no sidecar launch.
 
 ## F. Delivery estimate
 
@@ -121,3 +121,5 @@ The historical pace of creating several focused PRs over three days is useful fo
 
 - **2026-11-25:** Initial canonical tracker created from the two user-provided roadmap snapshots and live repository state. Added PRs #128–#131 and #139–#147; confirmed #130 and #131 exact-head CI success and #145 six-job CI success.
 - **2026-11-25 (reconciliation):** Checked PRs #132–#138 and exact-head CI. The versioned registration/capture protocol is already implemented in draft PRs #132–#138: #133 Rust DTO CI green (#45561353483/#45561353697), #135 Rust session/handler CI green (#45563628930/#45563628849), #136 TypeScript CI green (#45564926678), #137 Rust/contract CI green (#45568074629/#45568074945), and #138 TypeScript CI green (#45568062826). Reclassified A5 as implemented in an unmerged draft stack. Opened [PR #149](https://github.com/Veeresh-11/Loco-Agent/pull/149) for the A6 approval issue/consume protocol design; it is design-only and draft. PR #147 exact-head run #45573727400 (Rust Core Tests), #45573727596 (Contract Validation), and #45573727647 (Authority Native Artifact Builds) all completed successfully; PR remains draft and unreviewed.
+
+- **2026-11-25 (A6 store implementation):** PR #150 adds workspace-registration-scoped challenge issue/consume APIs, stores only a SHA-256 digest of the opaque registration handle, prevents the legacy unscoped consume API from consuming scoped challenges, and deletes challenges on registration revocation. Four tests cover wrong-handle rejection, legacy API isolation, revocation invalidation and malformed handles. Initial exact-head Rust Core Tests #45577413052 exposed a Rust borrow-lifetime error in the new schema migration; corrected in commit `4b932d8cb74acddf9e2910574b0f6284f6d92bb7`. New Contract Validation run #45577556503 was in progress at this update; no green CI claim yet.
