@@ -14,6 +14,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: authority-native-artifacts-${{ github.ref }}
@@ -59,6 +61,12 @@ jobs:
           set -euo pipefail
           mkdir -p "dist/authority/${{ matrix.target }}"
           install "core/loco-core/target/${{ matrix.target }}/release/${{ matrix.executable }}" "dist/authority/${{ matrix.target }}/${{ matrix.executable }}"
+
+      - name: Attest native executable provenance (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/authority/${{ matrix.target }}/${{ matrix.executable }}
 
       - name: Upload native executable artifact
         uses: actions/upload-artifact@v4
@@ -129,6 +137,12 @@ jobs:
             extension/resources/authority/x86_64-apple-darwin/loco-authority; do
             grep -Fx "$path" <<< "$listing"
           done
+
+      - name: Attest packaged VSIX provenance (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "*.vsix"
 
       - name: Upload packaged VSIX
         uses: actions/upload-artifact@v4
