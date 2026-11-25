@@ -106,24 +106,18 @@
 
 ## F. Delivery estimate
 
-**Estimate from the 2026-11-25 checkpoint:** approximately **12–18 focused working days** (about **3–4 calendar weeks**) to reach an integrated, tested security-core milestone, assuming one developer working full-time and CI/review feedback arriving within a day.
+**Updated estimate from the 2026-11-25 checkpoint:** approximately **6–10 focused working days** (about **1.5–2.5 calendar weeks**) to reach the integrated, tested security-core milestone, assuming one developer working full-time, an independent reviewer is assigned within 2 business days, review feedback is actionable, and CI feedback arrives within a day. This is a remaining-work estimate, not a reset of completed implementation/CI work.
 
-Planning breakdown (not a guarantee):
-
-| Work package | Working-day estimate |
+| Remaining work package | Working-day estimate |
 |---|---:|
-| PR #147 CI validation and correction | 0.5–1 |
-| Versioned registration/capture protocol and tests | 2–3 |
-| Registry + native adapter integration and lifecycle tests | 1–2 |
-| Approval issue/consume integration | 2–3 |
-| Replay, concurrency, replacement and deactivation adversarial tests | 2–3 |
-| Reconcile stacked PRs, cross-platform CI and fixes | 2–3 |
-| Independent review remediation and final acceptance | 2–3 |
-| **Total** | **12–18** |
+| Independent security review of A1–A7 and action/workflow source; triage findings | 2–3 |
+| Fix review findings and reconcile dependent PR stacks in dependency order | 1–3 |
+| Final cross-platform CI, integration regressions and acceptance evidence | 1–2 |
+| **Total (overlapping work possible)** | **6–10** |
 
-This estimate does **not** promise production sidecar launch or a marketplace release. Those depend on external signing credentials, trusted-main attestation evidence, verifier/trust-root selection, repository governance, platform-specific exact-file binding and independent security approval. Those gates may add **5–10+ working days** or remain blocked by external provisioning/review. Python extraction, full command execution, controlled workspace writes, complete end-to-end integration and release are separate roadmap milestones and are not included in the 12–18-day estimate.
+**External dependency caveat:** A8 is currently blocked because no independent reviewer is requested/assigned on the inspected PRs. If reviewer availability slips, calendar completion is unbounded regardless of implementation throughput. The estimate assumes review availability; it cannot be treated as a committed date.
 
-The historical pace of creating several focused PRs over three days is useful for estimating documentation and isolated changes, but PR count is not a reliable throughput measure for security acceptance: integration, cross-platform CI, review, and adversarial testing dominate the remaining schedule.
+This milestone estimate does **not** include production sidecar launch or marketplace release. Trusted-main provenance, verifier/trust-root selection, Windows/macOS signing and platform integrity, repository governance, exact-file binding, platform authenticator validation and independent security approval remain distinct gates and may add **5–10+ working days** or remain blocked by external provisioning/review. Python extraction, full command execution, controlled workspace writes, complete end-to-end product integration and release are separate roadmap milestones.
 
 ## G. Change log
 
@@ -215,3 +209,7 @@ The historical pace of creating several focused PRs over three days is useful fo
 
 
 - **2026-11-25 (PR #143 pinned-action manifest audit):** Reviewed the PR #143 workflow diff and fetched the `action.yml` manifest at each of its six exact pinned action commits. Confirmed checkout's default `persist-credentials: true` stores the default GitHub token in local Git config; PR #145 now explicitly disables this for all three checkout uses. The Rust toolchain action defaults to moving `stable` and bootstraps rustup by downloading an installer over HTTPS and piping it to the shell; immutable action SHA therefore does not make the selected compiler reproducible. Upload/download-artifact and setup-node are Node 20 JavaScript actions. The pinned build-provenance action's composite manifest calls two further actions at immutable SHAs (predicate `1176ef556905f349f669722abf30bce1a6e16e01`, attest `ce27ba3b4a9a139d9a20a4a07d69fabb52f1e5bc`); the predicate manifest uses Node 20, while the attest action package declares semver-ranged runtime dependencies that are bundled into its distribution. This is a limited manifest-level audit, not a complete source/bundle/dependency or tag-to-SHA security review. No confirmed exploitable defect was established. Follow-up: independent reviewer to verify source and bundled dependency provenance; decide whether to pin an explicit Rust toolchain version for reproducible builds. PR #143 remains draft.
+
+- **2026-11-25 (PR #143 action tag-to-SHA provenance check):** Queried upstream Git refs for the pinned workflow actions. The `v4` tags for `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact` and `actions/setup-node` each resolve directly to the exact commit SHA pinned in PR #143. The annotated `actions/attest-build-provenance` `v2` tag dereferences to the exact pinned commit `e8998f949152b193b063cb0ec769d69d929409be`; GitHub reports the annotated tag object as unsigned (`verification.verified=false`, reason `unsigned`), so this is a tag target match, not a cryptographic tag-signature validation. `dtolnay/rust-toolchain` is pinned to the current `stable` branch head `39008827e6b4319a349e9a42dfc90579dd25f1ca`, not a version tag, reinforcing the moving-toolchain/reproducibility limitation. No mismatch was found among the queried refs. This source-side verification does not substitute for independent review of action implementation/bundled dependencies. PR #143 remains draft.
+
+- **2026-11-25 (updated remaining delivery estimate):** Rebased the estimate on work already implemented and CI-verified in A5–A7 and the artifact workflow stack. Remaining integrated security-core milestone is estimated at 6–10 focused working days (1.5–2.5 calendar weeks), assuming an independent reviewer is assigned within two business days and no major security redesign is required. The estimate covers independent review, remediation, ordered stack reconciliation and final cross-platform CI. A8 reviewer availability is an external blocker and makes calendar completion unbounded if not resolved. Production release/signing/provenance and later D1–D6 product milestones are excluded; the release gates may add 5–10+ working days or remain externally blocked.
