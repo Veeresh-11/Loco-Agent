@@ -337,4 +337,37 @@ mod adversarial_handler_tests {
         let (result, _) = run_with(hello(), oversized);
         assert!(result.unwrap_err().contains("invalid stdio frame"));
     }
+    #[test]
+    fn eof_after_workspace_registration_releases_retained_root_handle() {
+        let parent = std::env::current_dir().expect("current directory");
+        let workspace = tempfile::tempdir_in(parent).expect("temporary workspace");
+        let request = json!({
+            "protocolVersion": "2.0",
+            "messageType": "registerWorkspace",
+            "requestId": "register-1",
+            "selectedRoot": workspace.path().to_string_lossy(),
+            "displayName": "eof-cleanup-test"
+        })
+        .to_string();
+
+        let (result, output) = run_with(hello(), format!("{request}\\n").into_bytes());
+        assert!(result.is_ok(), "EOF should terminate the session cleanly: {result:?}");
+
+        let frames: Vec<Value> = String::from_utf8(output)
+            .expect("handler output is UTF-8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("valid response frame"))
+            .collect();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[1]["messageType"], "workspaceRegistered");
+        assert_eq!(frames[1]["requestId"], "register-1");
+        assert_eq!(frames[1]["workspaceHandle"].as_str().map(str::len), Some(64));
+
+        // Closing/removing the selected root after EOF proves the handler dropped
+        // its registry and the adapter's retained native root handle.
+        workspace
+            .close()
+            .expect("EOF must release the registered workspace root");
+    }
+
 }
