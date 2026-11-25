@@ -1,0 +1,80 @@
+name: Reconcile validated Azure MSAL lockfile
+on:
+  push:
+    branches:
+      - security/azure-msal-uuid-remediation
+    paths:
+      - ".github/workflows/reconcile-azure-lockfile.yml"
+permissions:
+  actions: read
+  contents: write
+jobs:
+  reconcile:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/security/azure-msal-uuid-remediation'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+      - name: Download previously validated candidate artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.2.0
+        with:
+          name: azure-msal-uuid-candidate
+          repository: Veeresh-11/Loco-Agent
+          run-id: 45697878635
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Validate exact candidate against branch manifest
+        run: |
+          set -euo pipefail
+          test -f candidate/Loco-Agent/Loco-Agent/package-lock.json
+          cp candidate/Loco-Agent/Loco-Agent/package-lock.json package-lock.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+          const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const root = lock.packages?.[""] ?? {};
+          if (manifest.dependencies?.uuid || manifest.devDependencies?.uuid) throw new Error("Branch manifest still declares uuid");
+          if (root.dependencies?.uuid || root.devDependencies?.uuid) throw new Error("Candidate lockfile root still declares uuid");
+          const identity = lock.packages["node_modules/@azure/identity"];
+          const msal = lock.packages["node_modules/@azure/msal-node"];
+          if (!identity || !msal || identity.version !== "4.13.1" || msal.version !== "5.6.0") throw new Error("Candidate Azure/MSAL versions differ from reviewed artifact");
+          if (msal.dependencies?.uuid) throw new Error("MSAL still declares uuid");
+          const uuids = Object.keys(lock.packages).filter(p => p === "node_modules/uuid" || p.endsWith("/node_modules/uuid"));
+          if (uuids.length) throw new Error("Candidate still contains uuid packages: " + uuids.join(", "));
+          console.log(JSON.stringify({ packageEntries: Object.keys(lock.packages).length, identity: identity.version, msal: msal.version, uuidPackages: uuids }, null, 2));
+          NODE
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Commit exact validated lockfile and dispatch standard checks
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const branch = "security/azure-msal-uuid-remediation";
+            const path = "package-lock.json";
+            const current = await github.rest.repos.getContent({ owner: context.repo.owner, repo: context.repo.repo, path, ref: branch });
+            const content = fs.readFileSync(path, "utf8");
+            const updated = await github.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path,
+              message: "security(deps): reconcile validated Azure MSAL lockfile",
+              content: Buffer.from(content, "utf8").toString("base64"),
+              sha: current.data.sha,
+              branch
+            });
+            core.info("Committed candidate lockfile: " + updated.data.commit.sha);
+            for (const workflow_id of ["typescript-ci.yml", "npm-dependency-audit.yml"]) {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id,
+                ref: branch
+              });
+              core.info("Dispatched " + workflow_id + " on " + branch);
+            }
