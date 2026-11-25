@@ -5,6 +5,8 @@
 .vscode/**
 .vscode-test/**
 coverage/**
+core/**
+dist/**
 src/**
 **/__tests__/**
 **/*.test.js
