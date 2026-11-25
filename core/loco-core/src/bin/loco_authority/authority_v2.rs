@@ -338,6 +338,38 @@ mod adversarial_handler_tests {
         assert!(result.unwrap_err().contains("invalid stdio frame"));
     }
     #[test]
+    fn invalid_workspace_selection_returns_generic_error_without_path_disclosure() {
+        let missing = std::env::current_dir()
+            .expect("current directory")
+            .join("loco-authority-missing-workspace-fixture");
+        let request = json!({
+            "protocolVersion": "2.0",
+            "messageType": "registerWorkspace",
+            "requestId": "register-invalid",
+            "selectedRoot": missing.to_string_lossy(),
+            "displayName": "invalid-selection"
+        }).to_string();
+        let shutdown = br#"{"protocolVersion":"2.0","messageType":"shutdown","requestId":"shutdown-after-denial"}"#;
+        let mut subsequent = request.into_bytes();
+        subsequent.push(b'\n');
+        subsequent.extend_from_slice(shutdown);
+        subsequent.push(b'\n');
+
+        let (result, output) = run_with(hello(), subsequent);
+        assert!(result.is_ok(), "a denied registration must not corrupt the session: {result:?}");
+        let output = String::from_utf8(output).expect("handler output is UTF-8");
+        assert!(!output.contains(&missing.to_string_lossy().to_string()));
+        let frames: Vec<Value> = output.lines()
+            .map(|line| serde_json::from_str(line).expect("valid response frame"))
+            .collect();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[1]["messageType"], "error");
+        assert_eq!(frames[1]["error"]["code"], "INVALID_WORKSPACE_SELECTION");
+        assert_eq!(frames[1]["error"]["message"], "Workspace selection could not be registered.");
+        assert_eq!(frames[2]["messageType"], "shutdown");
+    }
+
+    #[test]
     fn eof_after_workspace_registration_releases_retained_root_handle() {
         let parent = std::env::current_dir().expect("current directory");
         let workspace = tempfile::tempdir_in(parent).expect("temporary workspace");
