@@ -96,7 +96,7 @@ fn run() -> Result<(), String> {
     let first_text = std::str::from_utf8(&first_frame).map_err(|_| "frame is not UTF-8".to_string())?;
     let first_value: Value = serde_json::from_str(first_text).map_err(|_| "frame is not valid JSON".to_string())?;
     match first_value.get("protocolVersion").and_then(Value::as_str) {
-        Some("2.0") => return authority_v2::run(first_frame, &mut input, &mut output),
+        Some("2.0") | Some("2.1") => return authority_v2::run(first_frame, &mut input, &mut output),
         Some("1.0") => {}
         _ => return Err("unsupported or missing protocol version".into()),
     }
