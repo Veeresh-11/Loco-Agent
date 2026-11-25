@@ -281,6 +281,19 @@ impl ApprovalStore {
         snapshot: &CapturedWorkspaceSnapshot,
         ttl_seconds: u64,
     ) -> Result<ApprovalChallenge, StoreError> {
+        self.issue_inner(action, snapshot, ttl_seconds, None)
+    }
+
+    /// Insert the challenge and its optional registration scope in one SQLite
+    /// transaction. A legacy consumer must never observe a scoped challenge
+    /// in the intermediate unscoped state.
+    fn issue_inner(
+        &mut self,
+        action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
+        ttl_seconds: u64,
+        registration_digest: Option<&str>,
+    ) -> Result<ApprovalChallenge, StoreError> {
         if !(1..=MAX_APPROVAL_TTL_SECONDS).contains(&ttl_seconds) {
             return Err(StoreError::InvalidChallenge);
         }
@@ -317,9 +330,9 @@ impl ApprovalStore {
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
         prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         tx.execute(
-            "INSERT INTO approval_challenges(challenge_id, action_digest, snapshot_digest, expires_at, consumed_at, process_epoch)
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
-            params![challenge.challenge_id, challenge.action_digest, challenge.snapshot_digest, challenge.expires_at_unix as i64, self.process_epoch],
+            "INSERT INTO approval_challenges(challenge_id, action_digest, snapshot_digest, expires_at, consumed_at, process_epoch, registration_digest)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            params![challenge.challenge_id, challenge.action_digest, challenge.snapshot_digest, challenge.expires_at_unix as i64, self.process_epoch, registration_digest.unwrap_or("")],
         )?;
         deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         if let Err(error) = tx.commit() {
@@ -340,19 +353,7 @@ impl ApprovalStore {
         ttl_seconds: u64,
     ) -> Result<ApprovalChallenge, StoreError> {
         let registration_digest = digest_workspace_registration(workspace_handle)?;
-        let challenge = self.issue(action, snapshot, ttl_seconds)?;
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        Self::ensure_active_epoch(&tx, &self.process_epoch)?;
-        let changed = tx.execute(
-            "UPDATE approval_challenges SET registration_digest=?2
-             WHERE challenge_id=?1 AND process_epoch=?3 AND registration_digest=''",
-            params![challenge.challenge_id, registration_digest, self.process_epoch],
-        )?;
-        if changed != 1 {
-            return Err(StoreError::InvalidChallenge);
-        }
-        tx.commit()?;
-        Ok(challenge)
+        self.issue_inner(action, snapshot, ttl_seconds, Some(&registration_digest))
     }
 
     /// Revoke every outstanding challenge issued under this workspace registration.
