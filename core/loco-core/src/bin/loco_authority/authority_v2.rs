@@ -339,9 +339,10 @@ mod adversarial_handler_tests {
     }
     #[test]
     fn invalid_workspace_selection_returns_generic_error_without_path_disclosure() {
-        let missing = std::env::current_dir()
-            .expect("current directory")
-            .join("loco-authority-missing-workspace-fixture");
+        let missing_fixture = tempfile::tempdir_in(std::env::current_dir().expect("current directory"))
+            .expect("temporary workspace fixture");
+        let missing = missing_fixture.path().to_path_buf();
+        missing_fixture.close().expect("remove temporary workspace fixture");
         let request = json!({
             "protocolVersion": "2.0",
             "messageType": "registerWorkspace",
