@@ -1,3 +1,4 @@
+#[path = "loco_authority/authority_v2.rs"]
 mod authority_v2;
 
 use loco_core::{evaluate, ActionProposal, PolicyConfig};
