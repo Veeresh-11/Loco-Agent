@@ -144,8 +144,10 @@ describe('RustSidecarClient protocol v2', () => {
       .rejects.toThrow(/path/i);
     await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/\u0085name', 1024))
       .rejects.toThrow(/path/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/\u009fname', 1024))
+      .rejects.toThrow(/path/i);
     await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/ſon.txt', 1024))
-      .resolves.toEqual({ captured: true, byteLength: 0 });
+      .resolves.toEqual({ captured: true, byteLength: 17 });
     await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/main.rs', 10 * 1024 * 1024 + 1))
       .rejects.toThrow(/byte limit/i);
     expect(child.killed).toBe(false);
