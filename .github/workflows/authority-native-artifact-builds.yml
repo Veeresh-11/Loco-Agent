@@ -89,9 +89,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - name: Install Rust 1.100.0
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # pinned action commit
         with:
+          toolchain: 1.100.0
           targets: ${{ matrix.target }}
 
       - name: Build release authority executable
