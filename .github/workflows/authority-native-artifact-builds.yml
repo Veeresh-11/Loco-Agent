@@ -24,6 +24,9 @@ jobs:
     name: Validate immutable action references
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout workflow source for validation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: Validate workflow action references without third-party actions
         shell: bash
         run: |
