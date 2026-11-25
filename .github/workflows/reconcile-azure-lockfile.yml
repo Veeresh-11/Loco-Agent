@@ -6,7 +6,7 @@ on:
     paths:
       - ".github/workflows/reconcile-azure-lockfile.yml"
 permissions:
-  actions: read
+  actions: write
   contents: write
 jobs:
   reconcile:
