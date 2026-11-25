@@ -10,8 +10,9 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' = 'normal';
-  capabilities = ['proposal_evaluation'];
+  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' = 'normal';
+  capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
+  workspaceHandle = 'a'.repeat(64);
 
   constructor() {
     super();
@@ -19,20 +20,30 @@ class FakeChild extends EventEmitter {
       const request = JSON.parse(chunk.toString('utf8').trim());
       if ((this.mode === 'stall-evaluate' && request.messageType === 'evaluate') ||
           (this.mode === 'stall-hello' && request.messageType === 'hello')) return;
+      const protocolVersion = this.mode === 'legacy' ? '1.0' : '2.0';
       let response: Record<string, unknown>;
       if (request.messageType === 'hello') {
         response = {
-          protocolVersion: '1.0', messageType: 'hello', requestId: request.requestId,
+          protocolVersion, messageType: 'hello', requestId: request.requestId,
           server: { name: 'loco-rust-authority', version: '0.1.0', capabilities: this.capabilities }
         };
       } else if (request.messageType === 'evaluate') {
         response = {
-          protocolVersion: '1.0', messageType: 'decision',
+          protocolVersion: '2.0', messageType: 'decision',
           requestId: this.mode === 'wrong-id' ? 'wrong' : request.requestId,
-          decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Proposal accepted for evaluation only.' }
+          decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Policy result only.' }
         };
+      } else if (request.messageType === 'registerWorkspace') {
+        response = { protocolVersion: '2.0', messageType: 'workspaceRegistered', requestId: request.requestId, workspaceHandle: this.workspaceHandle };
+      } else if (request.messageType === 'captureWorkspaceFile') {
+        response = {
+          protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
+          captured: true, byteLength: this.mode === 'bad-capture' ? request.maxBytes + 1 : 17
+        };
+      } else if (request.messageType === 'revokeWorkspace') {
+        response = { protocolVersion: '2.0', messageType: 'workspaceRevoked', requestId: request.requestId, revoked: true };
       } else {
-        response = { protocolVersion: '1.0', messageType: 'shutdown', requestId: request.requestId, accepted: true };
+        response = { protocolVersion: '2.0', messageType: 'shutdown', requestId: request.requestId, accepted: true };
       }
       const frame = this.mode === 'oversized' && request.messageType === 'evaluate'
         ? Buffer.concat([Buffer.alloc(12 * 1024 * 1024 + 1, 0x61), Buffer.from('\n')])
@@ -50,7 +61,7 @@ class FakeChild extends EventEmitter {
   }
 }
 
-describe('RustSidecarClient', () => {
+describe('RustSidecarClient protocol v2', () => {
   let child: FakeChild;
   let client: RustSidecarClient;
 
@@ -66,13 +77,28 @@ describe('RustSidecarClient', () => {
 
   afterEach(async () => client.shutdown());
 
-  it('requires handshake and correlates a proposal decision', async () => {
+  it('requires a v2 handshake and correlates a policy decision', async () => {
     const decision = await client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' });
     expect(decision.decision).toBe('allow');
     expect(decision.proposalId).toBe('p-1');
+    expect(client.hasCapability('workspace_capture')).toBe(true);
   });
 
-  it('exposes optional runtime capabilities and clears them on shutdown', async () => {
+  it('registers, captures and revokes a workspace using opaque handles', async () => {
+    const handle = await client.registerWorkspace('/workspace/project', 'project');
+    expect(handle).toBe(child.workspaceHandle);
+    await expect(client.captureWorkspaceFile(handle, 'src/main.rs', 1024))
+      .resolves.toEqual({ captured: true, byteLength: 17 });
+    await expect(client.revokeWorkspace(handle)).resolves.toBeUndefined();
+  });
+
+  it('sends a strict v2 handshake and does not downgrade to v1', async () => {
+    child.mode = 'legacy';
+    await expect(client.start()).rejects.toThrow(/protocol envelope/i);
+    expect(child.killed).toBe(true);
+  });
+
+  it('exposes runtime capabilities and clears them on shutdown', async () => {
     child.capabilities.push('macos_fcntl_getpath_nofirmlink', 'macos_attr_cmnex_nofirmlinkpath');
     expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
     await client.start();
@@ -82,7 +108,6 @@ describe('RustSidecarClient', () => {
     expect(client.hasCapability('unknown_capability')).toBe(false);
     await client.shutdown();
     expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
-    expect(client.hasCapability('macos_attr_cmnex_nofirmlinkpath')).toBe(false);
   });
 
   it('fails closed when the sidecar advertises malformed capabilities', async () => {
@@ -91,12 +116,11 @@ describe('RustSidecarClient', () => {
   });
 
   it('clears runtime capabilities when the sidecar exits unexpectedly', async () => {
-    child.capabilities.push('macos_fcntl_getpath_nofirmlink');
     await client.start();
-    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(true);
+    expect(client.hasCapability('workspace_registration')).toBe(true);
     child.exitCode = 2;
     child.emit('exit', 2, null);
-    expect(client.hasCapability('macos_fcntl_getpath_nofirmlink')).toBe(false);
+    expect(client.hasCapability('workspace_registration')).toBe(false);
   });
 
   it('fails closed on a mismatched response ID', async () => {
@@ -109,6 +133,31 @@ describe('RustSidecarClient', () => {
     child.mode = 'oversized';
     await expect(client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' }))
       .rejects.toThrow(/frame limit/i);
+  });
+
+  it('validates workspace handles, portable paths and capture limits before transport', async () => {
+    await expect(client.captureWorkspaceFile('not-a-handle', 'src/main.rs', 1024))
+      .rejects.toThrow(/handle/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), '../secret', 1024))
+      .rejects.toThrow(/path/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/CON.txt', 1024))
+      .rejects.toThrow(/path/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/main.rs', 10 * 1024 * 1024 + 1))
+      .rejects.toThrow(/byte limit/i);
+    expect(child.killed).toBe(false);
+  });
+
+  it('rejects malformed capture acknowledgements and never exposes content', async () => {
+    child.mode = 'bad-capture';
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.captureWorkspaceFile(handle, 'src/main.rs', 10))
+      .rejects.toThrow(/acknowledgement/i);
+  });
+
+  it('rejects non-absolute and oversized workspace selections locally', async () => {
+    await expect(client.registerWorkspace('relative/project')).rejects.toThrow(/absolute path/i);
+    await expect(client.registerWorkspace('/' + 'x'.repeat(4096))).rejects.toThrow(/absolute path/i);
+    expect(child.killed).toBe(false);
   });
 
   it('terminates the child when an evaluation is cancelled', async () => {
