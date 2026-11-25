@@ -413,10 +413,18 @@ function isSafePortableRelativePath(value: string): boolean {
   ]);
   return value.split('/').every(component => {
     if (!component || component === '.' || component === '..' || component.endsWith('.') ||
-        component.endsWith(' ') || /[\x00-\x1f\x7f<>"|?*]/.test(component)) return false;
+        component.endsWith(' ') || hasForbiddenPathCharacter(component)) return false;
     const stem = (component.split('.')[0] ?? component).toUpperCase();
     return !reserved.has(stem);
   });
+}
+
+function hasForbiddenPathCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x1f || code === 0x7f || '<>"|?*'.includes(character)) return true;
+  }
+  return false;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
