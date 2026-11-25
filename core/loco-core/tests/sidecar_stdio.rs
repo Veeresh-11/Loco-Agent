@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
 fn run_with_input(input: &[u8]) -> std::process::Output {
@@ -130,20 +130,76 @@ fn protocol_v2_register_capture_revoke_and_shutdown_are_correlated() {
     std::fs::create_dir(root.path().join("src")).unwrap();
     std::fs::write(root.path().join("src/main.rs"), b"v2-native-capture").unwrap();
 
-    let mut input = Vec::new();
-    line(&hello_v2("v2-boot"), &mut input);
-    line(&json!({
-        "protocolVersion":"2.0",
-        "messageType":"registerWorkspace",
-        "requestId":"v2-register",
-        "selectedRoot":root.path().to_string_lossy(),
+    let mut child = Command::new(env!("CARGO_BIN_EXE_loco-authority"))
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn v2 sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    writeln!(stdin, "{}", hello_v2("v2-boot")).unwrap();
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    let hello: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(hello["messageType"], "hello");
+    line.clear();
+
+    let register = json!({
+        "protocolVersion":"2.0", "messageType":"registerWorkspace",
+        "requestId":"v2-register", "selectedRoot":root.path().to_string_lossy().to_string(),
         "displayName":"test workspace"
-    }), &mut input);
-    // The handle is not known until registration returns, so run the first
-    // exchange and then use the returned opaque process-local handle.
-    let first = run_with_input(&input);
-    assert!(!first.status.success(), "registration stream must await remaining protocol input");
-    let _ = first;
+    });
+    writeln!(stdin, "{}", register).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let registered: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(registered["messageType"], "workspaceRegistered");
+    let handle = registered["workspaceHandle"].as_str().unwrap().to_string();
+    assert_eq!(handle.len(), 64);
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.0", "messageType":"captureWorkspaceFile",
+        "requestId":"v2-capture", "workspaceHandle":handle,
+        "relativePath":"src/main.rs", "maxBytes":1024
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let captured: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(captured["messageType"], "workspaceFileCaptured");
+    assert_eq!(captured["captured"], true);
+    assert_eq!(captured["byteLength"], 17);
+    assert!(captured.get("bytes").is_none());
+    assert!(captured.get("snapshotDigest").is_none());
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.0", "messageType":"revokeWorkspace",
+        "requestId":"v2-revoke", "workspaceHandle":handle
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let revoked: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(revoked["messageType"], "workspaceRevoked");
+    assert_eq!(revoked["revoked"], true);
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.0", "messageType":"captureWorkspaceFile",
+        "requestId":"v2-capture-after-revoke", "workspaceHandle":handle,
+        "relativePath":"src/main.rs", "maxBytes":1024
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let denied: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(denied["messageType"], "error");
+    assert_eq!(denied["error"]["code"], "CAPTURE_DENIED");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.0", "messageType":"shutdown", "requestId":"v2-stop"
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let stopped: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(stopped["messageType"], "shutdown");
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
