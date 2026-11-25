@@ -182,7 +182,8 @@ jobs:
           # the compiled entrypoint and runtime dependency metadata.
           grep -Fx "extension/out/extension.js" <<< "$listing"
           grep -Fx "extension/package.json" <<< "$listing"
-          if grep -E '(^|/)(src|\.github|coverage|__tests__)/|\.map$|\.tsbuildinfo$|(^|/)tsconfig[^/]*\.json$|(^|/)jest\.config\.js
+          if grep -E '(^|/)(src|\\.github|coverage|__tests__)/|\\.map$|\\.tsbuildinfo$|(^|/)tsconfig[^/]*\\.json$|(^|/)jest\\.config\\.js
+      - name: Upload packaged VSIX
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: loco-agent-vsix-with-authority
