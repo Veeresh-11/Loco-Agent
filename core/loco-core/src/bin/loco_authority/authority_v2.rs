@@ -350,7 +350,9 @@ mod adversarial_handler_tests {
         })
         .to_string();
 
-        let (result, output) = run_with(hello(), format!("{request}\\n").into_bytes());
+        let mut request_frame = request;
+        request_frame.push('\n');
+        let (result, output) = run_with(hello(), request_frame.into_bytes());
         assert!(result.is_ok(), "EOF should terminate the session cleanly: {result:?}");
 
         let frames: Vec<Value> = String::from_utf8(output)
