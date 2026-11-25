@@ -30,6 +30,8 @@ jobs:
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Validate manifest-lock consistency
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Assert patched handlebars version
+        run: node -e "const lock = require('./package-lock.json'); const actual = lock.packages['node_modules/handlebars']?.version; if (actual !== '4.7.10') { console.error('Expected handlebars 4.7.10, got', actual); process.exit(1); } console.log('handlebars', actual);"
       - name: Run dependency audit
         shell: bash
         run: |
