@@ -479,3 +479,67 @@ fn protocol_v21_re_registration_does_not_rebind_old_challenge_to_new_workspace_h
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 }
+
+#[test]
+fn protocol_v21_stale_capture_rejects_without_consuming_challenge() {
+    let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let target = root.path().join("README.md");
+    std::fs::write(&target, b"original-captured-content").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_loco-authority"))
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn v2.1 sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+
+    writeln!(stdin, "{}", hello_v21("stale-hello")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    line.clear();
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"registerWorkspace","requestId":"stale-register",
+        "selectedRoot":root.path().to_string_lossy().to_string()
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let handle = serde_json::from_str::<Value>(&line).unwrap()["workspaceHandle"].as_str().unwrap().to_string();
+    line.clear();
+
+    let action = json!({"type":"read_file","path":"README.md","maxBytes":1024});
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"issueBindingChallenge","requestId":"stale-issue",
+        "workspaceHandle":handle,"action":action,"ttlSeconds":60
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let challenge = serde_json::from_str::<Value>(&line).unwrap()["challengeId"].as_str().unwrap().to_string();
+    line.clear();
+
+    std::fs::write(&target, b"changed-after-challenge").unwrap();
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"consumeBindingChallenge","requestId":"stale-consume",
+        "workspaceHandle":handle,"challengeId":challenge,"action":action
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let stale = serde_json::from_str::<Value>(&line).unwrap();
+    assert_eq!(stale["messageType"], "error");
+    assert_eq!(stale["error"]["code"], "BINDING_MISMATCH");
+    line.clear();
+
+    // Restore the exact captured bytes. A failed stale check must not burn the
+    // one-time challenge; the matching fresh capture can still consume it.
+    std::fs::write(&target, b"original-captured-content").unwrap();
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"consumeBindingChallenge","requestId":"stale-retry",
+        "workspaceHandle":handle,"challengeId":challenge,"action":action
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let retry = serde_json::from_str::<Value>(&line).unwrap();
+    assert_eq!(retry["messageType"], "bindingVerified");
+    assert_eq!(retry["bindingVerified"], true);
+    line.clear();
+
+    writeln!(stdin, "{}", json!({"protocolVersion":"2.1","messageType":"shutdown","requestId":"stale-stop"})).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
