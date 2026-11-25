@@ -51,7 +51,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build release authority executable
-        run: cargo build --locked --release --manifest-path core/loco-core/Cargo.toml --bin loco-authority --target ${{ matrix.target }}
+        run: cargo build --release --manifest-path core/loco-core/Cargo.toml --bin loco-authority --target ${{ matrix.target }}
 
       - name: Stage executable
         shell: bash
