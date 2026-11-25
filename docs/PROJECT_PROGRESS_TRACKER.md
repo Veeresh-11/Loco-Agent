@@ -33,7 +33,7 @@
 | A3 | Process-local workspace registry | **CI green — draft** | [PR #130](https://github.com/Veeresh-11/Loco-Agent/pull/130), exact-head run #45431484151: Contract Validation and Rust Core Tests passed | Review registry lifecycle, ownership, invalidation and concurrency; integration with native adapter |
 | A4 | Native adapter factory and registration | **CI green / implementation submitted — draft** | [PR #131](https://github.com/Veeresh-11/Loco-Agent/pull/131), exact-head run #45437420337: Contract Validation and Rust Core Tests passed | Review platform selection and registration lifecycle; connect to versioned registration/capture protocol; cross-platform adversarial coverage |
 | A5 | Versioned authority registration/capture protocol | **Implemented in draft PR stack; CI green, integration/review pending** | [PR #132](https://github.com/Veeresh-11/Loco-Agent/pull/132) design, [#133](https://github.com/Veeresh-11/Loco-Agent/pull/133) DTOs, [#135](https://github.com/Veeresh-11/Loco-Agent/pull/135) Rust session/handlers, [#136](https://github.com/Veeresh-11/Loco-Agent/pull/136) TypeScript client, [#137](https://github.com/Veeresh-11/Loco-Agent/pull/137) adversarial tests, [#138](https://github.com/Veeresh-11/Loco-Agent/pull/138) path parity | Reconcile and review the stacked protocol chain; confirm exact-head CI, lifecycle semantics, registration/capture/revocation behavior and independent security review; merge in dependency order |
-| A6 | Approval issue/consume integration | **Design submitted — draft** | [PR #149](https://github.com/Veeresh-11/Loco-Agent/pull/149), based on #138 | Review proposed protocol 2.1; bind exact action + fresh Rust-owned capture + workspace registration/session epoch; extend store invalidation on workspace revoke; implement DTOs/handlers/client/tests after design review; keep authenticator ceremony separate and do not claim human approval |
+| A6 | Approval issue/consume integration | **In progress — design + store foundation submitted** | [PR #149](https://github.com/Veeresh-11/Loco-Agent/pull/149) protocol design; [PR #150](https://github.com/Veeresh-11/Loco-Agent/pull/150) registration-bound store API and tests; Rust Core Tests #45577413052 and Contract Validation #45577413124 running | Review protocol 2.1 design; integrate issue/consume DTOs and handlers with Rust-owned registry capture; revoke challenges with workspace registration; add TypeScript client and replay/lifecycle tests; keep authenticator ceremony separate and do not claim human approval |
 | A7 | Adversarial lifecycle and replay tests | **Pending** | Depends on A5–A6 | Registration replacement, stale capture, replay, duplicate consume, concurrent consume, process restart, deactivation, malformed IPC and race tests |
 | A8 | Independent security review | **Pending** | Applies to A1–A7 | Independent reviewer sign-off on threat model, trust boundary, protocol, platform adapters, approval lifecycle and residual risks |
 
@@ -90,10 +90,9 @@
 ## E. Immediate execution queue
 
 1. **Review PR #147**: exact-head Rust Core Tests, Contract Validation and Authority Native Artifact Builds are now green (#45573727400, #45573727596, #45573727647). Review the pure policy boundaries and negative tests; retain draft until independent review.
-2. **Advance A5 — versioned authority registration/capture protocol**: inspect #129–#131 contracts and current protocol v2; define one canonical versioned protocol and tests without enabling privileged operations.
-3. Integrate the registration/capture protocol with process-local registry and native adapter factory.
-4. Implement approval issue/consume only after registration and capture identities are stable.
-5. Add adversarial lifecycle/replay tests.
+2. **Review and reconcile A5 (#132–#138)**: protocol v2 DTOs, Rust handlers/session, TypeScript client and adversarial tests are implemented in the open draft stack; confirm dependencies and semantics before merge.
+3. **Continue A6**: after #150 CI, wire strict issue/consume messages to registry capture and registration-bound store APIs; ensure workspace revocation clears challenges.
+4. Add adversarial issue/consume, replay, concurrent-consume and lifecycle tests.
 6. Review and reconcile stacked PR dependencies before merging in order.
 7. Continue attestation and runtime-verification gates independently; no sidecar launch.
 
