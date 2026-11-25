@@ -95,8 +95,18 @@ jobs:
           toolchain: 1.100.0
           targets: ${{ matrix.target }}
 
-      - name: Build release authority executable
-        run: cargo build --release --manifest-path core/loco-core/Cargo.toml --bin loco-authority --target ${{ matrix.target }}
+      - name: Generate and validate dependency lockfile (bootstrap)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile --manifest-path core/loco-core/Cargo.toml
+          echo "BOOTSTRAP_CARGO_LOCKFILE_BASE64_BEGIN"
+          base64 -w0 core/loco-core/Cargo.lock
+          echo
+          echo "BOOTSTRAP_CARGO_LOCKFILE_BASE64_END"
+
+      - name: Build release authority executable with locked dependencies
+        run: cargo build --locked --release --manifest-path core/loco-core/Cargo.toml --bin loco-authority --target ${{ matrix.target }}
 
       - name: Stage executable
         shell: bash
