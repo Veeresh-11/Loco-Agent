@@ -93,7 +93,7 @@
 2. **Independent review PR #147**: review-hardening head `71bfe8cda54cc58f60f0028e970f70fa6819e428` passed Contract #45580071069, Native Artifact Builds #45580071097 (four target builds + VSIX), and Rust Core Tests #45580071318 (all nine targets). Keep draft until an independent security review is recorded.
 3. **A5 (#132–#138) protocol-chain review complete locally**: exact-head implementation CI is green. Dependency order is #132 → #133 → #135 → (#136 → #138, with #137 as a parallel child of #135). Integration remains pending independent review; do not merge this draft stack yet.
 4. **A6 store hardening (#150)**: fixed the registration-scope race by atomically inserting the registration digest; Contract Validation #45581381364 passed, Rust Core Tests #45581381473 passed all nine targets. #151's earlier green CI is against the old base and must be rerun after stack reconciliation.
-5. **A7 remaining lifecycle gaps**: after latest PR #151 CI, add deactivation/malformed IPC or additional cross-layer race coverage only where the current sidecar and store tests do not already cover it.
+5. **A7 lifecycle coverage**: implementation and exact-head CI are green; local source audit found coverage for revocation/deactivation, malformed IPC, stale-capture retry, re-registration isolation, replay, command rejection and shutdown. Do not add duplicate cases without a newly identified gap; obtain independent review.
 6. Keep platform-authenticator verification and independent security review as separate gates; do not enable privileged operations.
 7. Continue attestation and runtime-verification gates independently; no sidecar launch.
 
@@ -177,3 +177,6 @@ The historical pace of creating several focused PRs over three days is useful fo
 
 
 - **2026-11-25 (A7 exact-head CI completion):** Rechecked workflow run #45583199600 and its nine jobs on PR #151 head `47665a5824cd94d7b06c47f7087db12b22f4f140`. All nine targets are now completed successfully: Ubuntu 22.04/24.04/26.04, Windows 2022/2025, macOS 15, macOS 15 Intel, macOS 26 and macOS 26 Intel. Contract Validation #45583199565 and TypeScript CI #45583199603 (Node 20/22) also passed. A7 is now exact-head CI green, but remains unaccepted pending independent security review and integration. Corrected the stale #150 Rust status: #45581381473 passed all nine targets.
+
+
+- **2026-11-25 (execution queue advanced):** Reordered the immediate queue after the final macOS 15 job completed successfully. A7 implementation/CI work is no longer the immediate task; the next blocking task is independent security review by a reviewer who did not author the changes. Local review and CI evidence are not substitutes. PR #147 and A5–A7 remain unmerged/draft; no privileged runtime path is enabled.
