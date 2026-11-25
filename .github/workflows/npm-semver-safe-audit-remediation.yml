@@ -40,6 +40,20 @@ jobs:
             echo "npm audit fix failed unexpectedly" >&2
             exit "$audit_fix_status"
           fi
+      - name: Update Azure Identity within the parent semver range
+        shell: bash
+        run: |
+          # @vscode/vsce declares @azure/identity ^4.1.0; Azure Identity 4.14.1
+          # is within that range and declares the patched @azure/msal-node ^7.1.0.
+          npm update @azure/identity --package-lock-only --ignore-scripts --no-fund
+          node <<'NODE'
+          const lock = require('./package-lock.json');
+          const identity = lock.packages['node_modules/@azure/identity'];
+          const msal = lock.packages['node_modules/@azure/msal-node'];
+          if (!identity || identity.version !== '4.14.1') throw new Error(`Expected @azure/identity 4.14.1, got ${identity?.version}`);
+          if (!msal || !/^7\\./.test(msal.version) || !identity.dependencies?.['@azure/msal-node']?.startsWith('^7.1.0')) throw new Error(`Expected Azure Identity's patched MSAL Node 7.x dependency, got ${msal?.version}`);
+          console.log({identity: identity.version, identityMsalRange: identity.dependencies['@azure/msal-node'], msal: msal.version});
+          NODE
       - name: Validate candidate lockfile
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Assert critical handlebars fix remains
