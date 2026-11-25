@@ -235,3 +235,165 @@ fn protocol_v2_handshake_advertises_only_implemented_read_only_capabilities() {
     assert!(capabilities.iter().any(|value| value == "workspace_revocation"));
     assert_eq!(messages[1]["messageType"], "shutdown");
 }
+
+
+fn hello_v21(id: &str) -> Value {
+    json!({
+        "protocolVersion":"2.1",
+        "messageType":"hello",
+        "requestId":id,
+        "supportedProtocolVersions":["2.0","2.1"],
+        "client":{"name":"loco-vscode-extension","version":"0.1.0"}
+    })
+}
+
+#[test]
+fn protocol_v21_issues_consumes_and_rejects_replay_of_registration_bound_challenge() {
+    let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    std::fs::write(root.path().join("src/main.rs"), b"approval-binding-v21").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_loco-authority"))
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn v2.1 sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+
+    writeln!(stdin, "{}", hello_v21("v21-hello")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let hello: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(hello["protocolVersion"], "2.1");
+    assert_eq!(hello["negotiatedProtocolVersion"], "2.1");
+    assert!(hello["server"]["capabilities"].as_array().unwrap().iter().any(|v| v == "approval_binding_challenge"));
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"registerWorkspace","requestId":"v21-register",
+        "selectedRoot":root.path().to_string_lossy().to_string()
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let registered: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(registered["messageType"], "workspaceRegistered");
+    let handle = registered["workspaceHandle"].as_str().unwrap().to_string();
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"captureWorkspaceFile","requestId":"v21-capture",
+        "workspaceHandle":handle,"relativePath":"src/main.rs","maxBytes":1024
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let captured: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(captured["messageType"], "workspaceFileCaptured");
+    assert_eq!(captured["captured"], true);
+    assert!(captured.get("snapshotDigest").is_none());
+    line.clear();
+
+    let action = json!({"type":"read_file","path":"src/main.rs","maxBytes":1024});
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"issueBindingChallenge","requestId":"v21-issue",
+        "workspaceHandle":handle,"action":action,"ttlSeconds":60
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let issued: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(issued["messageType"], "bindingChallengeIssued");
+    assert_eq!(issued["actionDigest"].as_str().unwrap().len(), 64);
+    assert_eq!(issued["snapshotDigest"].as_str().unwrap().len(), 64);
+    let challenge_id = issued["challengeId"].as_str().unwrap().to_string();
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"consumeBindingChallenge","requestId":"v21-consume",
+        "workspaceHandle":handle,"challengeId":challenge_id,"action":action
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let consumed: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(consumed["messageType"], "bindingVerified");
+    assert_eq!(consumed["bindingVerified"], true);
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"consumeBindingChallenge","requestId":"v21-replay",
+        "workspaceHandle":handle,"challengeId":challenge_id,"action":action
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let replay: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(replay["messageType"], "error");
+    assert_eq!(replay["error"]["code"], "BINDING_CHALLENGE_EXPIRED_OR_CONSUMED");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"shutdown","requestId":"v21-stop"
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "shutdown");
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn protocol_v21_revocation_invalidates_challenges_and_commands_are_rejected() {
+    let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    std::fs::write(root.path().join("README.md"), b"revoke-me").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_loco-authority"))
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn v2.1 sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+
+    writeln!(stdin, "{}", hello_v21("revoke-hello")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    line.clear();
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"registerWorkspace","requestId":"revoke-register",
+        "selectedRoot":root.path().to_string_lossy().to_string()
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let handle = serde_json::from_str::<Value>(&line).unwrap()["workspaceHandle"].as_str().unwrap().to_string();
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"issueBindingChallenge","requestId":"revoke-issue",
+        "workspaceHandle":handle,"action":{"type":"read_file","path":"README.md","maxBytes":1024},"ttlSeconds":60
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let challenge = serde_json::from_str::<Value>(&line).unwrap()["challengeId"].as_str().unwrap().to_string();
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"revokeWorkspace","requestId":"revoke-workspace",
+        "workspaceHandle":handle
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "workspaceRevoked");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"consumeBindingChallenge","requestId":"revoke-consume",
+        "workspaceHandle":handle,"challengeId":challenge,
+        "action":{"type":"read_file","path":"README.md","maxBytes":1024}
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let denied = serde_json::from_str::<Value>(&line).unwrap();
+    assert_eq!(denied["messageType"], "error");
+    assert_eq!(denied["error"]["code"], "BINDING_CHALLENGE_EXPIRED_OR_CONSUMED");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"issueBindingChallenge","requestId":"reject-command",
+        "workspaceHandle":handle,"action":{"type":"run_command","executable":"echo","args":["unsafe"]},"ttlSeconds":60
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let unsupported = serde_json::from_str::<Value>(&line).unwrap();
+    assert_eq!(unsupported["messageType"], "error");
+    assert_eq!(unsupported["error"]["code"], "UNSUPPORTED_ACTION");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({"protocolVersion":"2.1","messageType":"shutdown","requestId":"revoke-stop"})).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
