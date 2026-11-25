@@ -27,7 +27,19 @@ jobs:
           node-version: "20"
           cache: npm
       - name: Generate semver-compatible remediation candidate
-        run: npm audit fix --package-lock-only --ignore-scripts --no-fund
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund 2>&1 | tee "$RUNNER_TEMP/npm-audit-fix.log"
+          audit_fix_status=${PIPESTATUS[0]}
+          set -e
+          echo "npm audit fix exit code: ${audit_fix_status}" | tee -a "$GITHUB_STEP_SUMMARY"
+          # npm audit fix exits nonzero when remaining advisories are present; preserve
+          # the candidate for explicit validation and machine-readable reporting.
+          if [ "$audit_fix_status" -gt 1 ]; then
+            echo "npm audit fix failed unexpectedly" >&2
+            exit "$audit_fix_status"
+          fi
       - name: Validate candidate lockfile
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Assert critical handlebars fix remains
