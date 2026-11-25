@@ -545,6 +545,70 @@ mod tests {
     }
 
     #[test]
+    fn registration_bound_challenge_requires_same_workspace_handle() {
+        let (mut store, clock) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let handle = "a".repeat(64);
+        let challenge = store.issue_for_registration(&action, &snapshot, &handle, 30).unwrap();
+
+        let fresh = sample_snapshot_at(clock.monotonic_now().unwrap());
+        assert!(matches!(
+            store.consume_for_registration(&challenge.challenge_id, &action, &fresh, &"b".repeat(64)),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+
+        store.consume_for_registration(&challenge.challenge_id, &action, &fresh, &handle).unwrap();
+        assert!(store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn legacy_consume_cannot_consume_registration_bound_challenge() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let challenge = store.issue_for_registration(&action, &snapshot, &"c".repeat(64), 30).unwrap();
+        let fresh = sample_snapshot_at(Duration::ZERO);
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action, &fresh),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn revoking_workspace_registration_invalidates_its_outstanding_challenges() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let handle = "d".repeat(64);
+        let challenge = store.issue_for_registration(&action, &snapshot, &handle, 30).unwrap();
+
+        store.revoke_registration(&handle).unwrap();
+        let fresh = sample_snapshot_at(Duration::ZERO);
+        assert!(matches!(
+            store.consume_for_registration(&challenge.challenge_id, &action, &fresh, &handle),
+            Err(StoreError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn registration_binding_rejects_malformed_workspace_handles() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        assert!(matches!(
+            store.issue_for_registration(&action, &snapshot, "not-a-handle", 30),
+            Err(StoreError::InvalidRegistration)
+        ));
+        assert!(matches!(
+            store.revoke_registration("not-a-handle"),
+            Err(StoreError::InvalidRegistration)
+        ));
+    }
+
+    #[test]
     fn store_issues_and_consumes_using_its_own_clock() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
