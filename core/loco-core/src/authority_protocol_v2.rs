@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(request.validate(), Err(ProtocolV2ValidationError::InvalidSelectedRoot));
         request.selected_root = "x".repeat(MAX_SELECTED_ROOT_BYTES + 1);
         assert_eq!(request.validate(), Err(ProtocolV2ValidationError::InvalidSelectedRoot));
-        request.selected_root.push('\\0');
+        request.selected_root.push('\0');
         assert_eq!(request.validate(), Err(ProtocolV2ValidationError::InvalidSelectedRoot));
     }
 
