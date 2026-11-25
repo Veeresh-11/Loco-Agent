@@ -100,7 +100,7 @@ impl RegisterWorkspaceRequestV2 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CaptureWorkspaceFileRequestV2 {
     pub protocol_version: String,
