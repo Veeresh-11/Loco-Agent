@@ -414,9 +414,13 @@ function isSafePortableRelativePath(value: string): boolean {
   return value.split('/').every(component => {
     if (!component || component === '.' || component === '..' || component.endsWith('.') ||
         component.endsWith(' ') || hasForbiddenPathCharacter(component)) return false;
-    const stem = (component.split('.')[0] ?? component).toUpperCase();
+    const stem = asciiUppercase(component.split('.')[0] ?? component);
     return !reserved.has(stem);
   });
+}
+
+function asciiUppercase(value: string): string {
+  return value.replace(/[a-z]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x20));
 }
 
 function hasForbiddenPathCharacter(value: string): boolean {
