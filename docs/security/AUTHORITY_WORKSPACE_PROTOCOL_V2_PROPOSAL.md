@@ -22,6 +22,12 @@ The new contract is protocol **2.0**. The protocol version is exact on every req
 
 All messages are newline-delimited UTF-8 JSON objects. Stdout contains protocol frames only; diagnostics go to stderr. Existing frame, request-ID, per-process request-count, and one-outstanding-request limits remain in force. Every request ID is unique for the process lifetime.
 
+## Implementation checkpoints
+
+- PR #133 adds strict protocol v2 DTOs and lexical validation only; it does not change the production sidecar, which remains protocol 1.0.
+- PR #135 adds a separately testable per-process session state machine: one initial hello, process-lifetime unique request IDs, a 4,096-request budget, handshake-required operation gating, and terminal shutdown. This state machine is not yet wired into the stdio sidecar handlers.
+- Workspace registration, bounded capture, revocation, TypeScript client migration, and end-to-end protocol tests remain subsequent integration gates. No v2 capabilities should be advertised until those handlers are wired and validated.
+
 ## 3. Common envelope
 
 Every request contains:
