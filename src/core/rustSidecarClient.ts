@@ -18,6 +18,8 @@ export interface SidecarClientOptions {
   /** Resolve only the extension-packaged executable; never accept a workspace/provider path. */
   resolveExecutable: () => string;
   extensionVersion: string;
+  /** Opt into the additive 2.1 binding-challenge contract; default remains 2.0. */
+  protocolVersion?: '2.0' | '2.1';
   handshakeTimeoutMs?: number;
   requestTimeoutMs?: number;
   shutdownTimeoutMs?: number;
@@ -36,6 +38,17 @@ export interface SidecarDecision {
 export interface WorkspaceCaptureAcknowledgement {
   captured: true;
   byteLength: number;
+}
+
+export type BindingAction =
+  | { type: 'read_file'; path: string; maxBytes?: number }
+  | { type: 'propose_patch'; path: string; patch: string; expectedTargetSha256: string };
+
+export interface BindingChallenge {
+  challengeId: string;
+  actionDigest: string;
+  snapshotDigest: string;
+  expiresAtUnix: number;
 }
 
 /**
@@ -58,6 +71,10 @@ export class RustSidecarClient implements vscodeDisposable {
   private seenRequestIds = new Set<string>();
   private serverCapabilities = new Set<string>();
   private stderrTextDecoder = new TextDecoder();
+
+  private get protocolVersion(): '2.0' | '2.1' {
+    return this.options.protocolVersion ?? PROTOCOL_VERSION;
+  }
 
   constructor(private readonly options: SidecarClientOptions) {}
 
@@ -141,6 +158,52 @@ export class RustSidecarClient implements vscodeDisposable {
     return { captured: true, byteLength: response.byteLength as number };
   }
 
+  async issueBindingChallenge(
+    workspaceHandle: string, action: BindingAction, ttlSeconds: number, signal?: AbortSignal
+  ): Promise<BindingChallenge> {
+    if (this.protocolVersion !== '2.1') throw new Error('Binding challenges require protocol 2.1.');
+    if (!isWorkspaceHandle(workspaceHandle)) throw new Error('Workspace handle is invalid.');
+    validateBindingAction(action);
+    if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 300) {
+      throw new Error('Binding challenge TTL must be between 1 and 300 seconds.');
+    }
+    const response = await this.request({ messageType: 'issueBindingChallenge', workspaceHandle, action, ttlSeconds }, signal);
+    if (response.messageType === 'error') throw protocolError(response);
+    if (response.messageType !== 'bindingChallengeIssued' ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'challengeId', 'actionDigest', 'snapshotDigest', 'expiresAtUnix']) ||
+        typeof response.challengeId !== 'string' || !/^[a-f0-9]{64}$/.test(response.challengeId) ||
+        typeof response.actionDigest !== 'string' || !/^[a-f0-9]{64}$/.test(response.actionDigest) ||
+        typeof response.snapshotDigest !== 'string' || !/^[a-f0-9]{64}$/.test(response.snapshotDigest) ||
+        !Number.isSafeInteger(response.expiresAtUnix) || (response.expiresAtUnix as number) <= 0) {
+      await this.terminate();
+      throw new Error('Invalid binding challenge response.');
+    }
+    return {
+      challengeId: response.challengeId, actionDigest: response.actionDigest,
+      snapshotDigest: response.snapshotDigest, expiresAtUnix: response.expiresAtUnix as number
+    };
+  }
+
+  async consumeBindingChallenge(
+    workspaceHandle: string, challengeId: string, action: BindingAction, signal?: AbortSignal
+  ): Promise<{ bindingVerified: true }> {
+    if (this.protocolVersion !== '2.1') throw new Error('Binding challenges require protocol 2.1.');
+    if (!isWorkspaceHandle(workspaceHandle)) throw new Error('Workspace handle is invalid.');
+    if (typeof challengeId !== 'string' || !/^[a-f0-9]{64}$/.test(challengeId)) {
+      throw new Error('Binding challenge identifier is invalid.');
+    }
+    validateBindingAction(action);
+    const response = await this.request({ messageType: 'consumeBindingChallenge', workspaceHandle, challengeId, action }, signal);
+    if (response.messageType === 'error') throw protocolError(response);
+    if (response.messageType !== 'bindingVerified' ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'bindingVerified']) ||
+        response.bindingVerified !== true) {
+      await this.terminate();
+      throw new Error('Invalid binding verification response.');
+    }
+    return { bindingVerified: true };
+  }
+
   async revokeWorkspace(workspaceHandle: string, signal?: AbortSignal): Promise<void> {
     if (!isWorkspaceHandle(workspaceHandle)) throw new Error('Workspace handle is invalid.');
     const response = await this.request({ messageType: 'revokeWorkspace', workspaceHandle }, signal);
@@ -182,17 +245,28 @@ export class RustSidecarClient implements vscodeDisposable {
     let response: JsonObject;
     try {
       response = await this.exchange({
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: this.protocolVersion,
         messageType: 'hello',
         requestId,
+        ...(this.protocolVersion === '2.1' ? { supportedProtocolVersions: ['2.0', '2.1'] } : {}),
         client: { name: 'loco-vscode-extension', version: this.options.extensionVersion }
       }, this.options.handshakeTimeoutMs ?? 5000, signal);
     } catch (error) {
       await this.terminate();
       throw error;
     }
-    if (response.messageType !== 'hello' || !isObject(response.server) ||
-        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'server']) ||
+    const expectedHelloKeys = this.protocolVersion === '2.1'
+      ? ['protocolVersion', 'messageType', 'requestId', 'negotiatedProtocolVersion', 'supportedProtocolVersions', 'server']
+      : ['protocolVersion', 'messageType', 'requestId', 'server'];
+    const requiredCapabilities = this.protocolVersion === '2.1'
+      ? ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation', 'approval_binding_challenge']
+      : ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
+    if (response.protocolVersion !== this.protocolVersion ||
+        response.messageType !== 'hello' || !isObject(response.server) ||
+        !hasExactKeys(response, expectedHelloKeys) ||
+        (this.protocolVersion === '2.1' &&
+          (response.negotiatedProtocolVersion !== '2.1' || !Array.isArray(response.supportedProtocolVersions) ||
+           !response.supportedProtocolVersions.includes('2.1'))) ||
         !hasExactKeys(response.server, ['name', 'version', 'capabilities']) ||
         response.server.name !== 'loco-rust-authority' ||
         typeof response.server.version !== 'string' || response.server.version.length < 1 ||
@@ -200,10 +274,7 @@ export class RustSidecarClient implements vscodeDisposable {
         !Array.isArray(response.server.capabilities) ||
         response.server.capabilities.some(capability =>
           typeof capability !== 'string' || !/^[a-z0-9_]{1,64}$/.test(capability)) ||
-        !response.server.capabilities.includes('proposal_evaluation') ||
-        !response.server.capabilities.includes('workspace_registration') ||
-        !response.server.capabilities.includes('workspace_capture') ||
-        !response.server.capabilities.includes('workspace_revocation')) {
+        requiredCapabilities.some(capability => !((response.server as JsonObject).capabilities as unknown[]).includes(capability))) {
       await this.terminate();
       throw new Error('Rust sidecar handshake did not satisfy the v2 contract.');
     }
@@ -243,7 +314,7 @@ export class RustSidecarClient implements vscodeDisposable {
       throwIfAborted(signal);
       await this.ensureStarted(signal);
       const response = await this.exchange({
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: this.protocolVersion,
         ...fields,
         requestId: randomUUID()
       }, this.options.requestTimeoutMs ?? 30_000, signal);
@@ -341,7 +412,7 @@ export class RustSidecarClient implements vscodeDisposable {
         this.fail(new Error('Sidecar emitted an invalid UTF-8 or JSON frame.'));
         return;
       }
-      if (!isObject(parsed) || parsed.protocolVersion !== PROTOCOL_VERSION ||
+      if (!isObject(parsed) || parsed.protocolVersion !== this.protocolVersion ||
           typeof parsed.requestId !== 'string' || !isValidId(parsed.requestId)) {
         this.fail(new Error('Sidecar emitted an invalid protocol envelope.'));
         return;
@@ -397,6 +468,27 @@ function hasExactKeys(value: JsonObject, expected: string[]): boolean {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function validateBindingAction(action: BindingAction): void {
+  if (!action || typeof action !== 'object' || !isSafePortableRelativePath(action.path)) {
+    throw new Error('Binding action path is invalid.');
+  }
+  if (action.type === 'read_file') {
+    if (action.maxBytes !== undefined &&
+        (!Number.isSafeInteger(action.maxBytes) || action.maxBytes < 1 || action.maxBytes > MAX_CAPTURE_BYTES)) {
+      throw new Error('Binding read byte limit is invalid.');
+    }
+    return;
+  }
+  if (action.type === 'propose_patch') {
+    if (typeof action.patch !== 'string' || action.patch.length < 1 || Buffer.byteLength(action.patch, 'utf8') > 1_000_000 ||
+        typeof action.expectedTargetSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(action.expectedTargetSha256)) {
+      throw new Error('Binding patch action is invalid.');
+    }
+    return;
+  }
+  throw new Error('Binding action type is unsupported.');
 }
 
 function isWorkspaceHandle(value: string): boolean {
