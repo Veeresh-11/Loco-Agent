@@ -1,11 +1,15 @@
 import * as cp from 'child_process';
 import { randomUUID } from 'crypto';
+import { isAbsolute } from 'path';
 import { TextDecoder } from 'util';
 
-const PROTOCOL_VERSION = '1.0';
+const PROTOCOL_VERSION = '2.0';
+const POLICY_CONTRACT_VERSION = '1.0';
 const MAX_FRAME_BYTES = 12 * 1024 * 1024;
 const MAX_STDERR_BYTES = 16 * 1024;
 const MAX_STARTS = 3;
+const MAX_REQUESTS_PER_PROCESS = 4096;
+const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
 
 type JsonObject = Record<string, unknown>;
 type SpawnSidecar = (executable: string) => cp.ChildProcessWithoutNullStreams;
@@ -29,9 +33,17 @@ export interface SidecarDecision {
   message: string;
 }
 
+export interface WorkspaceCaptureAcknowledgement {
+  captured: true;
+  byteLength: number;
+}
+
 /**
- * Parent-owned proposal-evaluation transport. A returned "allow" is a policy
- * result only; it is never an execution capability or workspace-write grant.
+ * Parent-owned protocol v2 transport. A returned "allow" is a policy result
+ * only; it is never an execution capability or workspace-write grant.
+ *
+ * Workspace captures are acknowledged only. File bytes and trusted snapshot
+ * metadata remain inside Rust and are not exposed through this client.
  */
 export class RustSidecarClient implements vscodeDisposable {
   private child?: cp.ChildProcessWithoutNullStreams;
@@ -42,46 +54,96 @@ export class RustSidecarClient implements vscodeDisposable {
   private started = false;
   private closed = false;
   private starts = 0;
+  private requestsSent = 0;
+  private seenRequestIds = new Set<string>();
   private serverCapabilities = new Set<string>();
   private stderrTextDecoder = new TextDecoder();
 
   constructor(private readonly options: SidecarClientOptions) {}
 
-  /** Runtime capabilities reported by the child; never treat these as authorization grants. */
+  /** Runtime capabilities report implemented protocol features, never authorization grants. */
   hasCapability(name: string): boolean {
     return this.serverCapabilities.has(name);
   }
 
   async evaluate(proposal: JsonObject, signal?: AbortSignal): Promise<SidecarDecision> {
-    if (this.busy) throw new Error('A sidecar request is already in progress.');
-    this.busy = true;
-    try {
-      throwIfAborted(signal);
-      await this.ensureStarted(signal);
-      const requestId = randomUUID();
-      const response = await this.exchange({
-        protocolVersion: PROTOCOL_VERSION,
-        messageType: 'evaluate',
-        requestId,
-        proposal
-      }, this.options.requestTimeoutMs ?? 30_000, signal);
-      if (response.messageType !== 'decision' || !isObject(response.decision)) {
-        throw new Error('Unexpected sidecar response.');
-      }
-      const decision = response.decision;
-      if (decision.contractVersion !== PROTOCOL_VERSION ||
-          typeof decision.proposalId !== 'string' ||
-          !['deny', 'approval_required', 'allow'].includes(String(decision.decision)) ||
-          typeof decision.reasonCode !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(decision.reasonCode) ||
-          typeof decision.message !== 'string' || decision.message.length > 2000) {
-        throw new Error('Invalid sidecar decision payload.');
-      }
-      return decision as unknown as SidecarDecision;
-    } catch (error) {
-      await this.terminate();
-      throw error;
-    } finally {
-      this.busy = false;
+    const response = await this.request({
+      messageType: 'evaluate',
+      proposal
+    }, signal);
+    if (response.messageType !== 'decision' || !isObject(response.decision) ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'decision'])) {
+      throw new Error('Unexpected sidecar decision response.');
+    }
+    const decision = response.decision;
+    if (decision.contractVersion !== POLICY_CONTRACT_VERSION ||
+        typeof decision.proposalId !== 'string' || decision.proposalId.length < 1 || decision.proposalId.length > 128 ||
+        !['deny', 'approval_required', 'allow'].includes(String(decision.decision)) ||
+        typeof decision.reasonCode !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(decision.reasonCode) ||
+        typeof decision.message !== 'string' || decision.message.length > 2000) {
+      throw new Error('Invalid sidecar decision payload.');
+    }
+    return decision as unknown as SidecarDecision;
+  }
+
+  async registerWorkspace(selectedRoot: string, displayName?: string, signal?: AbortSignal): Promise<string> {
+    if (typeof selectedRoot !== 'string' || !isAbsolute(selectedRoot) ||
+        Buffer.byteLength(selectedRoot, 'utf8') > 4096 || selectedRoot.includes('\0')) {
+      throw new Error('Workspace selection must be a bounded absolute path.');
+    }
+    if (displayName !== undefined && (displayName.trim().length === 0 ||
+        Buffer.byteLength(displayName, 'utf8') > 128 || displayName.includes('\0'))) {
+      throw new Error('Workspace display name is invalid.');
+    }
+    const response = await this.request({
+      messageType: 'registerWorkspace',
+      selectedRoot,
+      ...(displayName === undefined ? {} : { displayName })
+    }, signal);
+    if (response.messageType === 'error') throw protocolError(response);
+    if (response.messageType !== 'workspaceRegistered' ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'workspaceHandle']) ||
+        typeof response.workspaceHandle !== 'string' || !/^[a-f0-9]{64}$/.test(response.workspaceHandle)) {
+      throw new Error('Invalid workspace registration response.');
+    }
+    return response.workspaceHandle;
+  }
+
+  async captureWorkspaceFile(
+    workspaceHandle: string,
+    relativePath: string,
+    maxBytes: number,
+    signal?: AbortSignal
+  ): Promise<WorkspaceCaptureAcknowledgement> {
+    if (!isWorkspaceHandle(workspaceHandle)) throw new Error('Workspace handle is invalid.');
+    if (!isSafePortableRelativePath(relativePath)) throw new Error('Workspace relative path is invalid.');
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_CAPTURE_BYTES) {
+      throw new Error('Workspace capture byte limit is invalid.');
+    }
+    const response = await this.request({
+      messageType: 'captureWorkspaceFile',
+      workspaceHandle,
+      relativePath,
+      maxBytes
+    }, signal);
+    if (response.messageType === 'error') throw protocolError(response);
+    if (response.messageType !== 'workspaceFileCaptured' ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'captured', 'byteLength']) ||
+        response.captured !== true || !Number.isSafeInteger(response.byteLength) ||
+        (response.byteLength as number) < 0 || (response.byteLength as number) > maxBytes) {
+      throw new Error('Invalid workspace capture acknowledgement.');
+    }
+    return { captured: true, byteLength: response.byteLength as number };
+  }
+
+  async revokeWorkspace(workspaceHandle: string, signal?: AbortSignal): Promise<void> {
+    if (!isWorkspaceHandle(workspaceHandle)) throw new Error('Workspace handle is invalid.');
+    const response = await this.request({ messageType: 'revokeWorkspace', workspaceHandle }, signal);
+    if (response.messageType === 'error') throw protocolError(response);
+    if (response.messageType !== 'workspaceRevoked' ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'revoked']) ||
+        response.revoked !== true) {
+      throw new Error('Invalid workspace revocation response.');
     }
   }
 
@@ -100,6 +162,8 @@ export class RustSidecarClient implements vscodeDisposable {
     this.child = child;
     this.stdoutBuffer = Buffer.alloc(0);
     this.stderrTail = Buffer.alloc(0);
+    this.requestsSent = 0;
+    this.seenRequestIds.clear();
     child.stdout.on('data', (chunk: Buffer) => this.onStdout(Buffer.from(chunk)));
     child.stderr.on('data', (chunk: Buffer) => this.onStderr(Buffer.from(chunk)));
     child.on('error', error => this.fail(error));
@@ -116,15 +180,20 @@ export class RustSidecarClient implements vscodeDisposable {
       client: { name: 'loco-vscode-extension', version: this.options.extensionVersion }
     }, this.options.handshakeTimeoutMs ?? 5000, signal);
     if (response.messageType !== 'hello' || !isObject(response.server) ||
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'server']) ||
+        !hasExactKeys(response.server, ['name', 'version', 'capabilities']) ||
         response.server.name !== 'loco-rust-authority' ||
         typeof response.server.version !== 'string' || response.server.version.length < 1 ||
         response.server.version.length > 64 ||
         !Array.isArray(response.server.capabilities) ||
         response.server.capabilities.some(capability =>
           typeof capability !== 'string' || !/^[a-z0-9_]{1,64}$/.test(capability)) ||
-        !response.server.capabilities.includes('proposal_evaluation')) {
+        !response.server.capabilities.includes('proposal_evaluation') ||
+        !response.server.capabilities.includes('workspace_registration') ||
+        !response.server.capabilities.includes('workspace_capture') ||
+        !response.server.capabilities.includes('workspace_revocation')) {
       await this.terminate();
-      throw new Error('Rust sidecar handshake did not satisfy the v1 contract.');
+      throw new Error('Rust sidecar handshake did not satisfy the v2 contract.');
     }
     this.serverCapabilities = new Set(response.server.capabilities as string[]);
     this.started = true;
@@ -139,7 +208,8 @@ export class RustSidecarClient implements vscodeDisposable {
           messageType: 'shutdown',
           requestId: randomUUID()
         }, this.options.shutdownTimeoutMs ?? 2000);
-        if (response.messageType !== 'shutdown' || response.accepted !== true) {
+        if (response.messageType !== 'shutdown' || response.accepted !== true ||
+            !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'accepted'])) {
           throw new Error('Sidecar shutdown was not acknowledged.');
         }
       } catch {
@@ -154,6 +224,36 @@ export class RustSidecarClient implements vscodeDisposable {
     void this.terminate();
   }
 
+  private async request(fields: JsonObject, signal?: AbortSignal): Promise<JsonObject> {
+    if (this.busy) throw new Error('A sidecar request is already in progress.');
+    this.busy = true;
+    try {
+      throwIfAborted(signal);
+      await this.ensureStarted(signal);
+      const response = await this.exchange({
+        protocolVersion: PROTOCOL_VERSION,
+        ...fields,
+        requestId: randomUUID()
+      }, this.options.requestTimeoutMs ?? 30_000, signal);
+      if (response.messageType === 'error') {
+        if (!hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'error']) ||
+            !isObject(response.error) ||
+            !hasExactKeys(response.error, ['code', 'message', 'retryable']) ||
+            typeof response.error.code !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(response.error.code) ||
+            typeof response.error.message !== 'string' || response.error.message.length > 512 ||
+            typeof response.error.retryable !== 'boolean') {
+          throw new Error('Invalid sidecar error response.');
+        }
+      }
+      return response;
+    } catch (error) {
+      await this.terminate();
+      throw error;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async ensureStarted(signal?: AbortSignal): Promise<void> {
     if (!this.started) await this.start(signal);
   }
@@ -163,7 +263,15 @@ export class RustSidecarClient implements vscodeDisposable {
     if (!child || child.killed) return Promise.reject(new Error('Sidecar process is unavailable.'));
     if (this.pending) return Promise.reject(new Error('Sidecar protocol permits one outstanding request.'));
     const requestId = String(message.requestId);
+    if (!isValidId(requestId) || this.seenRequestIds.has(requestId)) {
+      return Promise.reject(new Error('Sidecar request identifier is invalid or duplicated.'));
+    }
+    if (this.requestsSent >= MAX_REQUESTS_PER_PROCESS) {
+      return Promise.reject(new Error('Sidecar process request budget is exhausted.'));
+    }
     if (signal?.aborted) return Promise.reject(new Error('Sidecar request cancelled.'));
+    this.seenRequestIds.add(requestId);
+    this.requestsSent += 1;
     return new Promise<JsonObject>((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);
@@ -238,7 +346,6 @@ export class RustSidecarClient implements vscodeDisposable {
 
   private onStderr(chunk: Buffer): void {
     this.stderrTail = Buffer.concat([this.stderrTail, chunk]).subarray(-MAX_STDERR_BYTES);
-    // Retain only a bounded diagnostic tail. Never forward raw child output to UI/logs.
   }
 
   private fail(error: Error): void {
@@ -268,6 +375,37 @@ export class RustSidecarClient implements vscodeDisposable {
 }
 
 interface vscodeDisposable { dispose(): void; }
+
+function protocolError(response: JsonObject): Error {
+  const error = response.error as JsonObject;
+  return new Error(`Sidecar request denied (${String(error.code)}).`);
+}
+
+function hasExactKeys(value: JsonObject, expected: string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function isWorkspaceHandle(value: string): boolean {
+  return /^[a-f0-9]{64}$/.test(value);
+}
+
+function isSafePortableRelativePath(value: string): boolean {
+  if (!value || value.startsWith('/') || value.includes('\\') || value.includes(':') || value.includes('\0')) return false;
+  const reserved = new Set([
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'COM¹', 'COM²', 'COM³', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+    'LPT¹', 'LPT²', 'LPT³'
+  ]);
+  return value.split('/').every(component => {
+    if (!component || component === '.' || component === '..' || component.endsWith('.') ||
+        component.endsWith(' ') || /[\x00-\x1f\x7f<>"|?*]/.test(component)) return false;
+    const stem = (component.split('.')[0] ?? component).toUpperCase();
+    return !reserved.has(stem);
+  });
+}
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error('Sidecar request cancelled.');
