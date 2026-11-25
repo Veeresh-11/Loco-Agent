@@ -43,9 +43,12 @@ jobs:
       - name: Update Azure Identity within the parent semver range
         shell: bash
         run: |
-          # @vscode/vsce declares @azure/identity ^4.1.0; Azure Identity 4.14.1
-          # is within that range and declares the patched @azure/msal-node ^7.1.0.
-          npm update @azure/identity --package-lock-only --ignore-scripts --no-fund
+          # @vscode/vsce declares @azure/identity ^4.1.0; constrain this transitive
+          # package to 4.14.1 for the candidate only (do not change package.json).
+          cp package.json "$RUNNER_TEMP/package.json.original"
+          npm pkg set 'overrides.@azure/identity=4.14.1'
+          npm install --package-lock-only --ignore-scripts --no-fund
+          cp "$RUNNER_TEMP/package.json.original" package.json
           node <<'NODE'
           const lock = require('./package-lock.json');
           const identity = lock.packages['node_modules/@azure/identity'];
