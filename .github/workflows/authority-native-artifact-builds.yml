@@ -20,8 +20,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate-action-pins:
+    name: Validate immutable action references
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate workflow action references without third-party actions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          workflow = pathlib.Path(".github/workflows/authority-native-artifact-builds.yml")
+          text = workflow.read_text(encoding="utf-8")
+          references = re.findall(r"^\s*uses:\s*(\S+)", text, flags=re.MULTILINE)
+          if not references:
+              print("No external action references found")
+              sys.exit(1)
+
+          invalid = []
+          for reference in references:
+              action, separator, revision = reference.partition("@")
+              if not separator or not re.fullmatch(r"[0-9a-f]{40}", revision.split()[0]):
+                  invalid.append(reference)
+
+          if invalid:
+              print("Action references must use immutable 40-character commit SHAs:")
+              for reference in invalid:
+                  print(f"  {reference}")
+              sys.exit(1)
+
+          print(f"Validated {len(references)} immutable action references")
+          PY
+
   build:
     name: Build authority binary (${{ matrix.target }})
+    needs: validate-action-pins
     strategy:
       fail-fast: false
       matrix:
