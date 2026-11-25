@@ -126,7 +126,9 @@ fn hello_v2(id: &str) -> Value {
 
 #[test]
 fn protocol_v2_register_capture_revoke_and_shutdown_are_correlated() {
-    let root = tempfile::tempdir().unwrap();
+    // Keep the fixture under the checked-out workspace: platform adapters
+    // intentionally reject roots reached through system-temp symlink aliases.
+    let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
     std::fs::create_dir(root.path().join("src")).unwrap();
     std::fs::write(root.path().join("src/main.rs"), b"v2-native-capture").unwrap();
 
@@ -151,7 +153,7 @@ fn protocol_v2_register_capture_revoke_and_shutdown_are_correlated() {
     writeln!(stdin, "{}", register).unwrap();
     stdout.read_line(&mut line).unwrap();
     let registered: Value = serde_json::from_str(&line).unwrap();
-    assert_eq!(registered["messageType"], "workspaceRegistered");
+    assert_eq!(registered["messageType"], "workspaceRegistered", "registration response: {registered}");
     let handle = registered["workspaceHandle"].as_str().unwrap().to_string();
     assert_eq!(handle.len(), 64);
     line.clear();
