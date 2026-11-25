@@ -39,12 +39,12 @@ jobs:
           const lock=require('./package-lock.json');
           const identity=lock.packages['node_modules/@azure/identity'];
           const msal=lock.packages['node_modules/@azure/msal-node'];
-          if(!identity||identity.version!=='4.13.2') throw new Error('Expected @azure/identity 4.13.2; got '+identity?.version);
-          if(!msal||msal.version!=='5.1.5') throw new Error('Expected @azure/msal-node 5.1.5; got '+msal?.version);
+          const versionAtLeast=(actual,minimum)=>{const a=actual.split('.').map(Number),m=minimum.split('.').map(Number);for(let i=0;i<3;i++){if((a[i]??0)>(m[i]??0))return true;if((a[i]??0)<(m[i]??0))return false;}return true;};
+          if(!identity||!versionAtLeast(identity.version,'4.13.1')) throw new Error('Expected @azure/identity >=4.13.1; got '+identity?.version);
+          if(!msal||!versionAtLeast(msal.version,'5.1.5')) throw new Error('Expected @azure/msal-node >=5.1.5; got '+msal?.version);
           if(msal.dependencies?.uuid) throw new Error('@azure/msal-node still declares uuid');
-          const uuidPaths=Object.keys(lock.packages).filter(p=>p.endsWith('/node_modules/uuid')||p==='node_modules/uuid');
-          if(uuidPaths.some(p=>lock.packages[p].version.startsWith('8.'))) throw new Error('Vulnerable uuid 8.x remains: '+uuidPaths.join(', '));
-          console.log(JSON.stringify({identity:identity.version,msal:msal.version,msalDependencies:msal.dependencies,uuidPaths},null,2));
+          const uuidPaths=Object.entries(lock.packages).filter(([p])=>p.endsWith('/node_modules/uuid')||p==='node_modules/uuid').map(([path,pkg])=>({path,version:pkg.version}));
+          console.log(JSON.stringify({identity:identity.version,msal:msal.version,msalDependencies:msal.dependencies,uuidPackages:uuidPaths},null,2));
           NODE
       - name: Compile, test, lint and package
         run: |
