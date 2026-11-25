@@ -1,3 +1,5 @@
+mod authority_v2;
+
 use loco_core::{evaluate, ActionProposal, PolicyConfig};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -85,15 +87,32 @@ fn run() -> Result<(), String> {
     let mut input = stdin.lock();
     let stdout = io::stdout();
     let mut output = stdout.lock();
+    let first_frame = match read_frame(&mut input) {
+        Ok(Some(frame)) => frame,
+        Ok(None) => return Ok(()),
+        Err(error) => return Err(format!("invalid stdio frame: {error}")),
+    };
+    let first_text = std::str::from_utf8(&first_frame).map_err(|_| "frame is not UTF-8".to_string())?;
+    let first_value: Value = serde_json::from_str(first_text).map_err(|_| "frame is not valid JSON".to_string())?;
+    match first_value.get("protocolVersion").and_then(Value::as_str) {
+        Some("2.0") => return authority_v2::run(first_frame, &mut input, &mut output),
+        Some("1.0") => {}
+        _ => return Err("unsupported or missing protocol version".into()),
+    }
+
+    let mut first_frame = Some(first_frame);
     let mut seen_ids = HashSet::new();
     let mut handshaken = false;
     let mut request_count = 0usize;
 
     loop {
-        let frame = match read_frame(&mut input) {
-            Ok(Some(frame)) => frame,
-            Ok(None) => return Ok(()),
-            Err(error) => return Err(format!("invalid stdio frame: {error}")),
+        let frame = match first_frame.take() {
+            Some(frame) => frame,
+            None => match read_frame(&mut input) {
+                Ok(Some(frame)) => frame,
+                Ok(None) => return Ok(()),
+                Err(error) => return Err(format!("invalid stdio frame: {error}")),
+            },
         };
         let text = std::str::from_utf8(&frame).map_err(|_| "frame is not UTF-8".to_string())?;
         let value: Value = serde_json::from_str(text).map_err(|_| "frame is not valid JSON".to_string())?;
