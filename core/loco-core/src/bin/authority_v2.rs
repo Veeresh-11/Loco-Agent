@@ -7,8 +7,9 @@ use loco_core::{
         RevokeWorkspaceRequestV2, AUTHORITY_PROTOCOL_V2,
     },
     authority_protocol_v2_session::{AuthorityProtocolV2Session, ProtocolV2SessionError},
-    evaluate, ActionProposal, PolicyConfig, SnapshotCaptureRequest, WorkspaceRegistry,
+    evaluate, ActionProposal, PolicyConfig,
 };
+use loco_core::{snapshot_payload::SnapshotCaptureRequest, workspace_registry::WorkspaceRegistry};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
