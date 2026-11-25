@@ -1,0 +1,66 @@
+name: Remove Unused uuid Dependency
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/remove-unused-uuid.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: remove-unused-uuid-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Regenerate lockfile without unused direct uuid dependency
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Validate lockfile and install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Assert uuid is no longer a root dependency
+        run: node -e "const p=require('./package.json');const l=require('./package-lock.json');if(p.dependencies?.uuid||l.packages['']?.dependencies?.uuid){throw new Error('uuid remains a root dependency')}console.log('uuid is not a root dependency')"
+      - name: Compile, test, lint and package
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Generate audit report
+        if: matrix.node == 20
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          audit_status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" "$GITHUB_STEP_SUMMARY" "$audit_status" <<'NODE'
+          const fs=require('node:fs');const [reportPath,summaryPath,exitCode]=process.argv.slice(2);const r=JSON.parse(fs.readFileSync(reportPath,'utf8'));const c=r.metadata?.vulnerabilities??{};const rows=Object.entries(r.vulnerabilities??{}).map(([name,v])=>({name,severity:v.severity,direct:Boolean(v.isDirect),range:v.range,fixAvailable:v.fixAvailable}));const rank={critical:0,high:1,moderate:2,low:3,info:4};
+          const lines=['## Audit after removing unused uuid','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${c[s]??0} |`),'',`Audit exit code: ${exitCode}`,'','| Package | Severity | Direct | Range | Fix |','|---|---|---:|---|---|',...rows.sort((a,b)=>rank[a.severity]-rank[b.severity]||a.name.localeCompare(b.name)).map(v=>`| ${v.name} | ${v.severity} | ${v.direct?'yes':'no'} | ${v.range??''} | ${JSON.stringify(v.fixAvailable)} |`)];fs.appendFileSync(summaryPath,lines.join('\n')+'\n');console.log(JSON.stringify({counts:c,packages:rows.length},null,2));
+          NODE
+      - name: Upload lockfile and audit artifact
+        if: matrix.node == 20
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: uuid-removal-candidate
+          path: |
+            package-lock.json
+            ${{ runner.temp }}/npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
