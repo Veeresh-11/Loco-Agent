@@ -397,3 +397,85 @@ fn protocol_v21_revocation_invalidates_challenges_and_commands_are_rejected() {
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 }
+
+#[test]
+fn protocol_v21_re_registration_does_not_rebind_old_challenge_to_new_workspace_handle() {
+    let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    std::fs::write(root.path().join("README.md"), b"same-root-new-registration").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_loco-authority"))
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn v2.1 sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+
+    writeln!(stdin, "{}", hello_v21("replace-hello")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "hello");
+    line.clear();
+
+    let register = |id: &str| json!({
+        "protocolVersion":"2.1","messageType":"registerWorkspace","requestId":id,
+        "selectedRoot":root.path().to_string_lossy().to_string()
+    });
+    writeln!(stdin, "{}", register("replace-register-old")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let old_handle = serde_json::from_str::<Value>(&line).unwrap()["workspaceHandle"].as_str().unwrap().to_string();
+    line.clear();
+
+    let action = json!({"type":"read_file","path":"README.md","maxBytes":1024});
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"issueBindingChallenge","requestId":"replace-issue-old",
+        "workspaceHandle":old_handle,"action":action,"ttlSeconds":60
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let old_challenge = serde_json::from_str::<Value>(&line).unwrap()["challengeId"].as_str().unwrap().to_string();
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"revokeWorkspace","requestId":"replace-revoke-old",
+        "workspaceHandle":old_handle
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "workspaceRevoked");
+    line.clear();
+
+    writeln!(stdin, "{}", register("replace-register-new")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let new_handle = serde_json::from_str::<Value>(&line).unwrap()["workspaceHandle"].as_str().unwrap().to_string();
+    assert_ne!(old_handle, new_handle);
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"consumeBindingChallenge","requestId":"replace-consume-old-on-new",
+        "workspaceHandle":new_handle,"challengeId":old_challenge,"action":action
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    let denied = serde_json::from_str::<Value>(&line).unwrap();
+    assert_eq!(denied["messageType"], "error");
+    assert_eq!(denied["error"]["code"], "BINDING_CHALLENGE_EXPIRED_OR_CONSUMED");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"captureWorkspaceFile","requestId":"replace-capture-old",
+        "workspaceHandle":old_handle,"relativePath":"README.md","maxBytes":1024
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "error");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"captureWorkspaceFile","requestId":"replace-capture-new",
+        "workspaceHandle":new_handle,"relativePath":"README.md","maxBytes":1024
+    })).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "workspaceFileCaptured");
+    line.clear();
+
+    writeln!(stdin, "{}", json!({"protocolVersion":"2.1","messageType":"shutdown","requestId":"replace-stop"})).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
