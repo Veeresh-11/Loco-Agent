@@ -580,6 +580,39 @@ mod tests {
     }
 
     #[test]
+    fn legacy_consumer_on_independent_connection_cannot_consume_registration_bound_challenge() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registration-scope.sqlite");
+        let clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(100));
+        let epoch = "shared-process-epoch".to_string();
+        let mut issuer = ApprovalStore::initialize_with_epoch(
+            Connection::open(&database).unwrap(), clock.clone(), epoch.clone(),
+        ).unwrap();
+        // A second connection models the legacy API running concurrently in the same
+        // authority process; it must never observe a registration-scoped row as unscoped.
+        let mut legacy_consumer = ApprovalStore::initialize_with_epoch(
+            Connection::open(&database).unwrap(), clock, epoch,
+        ).unwrap();
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let handle = "e".repeat(64);
+        let challenge = issuer.issue_for_registration(&action, &snapshot, &handle, 30).unwrap();
+        let fresh = sample_snapshot_at(Duration::ZERO);
+
+        assert!(matches!(
+            legacy_consumer.consume(&challenge.challenge_id, &action, &fresh),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!issuer.is_consumed(&challenge.challenge_id).unwrap());
+        let registration_digest: String = issuer.conn.query_row(
+            "SELECT registration_digest FROM approval_challenges WHERE challenge_id=?1",
+            params![challenge.challenge_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(!registration_digest.is_empty());
+    }
+
+    #[test]
     fn revoking_workspace_registration_invalidates_its_outstanding_challenges() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
