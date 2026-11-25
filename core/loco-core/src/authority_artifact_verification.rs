@@ -129,8 +129,11 @@ pub fn validate_package_member_set(
         if member.starts_with('/')
             || member.starts_with('\\')
             || member.contains('\\')
+            // Colons reject Windows drive-qualified/drive-relative paths and ADS.
+            || member.contains(':')
             || member.split('/').any(|part| part == "." || part == "..")
             || member.contains('\0')
+            || member.bytes().any(|byte| byte.is_ascii_control())
         {
             return Err(VerificationFailure::WrongSubject);
         }
@@ -262,6 +265,41 @@ mod tests {
         assert_eq!(validate_package_member_set(&[expected.clone(), expected.clone()], target), Err(VerificationFailure::WrongSubject));
         assert_eq!(validate_package_member_set(&["extension/../evil".into(), expected.clone()], target), Err(VerificationFailure::WrongSubject));
         assert_eq!(validate_package_member_set(&["/absolute".into(), expected], target), Err(VerificationFailure::WrongSubject));
+    }
+
+    #[test]
+    fn package_member_validation_rejects_windows_drive_paths_and_ads() {
+        let target = AuthorityTarget::WindowsX64;
+        let expected = target.package_member().to_string();
+        for hostile in ["C:/Windows/system32/evil.exe", "C:relative\\evil.exe", "extension/resources/file.exe:stream"] {
+            assert_eq!(
+                validate_package_member_set(&[hostile.into(), expected.clone()], target),
+                Err(VerificationFailure::WrongSubject),
+                "must reject Windows path form: {hostile}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_member_validation_rejects_control_characters() {
+        let target = AuthorityTarget::LinuxX64;
+        let expected = target.package_member().to_string();
+        let hostile = "extension/resources/authority/evil\u{7f}name";
+        assert_eq!(
+            validate_package_member_set(&[hostile.into(), expected], target),
+            Err(VerificationFailure::WrongSubject)
+        );
+    }
+
+    #[test]
+    fn provenance_rejects_target_enum_mismatch_even_when_subject_path_matches() {
+        let digest = "a".repeat(64);
+        let mut evidence = valid_evidence(AuthorityTarget::LinuxX64, &digest);
+        evidence.target = AuthorityTarget::WindowsX64;
+        assert_eq!(
+            validate_provenance(&evidence, AuthorityTarget::LinuxX64, &digest),
+            Err(VerificationFailure::WrongTarget)
+        );
     }
 
     #[test]
