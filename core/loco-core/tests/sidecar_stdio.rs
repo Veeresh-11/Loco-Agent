@@ -543,3 +543,31 @@ fn protocol_v21_stale_capture_rejects_without_consuming_challenge() {
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 }
+
+#[test]
+fn protocol_v21_rejects_unknown_ipc_fields_and_exits_without_processing_request() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_loco-authority"))
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().expect("spawn v2.1 sidecar");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+
+    writeln!(stdin, "{}", hello_v21("malformed-hello")).unwrap();
+    stdout.read_line(&mut line).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "hello");
+    line.clear();
+
+    // deny_unknown_fields on the wire DTO must reject caller-supplied snapshot
+    // metadata rather than accepting an alternate source of binding authority.
+    writeln!(stdin, "{}", json!({
+        "protocolVersion":"2.1","messageType":"issueBindingChallenge","requestId":"malformed-issue",
+        "workspaceHandle":"a".repeat(64),
+        "action":{"type":"read_file","path":"README.md","maxBytes":1024},
+        "ttlSeconds":60,"snapshotDigest":"caller-controlled"
+    })).unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success(), "malformed IPC unexpectedly succeeded");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid issueBindingChallenge message"));
+}
