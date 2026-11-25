@@ -162,3 +162,6 @@ The historical pace of creating several focused PRs over three days is useful fo
 
 
 - **2026-11-25 (A7 Contract Validation result):** Latest PR #151 head `47665a5824cd94d7b06c47f7087db12b22f4f140` passed Contract Validation #45583199565 and TypeScript CI #45583199603 (Node 20/22). Rust Core Tests #45583199600 is the remaining exact-head gate and is still running across the nine-target matrix.
+
+
+- **2026-11-25 (A7 Rust matrix progress):** On latest PR #151 head `47665a5824cd94d7b06c47f7087db12b22f4f140`, Contract Validation #45583199565 and TypeScript CI #45583199603 (Node 20/22) have passed. Rust Core Tests #45583199600 has passed Ubuntu 22.04, Ubuntu 24.04, Ubuntu 26.04 and macOS 26; Windows 2022, Windows 2025, macOS 15 Intel and macOS 26 Intel were still running; macOS 15 was queued. Exact-head Rust CI is therefore not yet green.
