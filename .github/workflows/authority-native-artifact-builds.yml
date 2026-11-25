@@ -45,10 +45,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: ${{ matrix.target }}
 
@@ -63,7 +63,7 @@ jobs:
           install "core/loco-core/target/${{ matrix.target }}/release/${{ matrix.executable }}" "dist/authority/${{ matrix.target }}/${{ matrix.executable }}"
 
       - name: Upload native executable artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: loco-authority-${{ matrix.target }}
           path: dist/authority/${{ matrix.target }}/${{ matrix.executable }}
@@ -78,10 +78,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download native authority artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: loco-authority-*
           path: dist/authority-artifacts
@@ -105,7 +105,7 @@ jobs:
           stage_binary x86_64-apple-darwin loco-authority
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: npm
@@ -135,7 +135,7 @@ jobs:
           done
 
       - name: Upload packaged VSIX
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: loco-agent-vsix-with-authority
           path: "*.vsix"
@@ -155,38 +155,38 @@ jobs:
       attestations: write
     steps:
       - name: Download native authority artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: loco-authority-*
           path: dist/authority-artifacts
 
       - name: Download packaged VSIX
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: loco-agent-vsix-with-authority
           path: dist/vsix
 
       - name: Attest Linux authority executable
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/authority-artifacts/loco-authority-x86_64-unknown-linux-gnu/loco-authority
 
       - name: Attest Windows authority executable
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/authority-artifacts/loco-authority-x86_64-pc-windows-msvc/loco-authority.exe
 
       - name: Attest macOS arm64 authority executable
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/authority-artifacts/loco-authority-aarch64-apple-darwin/loco-authority
 
       - name: Attest macOS Intel authority executable
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/authority-artifacts/loco-authority-x86_64-apple-darwin/loco-authority
 
       - name: Attest packaged VSIX
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/vsix/*.vsix
