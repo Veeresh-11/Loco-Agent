@@ -19,13 +19,6 @@ pub enum AuthorityTarget {
 }
 
 impl AuthorityTarget {
-    pub fn executable_name(self) -> &'static str {
-        match self {
-            Self::WindowsX64 => "loco-authority.exe",
-            Self::LinuxX64 | Self::MacosArm64 | Self::MacosX64 => "loco-authority",
-        }
-    }
-
     pub fn package_member(self) -> &'static str {
         match self {
             Self::LinuxX64 => "extension/resources/authority/x86_64-unknown-linux-gnu/loco-authority",
@@ -141,7 +134,7 @@ pub fn validate_package_member_set(
         {
             return Err(VerificationFailure::WrongSubject);
         }
-        if !seen.insert(member) {
+        if !seen.insert(member.as_str()) {
             return Err(VerificationFailure::WrongSubject);
         }
         if member == expected {
