@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use sha2::{Digest, Sha256};
 
 use crate::approval_binding::{action_digest, verify_approval_binding, ApprovalChallenge, ApprovalError};
 use crate::approval_clock::{ApprovalClock, ApprovalClockError, SystemApprovalClock};
@@ -32,6 +33,7 @@ pub enum StoreError {
     RuntimeEpochUnavailable,
     StaleRuntime,
     InvalidChallenge,
+    InvalidRegistration,
     CapacityExceeded,
     PersistentCapacityExceeded,
     StorageLimitExceeded,
@@ -42,6 +44,21 @@ pub enum StoreError {
 }
 impl From<rusqlite::Error> for StoreError {
     fn from(value: rusqlite::Error) -> Self { Self::Sql(value) }
+}
+
+fn digest_workspace_registration(workspace_handle: &str) -> Result<String, StoreError> {
+    if workspace_handle.len() != 64
+        || !workspace_handle.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(StoreError::InvalidRegistration);
+    }
+    let digest = Sha256::digest(workspace_handle.as_bytes());
+    let mut encoded = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut encoded, "{byte:02x}").map_err(|_| StoreError::InvalidRegistration)?;
+    }
+    Ok(encoded)
 }
 
 fn generate_challenge_id() -> Result<String, getrandom::Error> {
@@ -174,7 +191,8 @@ impl ApprovalStore {
                 snapshot_digest TEXT NOT NULL DEFAULT '',
                 expires_at INTEGER NOT NULL,
                 consumed_at INTEGER NULL,
-                process_epoch TEXT NOT NULL DEFAULT ''
+                process_epoch TEXT NOT NULL DEFAULT '',
+                registration_digest TEXT NOT NULL DEFAULT ''
              );
              CREATE INDEX IF NOT EXISTS approval_challenges_expiry
                 ON approval_challenges(expires_at);
@@ -214,6 +232,22 @@ impl ApprovalStore {
             )?;
         }
 
+        // Challenges are additionally scoped to one process-local workspace registration.
+        // Legacy rows receive an empty digest and remain usable only through the legacy
+        // unscoped prototype API; registration-bound consume rejects them.
+        let has_registration_digest: bool = {
+            let mut statement = conn.prepare("PRAGMA table_info(approval_challenges)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            let found = columns.filter_map(Result::ok).any(|name| name == "registration_digest");
+            found
+        };
+        if !has_registration_digest {
+            conn.execute(
+                "ALTER TABLE approval_challenges ADD COLUMN registration_digest TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+
         // A newly started authority rotates the database's active epoch. Any
         // challenge issued by a previous process is now invalid, even if the
         // wall clock was rolled backward while the application was stopped.
@@ -246,6 +280,19 @@ impl ApprovalStore {
         action: &ProposedAction,
         snapshot: &CapturedWorkspaceSnapshot,
         ttl_seconds: u64,
+    ) -> Result<ApprovalChallenge, StoreError> {
+        self.issue_inner(action, snapshot, ttl_seconds, None)
+    }
+
+    /// Insert the challenge and its optional registration scope in one SQLite
+    /// transaction. A legacy consumer must never observe a scoped challenge
+    /// in the intermediate unscoped state.
+    fn issue_inner(
+        &mut self,
+        action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
+        ttl_seconds: u64,
+        registration_digest: Option<&str>,
     ) -> Result<ApprovalChallenge, StoreError> {
         if !(1..=MAX_APPROVAL_TTL_SECONDS).contains(&ttl_seconds) {
             return Err(StoreError::InvalidChallenge);
@@ -283,9 +330,9 @@ impl ApprovalStore {
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
         prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         tx.execute(
-            "INSERT INTO approval_challenges(challenge_id, action_digest, snapshot_digest, expires_at, consumed_at, process_epoch)
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
-            params![challenge.challenge_id, challenge.action_digest, challenge.snapshot_digest, challenge.expires_at_unix as i64, self.process_epoch],
+            "INSERT INTO approval_challenges(challenge_id, action_digest, snapshot_digest, expires_at, consumed_at, process_epoch, registration_digest)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6)",
+            params![challenge.challenge_id, challenge.action_digest, challenge.snapshot_digest, challenge.expires_at_unix as i64, self.process_epoch, registration_digest.unwrap_or("")],
         )?;
         deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         if let Err(error) = tx.commit() {
@@ -295,6 +342,46 @@ impl ApprovalStore {
         Ok(challenge)
     }
 
+    /// Issue a challenge bound to a specific process-local workspace handle.
+    /// Only a digest of the opaque handle is persisted. The challenge is not a
+    /// human approval and grants no authority by itself.
+    pub fn issue_for_registration(
+        &mut self,
+        action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
+        workspace_handle: &str,
+        ttl_seconds: u64,
+    ) -> Result<ApprovalChallenge, StoreError> {
+        let registration_digest = digest_workspace_registration(workspace_handle)?;
+        self.issue_inner(action, snapshot, ttl_seconds, Some(&registration_digest))
+    }
+
+    /// Revoke every outstanding challenge issued under this workspace registration.
+    /// Consumed and unconsumed rows are removed; their in-memory deadlines are cleared.
+    pub fn revoke_registration(&mut self, workspace_handle: &str) -> Result<(), StoreError> {
+        let registration_digest = digest_workspace_registration(workspace_handle)?;
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        Self::ensure_active_epoch(&tx, &self.process_epoch)?;
+        let challenge_ids = {
+            let mut statement = tx.prepare(
+                "SELECT challenge_id FROM approval_challenges WHERE registration_digest=?1"
+            )?;
+            let rows = statement.query_map(params![registration_digest], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        tx.execute(
+            "DELETE FROM approval_challenges WHERE registration_digest=?1",
+            params![registration_digest],
+        )?;
+        tx.commit()?;
+        let mut deadlines = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
+        for challenge_id in challenge_ids {
+            deadlines.remove(&challenge_id);
+        }
+        Ok(())
+    }
+
     /// Consume an existing, fresh challenge for the exact action. Current time
     /// is obtained internally; callers cannot supply or backdate the timestamp.
     pub fn consume(
@@ -302,6 +389,28 @@ impl ApprovalStore {
         challenge_id: &str,
         action: &ProposedAction,
         snapshot: &CapturedWorkspaceSnapshot,
+    ) -> Result<(), StoreError> {
+        self.consume_inner(challenge_id, action, snapshot, None)
+    }
+
+    /// Consume only when the challenge belongs to the supplied live workspace registration.
+    pub fn consume_for_registration(
+        &mut self,
+        challenge_id: &str,
+        action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
+        workspace_handle: &str,
+    ) -> Result<(), StoreError> {
+        let registration_digest = digest_workspace_registration(workspace_handle)?;
+        self.consume_inner(challenge_id, action, snapshot, Some(&registration_digest))
+    }
+
+    fn consume_inner(
+        &mut self,
+        challenge_id: &str,
+        action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
+        expected_registration_digest: Option<&str>,
     ) -> Result<(), StoreError> {
         if !is_valid_challenge_id(challenge_id) {
             return Err(StoreError::InvalidChallenge);
@@ -317,13 +426,19 @@ impl ApprovalStore {
         // serializes concurrent consumers across independent SQLite connections.
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Self::ensure_active_epoch(&tx, &self.process_epoch)?;
-        let record: Option<(String, String, u64, Option<u64>, String)> = tx.query_row(
-            "SELECT action_digest, snapshot_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
+        let record: Option<(String, String, u64, Option<u64>, String, String)> = tx.query_row(
+            "SELECT action_digest, snapshot_digest, expires_at, consumed_at, process_epoch, registration_digest FROM approval_challenges WHERE challenge_id=?1",
             params![challenge_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
         ).optional()?;
-        let (digest, snapshot_digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
+        let (digest, snapshot_digest, expires_at, consumed_at, challenge_epoch, registration_digest) =
+            record.ok_or(StoreError::NotFound)?;
         if challenge_epoch != self.process_epoch { return Err(StoreError::AlreadyConsumedOrExpired); }
+        match expected_registration_digest {
+            Some(expected) if registration_digest != expected => return Err(StoreError::AlreadyConsumedOrExpired),
+            None if !registration_digest.is_empty() => return Err(StoreError::AlreadyConsumedOrExpired),
+            _ => {}
+        }
         let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
             .get(challenge_id).copied().ok_or(StoreError::AlreadyConsumedOrExpired)?;
@@ -429,6 +544,103 @@ mod tests {
             clock.clone(),
         ).unwrap();
         (store, clock)
+    }
+
+    #[test]
+    fn registration_bound_challenge_requires_same_workspace_handle() {
+        let (mut store, clock) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let handle = "a".repeat(64);
+        let challenge = store.issue_for_registration(&action, &snapshot, &handle, 30).unwrap();
+
+        let fresh = sample_snapshot_at(clock.monotonic_now().unwrap());
+        assert!(matches!(
+            store.consume_for_registration(&challenge.challenge_id, &action, &fresh, &"b".repeat(64)),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+
+        store.consume_for_registration(&challenge.challenge_id, &action, &fresh, &handle).unwrap();
+        assert!(store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn legacy_consume_cannot_consume_registration_bound_challenge() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let challenge = store.issue_for_registration(&action, &snapshot, &"c".repeat(64), 30).unwrap();
+        let fresh = sample_snapshot_at(Duration::ZERO);
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action, &fresh),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn legacy_consumer_on_independent_connection_cannot_consume_registration_bound_challenge() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registration-scope.sqlite");
+        let clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(100));
+        let epoch = "shared-process-epoch".to_string();
+        let mut issuer = ApprovalStore::initialize_with_epoch(
+            Connection::open(&database).unwrap(), clock.clone(), epoch.clone(),
+        ).unwrap();
+        // A second connection models the legacy API running concurrently in the same
+        // authority process; it must never observe a registration-scoped row as unscoped.
+        let mut legacy_consumer = ApprovalStore::initialize_with_epoch(
+            Connection::open(&database).unwrap(), clock, epoch,
+        ).unwrap();
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let handle = "e".repeat(64);
+        let challenge = issuer.issue_for_registration(&action, &snapshot, &handle, 30).unwrap();
+        let fresh = sample_snapshot_at(Duration::ZERO);
+
+        assert!(matches!(
+            legacy_consumer.consume(&challenge.challenge_id, &action, &fresh),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!issuer.is_consumed(&challenge.challenge_id).unwrap());
+        let registration_digest: String = issuer.conn.query_row(
+            "SELECT registration_digest FROM approval_challenges WHERE challenge_id=?1",
+            params![challenge.challenge_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(!registration_digest.is_empty());
+    }
+
+    #[test]
+    fn revoking_workspace_registration_invalidates_its_outstanding_challenges() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        let handle = "d".repeat(64);
+        let challenge = store.issue_for_registration(&action, &snapshot, &handle, 30).unwrap();
+
+        store.revoke_registration(&handle).unwrap();
+        let fresh = sample_snapshot_at(Duration::ZERO);
+        assert!(matches!(
+            store.consume_for_registration(&challenge.challenge_id, &action, &fresh, &handle),
+            Err(StoreError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn registration_binding_rejects_malformed_workspace_handles() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let snapshot = sample_snapshot_at(Duration::ZERO);
+        assert!(matches!(
+            store.issue_for_registration(&action, &snapshot, "not-a-handle", 30),
+            Err(StoreError::InvalidRegistration)
+        ));
+        assert!(matches!(
+            store.revoke_registration("not-a-handle"),
+            Err(StoreError::InvalidRegistration)
+        ));
     }
 
     #[test]
