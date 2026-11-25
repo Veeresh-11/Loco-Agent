@@ -1,5 +1,7 @@
 # LOCO Agent
 
+> **Project status and roadmap:** See [docs/PROJECT_PROGRESS_TRACKER.md](docs/PROJECT_PROGRESS_TRACKER.md) for the canonical task order, PR status, acceptance criteria, dependencies, and delivery estimate.
+
 A hybrid local + cloud AI assistant for Visual Studio Code that intelligently routes tasks between local LLMs and cloud providers for optimal performance and cost efficiency.
 
 ## Features
