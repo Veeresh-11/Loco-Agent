@@ -59,7 +59,7 @@
 |---|---|---|---|
 | Protocol v2 production integration gap | **Documented** | [PR #139](https://github.com/Veeresh-11/Loco-Agent/pull/139) | Close integration gaps with production TS client and lifecycle tests |
 | Native authority artifact build matrix | **CI implementation submitted** | [PR #140](https://github.com/Veeresh-11/Loco-Agent/pull/140) | Verify package and supported target matrix; review |
-| Build provenance attestations | **Workflow submitted; trusted release evidence pending** | [PR #141](https://github.com/Veeresh-11/Loco-Agent/pull/141) | Trusted-main run; independently verify each executable and VSIX subject |
+| Build provenance attestations | **Workflow submitted; least-privilege hardening finding filed; trusted release evidence pending** | [PR #141](https://github.com/Veeresh-11/Loco-Agent/pull/141), review COMMENT #6055131932 | Move `id-token: write` and `attestations: write` out of workflow-wide permissions into an isolated trusted-main-only attestation job/workflow; then obtain trusted-main evidence and independently verify each executable and VSIX subject |
 | Runtime verification architecture | **Proposed design** | [PR #142](https://github.com/Veeresh-11/Loco-Agent/pull/142) | Independent review and validate signing/platform feasibility |
 | Immutable workflow action pins | **CI implementation submitted** | [PR #143](https://github.com/Veeresh-11/Loco-Agent/pull/143) | Review pinned action code and workflow permissions |
 | Immutable pin validator | **CI implementation submitted** | [PR #144](https://github.com/Veeresh-11/Loco-Agent/pull/144) | Review validator and false-positive/negative coverage |
@@ -98,6 +98,8 @@
 7. Keep platform-authenticator verification and independent security review as separate gates; do not enable privileged operations.
 8. Continue attestation and runtime-verification gates independently; no sidecar launch, workspace writes, patch application, command execution, approval grants, or execution tokens.
 
+9. **Provenance workflow least-privilege review finding filed.** On PR #141 head `0e61e1e4f4dab3a23940ba5c4f0f7efad563df2d`, identified that `id-token: write` and `attestations: write` are granted at workflow scope even though attestation steps are conditionally skipped on PR events. The condition does not scope permissions away from other PR jobs/steps. Submitted review COMMENT #6055131932 recommending an isolated trusted-main-only attestation job/workflow with job-scoped write permissions and exact build-output consumption. This is an author-side pre-review finding, not independent security approval; remediation and exact-head CI remain pending.
+
 ## F. Delivery estimate
 
 **Estimate from the 2026-11-25 checkpoint:** approximately **12–18 focused working days** (about **3–4 calendar weeks**) to reach an integrated, tested security-core milestone, assuming one developer working full-time and CI/review feedback arriving within a day.
@@ -120,6 +122,8 @@ This estimate does **not** promise production sidecar launch or a marketplace re
 The historical pace of creating several focused PRs over three days is useful for estimating documentation and isolated changes, but PR count is not a reliable throughput measure for security acceptance: integration, cross-platform CI, review, and adversarial testing dominate the remaining schedule.
 
 ## G. Change log
+
+- **2026-11-25 (provenance workflow permission audit):** While A8 remained blocked on independent reviewer availability, advanced the separate provenance workstream. Inspected PR #141's workflow patch and found `id-token: write` and `attestations: write` granted at workflow scope; guarding only the attestation steps with a trusted-main `if` does not remove those permissions from other PR jobs/steps. Filed review COMMENT #6055131932 recommending an isolated trusted-main-only attestation job/workflow and job-scoped permissions. Updated the PR #141 tracker row and immediate queue. No runtime launch or privileged operation is enabled; finding remediation, trusted-main attestation evidence, and independent review remain pending.
 
 - **2026-11-25 (A8 review-gate reconciliation):** Rechecked live PR metadata for #132–#138 and #147/#149–#151. No requested reviewer was present on the inspected open/draft PRs; discussions checked on #147, #150 and #151 contained no independent review submission. Completed a limited pre-review patch/status audit of #147/#150/#151; it did not establish a new actionable defect and is explicitly not independent security approval. Corrected the immediate queue's stale contradictory #151 Rust status (eight of nine vs all nine) and reordered it around the actual A8 reviewer dependency. The next action requires a reviewer who did not author the changes; all privileged runtime gates remain disabled.
 
