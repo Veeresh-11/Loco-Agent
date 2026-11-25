@@ -173,12 +173,18 @@ export class RustSidecarClient implements vscodeDisposable {
     });
 
     const requestId = randomUUID();
-    const response = await this.exchange({
-      protocolVersion: PROTOCOL_VERSION,
-      messageType: 'hello',
-      requestId,
-      client: { name: 'loco-vscode-extension', version: this.options.extensionVersion }
-    }, this.options.handshakeTimeoutMs ?? 5000, signal);
+    let response: JsonObject;
+    try {
+      response = await this.exchange({
+        protocolVersion: PROTOCOL_VERSION,
+        messageType: 'hello',
+        requestId,
+        client: { name: 'loco-vscode-extension', version: this.options.extensionVersion }
+      }, this.options.handshakeTimeoutMs ?? 5000, signal);
+    } catch (error) {
+      await this.terminate();
+      throw error;
+    }
     if (response.messageType !== 'hello' || !isObject(response.server) ||
         !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'server']) ||
         !hasExactKeys(response.server, ['name', 'version', 'capabilities']) ||
