@@ -1,0 +1,88 @@
+name: npm Dependency Security Audit
+
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/npm-dependency-audit.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/npm-dependency-audit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit locked npm dependency graph
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate npm audit report
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/npm-audit.json"
+          audit_exit=0
+          npm audit --json > "$report" || audit_exit=$?
+          echo "npm audit exit code: $audit_exit"
+          node - "$report" "$GITHUB_STEP_SUMMARY" <<'NODE'
+          const fs = require("node:fs");
+          const [reportPath, summaryPath] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+          const counts = report.metadata?.vulnerabilities ?? {};
+          const lines = [
+            "## npm dependency audit",
+            "",
+            "| Severity | Count |",
+            "|---|---:|",
+            ...["critical", "high", "moderate", "low", "info"].map(
+              (severity) => `| ${severity} | ${counts[severity] ?? 0} |`
+            ),
+            "",
+            "| Package | Severity | Direct | Range | Fix available | Advisory summary |",
+            "|---|---|---:|---|---|---|",
+          ];
+          for (const [name, item] of Object.entries(report.vulnerabilities ?? {}).sort(
+            (a, b) => ({ critical: 0, high: 1, moderate: 2, low: 3, info: 4 }[a[1].severity] - ({ critical: 0, high: 1, moderate: 2, low: 3, info: 4 }[b[1].severity]) || a[0].localeCompare(b[0]))
+          )) {
+            const via = (item.via ?? []).map((entry) =>
+              typeof entry === "string" ? entry : entry.title ?? entry.name ?? "advisory"
+            ).join("; ").replaceAll("|", "\\|");
+            lines.push(`| ${name} | ${item.severity} | ${item.isDirect ? "yes" : "no"} | ${item.range ?? ""} | ${JSON.stringify(item.fixAvailable ?? false)} | ${via} |`);
+          }
+          fs.appendFileSync(summaryPath, lines.join("\n") + "\n");
+          console.log(JSON.stringify({ counts, packages: Object.keys(report.vulnerabilities ?? {}).length }, null, 2));
+          NODE
+
+      - name: Upload machine-readable audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-dependency-audit-json
+          path: "${{ runner.temp }}/npm-audit.json"
+          if-no-files-found: error
+          retention-days: 14
