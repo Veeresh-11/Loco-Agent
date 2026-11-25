@@ -40,6 +40,8 @@ jobs:
             executable: loco-authority
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -72,6 +74,8 @@ jobs:
     name: Package VSIX with native authority artifacts
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -137,3 +141,52 @@ jobs:
           path: "*.vsix"
           if-no-files-found: error
           retention-days: 14
+ 
+  attest-release-artifacts:
+    name: Attest trusted main build outputs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - build
+      - package-extension
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download native authority artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: loco-authority-*
+          path: dist/authority-artifacts
+
+      - name: Download packaged VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: loco-agent-vsix-with-authority
+          path: dist/vsix
+
+      - name: Attest Linux authority executable
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/authority-artifacts/loco-authority-x86_64-unknown-linux-gnu/loco-authority
+
+      - name: Attest Windows authority executable
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/authority-artifacts/loco-authority-x86_64-pc-windows-msvc/loco-authority.exe
+
+      - name: Attest macOS arm64 authority executable
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/authority-artifacts/loco-authority-aarch64-apple-darwin/loco-authority
+
+      - name: Attest macOS Intel authority executable
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/authority-artifacts/loco-authority-x86_64-apple-darwin/loco-authority
+
+      - name: Attest packaged VSIX
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/vsix/*.vsix
