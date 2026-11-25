@@ -182,7 +182,7 @@ jobs:
           # the compiled entrypoint and runtime dependency metadata.
           grep -Fx "extension/out/extension.js" <<< "$listing"
           grep -Fx "extension/package.json" <<< "$listing"
-          if grep -E -- "(^|/)(src|[.]github|coverage|__tests__)/|[.]map$|[.]tsbuildinfo$|(^|/)tsconfig[^/]*[.]json$|(^|/)jest[.]config[.]js$" <<< "$listing"; then
+          if grep -E -- "(^|/)(src|[.]github|coverage|__tests__)/|(^|/)dist/|(^|/)core/.*[.]rs$|[.]map$|[.]tsbuildinfo$|(^|/)tsconfig[^/]*[.]json$|(^|/)jest[.]config[.]js$" <<< "$listing"; then
             echo "VSIX contains excluded source, test, map, or build-config files" >&2
             exit 1
           fi
