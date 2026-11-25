@@ -238,7 +238,8 @@ impl ApprovalStore {
         let has_registration_digest: bool = {
             let mut statement = conn.prepare("PRAGMA table_info(approval_challenges)")?;
             let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-            columns.filter_map(Result::ok).any(|name| name == "registration_digest")
+            let found = columns.filter_map(Result::ok).any(|name| name == "registration_digest");
+            found
         };
         if !has_registration_digest {
             conn.execute(
