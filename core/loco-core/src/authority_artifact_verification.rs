@@ -271,7 +271,7 @@ mod tests {
     fn package_member_validation_rejects_windows_drive_paths_and_ads() {
         let target = AuthorityTarget::WindowsX64;
         let expected = target.package_member().to_string();
-        for hostile in ["C:/Windows/system32/evil.exe", "C:relative\\evil.exe", "extension/resources/file.exe:stream"] {
+        for hostile in ["C:/Windows/system32/evil.exe", "C:relative/evil.exe", "extension/resources/file.exe:stream"] {
             assert_eq!(
                 validate_package_member_set(&[hostile.into(), expected.clone()], target),
                 Err(VerificationFailure::WrongSubject),
