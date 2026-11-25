@@ -44,6 +44,25 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Assert critical handlebars fix remains
         run: node -e "const lock = require('./package-lock.json'); const v = lock.packages['node_modules/handlebars']?.version; if (v !== '4.7.10') { console.error('Expected handlebars 4.7.10, got', v); process.exit(1); } console.log('handlebars', v);"
+      - name: Compile, test, lint and package on Node 20
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Reinstall and validate candidate on Node 22
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile, test, lint and package on Node 22
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
       - name: Generate candidate audit report
         shell: bash
         run: |
