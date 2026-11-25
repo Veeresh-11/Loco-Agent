@@ -1,0 +1,18 @@
+# Keep the packaged extension limited to runtime files.
+# The compiled extension and the four staged native executables remain included.
+.git
+.github/**
+.vscode/**
+.vscode-test/**
+coverage/**
+src/**
+**/__tests__/**
+**/*.test.js
+**/*.test.js.map
+**/*.map
+*.tsbuildinfo
+tsconfig*.json
+jest.config.js
+.eslintrc*
+eslint.config.*
+.prettier*
