@@ -71,8 +71,10 @@ export class RustSidecarClient implements vscodeDisposable {
       messageType: 'evaluate',
       proposal
     }, signal);
+    if (response.messageType === 'error') throw protocolError(response);
     if (response.messageType !== 'decision' || !isObject(response.decision) ||
         !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'decision'])) {
+      await this.terminate();
       throw new Error('Unexpected sidecar decision response.');
     }
     const decision = response.decision;
@@ -81,6 +83,7 @@ export class RustSidecarClient implements vscodeDisposable {
         !['deny', 'approval_required', 'allow'].includes(String(decision.decision)) ||
         typeof decision.reasonCode !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(decision.reasonCode) ||
         typeof decision.message !== 'string' || decision.message.length > 2000) {
+      await this.terminate();
       throw new Error('Invalid sidecar decision payload.');
     }
     return decision as unknown as SidecarDecision;
@@ -104,6 +107,7 @@ export class RustSidecarClient implements vscodeDisposable {
     if (response.messageType !== 'workspaceRegistered' ||
         !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'workspaceHandle']) ||
         typeof response.workspaceHandle !== 'string' || !/^[a-f0-9]{64}$/.test(response.workspaceHandle)) {
+      await this.terminate();
       throw new Error('Invalid workspace registration response.');
     }
     return response.workspaceHandle;
@@ -131,6 +135,7 @@ export class RustSidecarClient implements vscodeDisposable {
         !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'captured', 'byteLength']) ||
         response.captured !== true || !Number.isSafeInteger(response.byteLength) ||
         (response.byteLength as number) < 0 || (response.byteLength as number) > maxBytes) {
+      await this.terminate();
       throw new Error('Invalid workspace capture acknowledgement.');
     }
     return { captured: true, byteLength: response.byteLength as number };
@@ -143,6 +148,7 @@ export class RustSidecarClient implements vscodeDisposable {
     if (response.messageType !== 'workspaceRevoked' ||
         !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'revoked']) ||
         response.revoked !== true) {
+      await this.terminate();
       throw new Error('Invalid workspace revocation response.');
     }
   }
