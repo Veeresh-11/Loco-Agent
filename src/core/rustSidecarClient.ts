@@ -422,7 +422,7 @@ function isSafePortableRelativePath(value: string): boolean {
 function hasForbiddenPathCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0;
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || '<>\"|?*'.includes(character)) return true;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || '<>"|?*'.includes(character)) return true;
   }
   return false;
 }
