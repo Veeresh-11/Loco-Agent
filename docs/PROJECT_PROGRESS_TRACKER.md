@@ -65,7 +65,7 @@
 | Immutable pin validator | **CI implementation submitted** | [PR #144](https://github.com/Veeresh-11/Loco-Agent/pull/144) | Review validator and false-positive/negative coverage |
 | Checkout prerequisite for validator | **CI green** | [PR #145](https://github.com/Veeresh-11/Loco-Agent/pull/145), exact-head run #45571797788: six jobs passed | Keep stacked order; review and merge with dependencies |
 | Attestation verification readiness | **Assessment submitted** | [PR #146](https://github.com/Veeresh-11/Loco-Agent/pull/146) | Validate findings against real trusted release and repository rules |
-| Pure artifact verification policy | **CI green — draft** | [PR #147](https://github.com/Veeresh-11/Loco-Agent/pull/147) | Run Rust tests on all targets; harden policy tests; do not treat normalized fields as cryptographic proof |
+| Pure artifact verification policy | **Review hardening submitted — exact-head CI running** | [PR #147](https://github.com/Veeresh-11/Loco-Agent/pull/147), latest head `71bfe8cda54cc58f60f0028e970f70fa6819e428`; Rust #45580071318 pending, Contract #45580071069 running, Authority Native Artifact Builds #45580071097 queued | Verify drive-qualified/drive-relative/ADS and control-character rejection on exact head; review policy boundaries; do not treat normalized fields as cryptographic proof |
 
 ### Runtime security gates (must remain disabled until approved)
 
@@ -92,7 +92,7 @@
 1. **Review PR #147**: exact-head Rust Core Tests, Contract Validation and Authority Native Artifact Builds are now green (#45573727400, #45573727596, #45573727647). Review the pure policy boundaries and negative tests; retain draft until independent review.
 2. **Review and reconcile A5 (#132–#138)**: protocol v2 DTOs, Rust handlers/session, TypeScript client and adversarial tests are implemented in the open draft stack; confirm dependencies and semantics before merge.
 3. **A6 implementation (#151) CI-green**: exact-head Rust (9 platforms), Contract Validation and TypeScript (Node 20/22) all passed. Keep draft until code review and security review; store-level tests cover expiry, stale capture, action mismatch, concurrent double-consume and process-epoch restart invalidation.
-4. Review PR #147 pure artifact-verification policy and negative tests; retain draft until review findings are resolved.
+4. **Review PR #147**: found Windows drive-qualified/drive-relative and ADS archive member paths could pass; added colon/control-character rejection and negative tests. Confirm exact-head Rust, Contract and Native Artifact Build CI before closing the review task.
 5. Keep platform-authenticator verification and independent security review as separate gates; do not enable privileged operations.
 5. Review and reconcile stacked PR dependencies before merging in order.
 6. Continue attestation and runtime-verification gates independently; no sidecar launch.
@@ -134,3 +134,5 @@ The historical pace of creating several focused PRs over three days is useful fo
 - **2026-11-25 (A6 cross-platform CI progress):** Rust Core Tests #45579363081 additionally passed Windows 2022, Windows 2025 and macOS 15 Intel. Only macOS 15 and macOS 26 Intel remained in progress at this check; Contract Validation and TypeScript (Node 20/22) remain green on the same PR #151 head.
 
 - **2026-11-25 (A6 exact-head CI complete):** PR #151 head `ff8987bd2946298505bcc5e48b4978a3057e7415` passed Rust Core Tests #45579363081 on all nine configured targets (Ubuntu 22.04/24.04/26.04, Windows 2022/2025, macOS 15/15 Intel/26/26 Intel), Contract Validation #45579362411, and TypeScript CI #45579363592 on Node 20 and Node 22. Store tests also cover internal-time expiry, stale snapshots, action mismatch without consumption, process-epoch restart invalidation and concurrent single-use consumption. PR #151 remains draft pending review; binding verification is not human approval. Next queue item is review of PR #147.
+
+- **2026-11-25 (PR #147 review):** Reviewed `authority_artifact_verification.rs` against the attestation-readiness constraints. The package member validator rejected POSIX absolute paths, backslashes and dot traversal, but accepted Windows drive-qualified/drive-relative paths (for example `C:/...`) and ADS syntax because it did not reject colons. Added colon and ASCII control-character rejection, tests for drive-qualified/drive-relative/ADS paths, and direct coverage of the `WrongTarget` branch on PR #147. Latest exact-head `71bfe8cda54cc58f60f0028e970f70fa6819e428`: Contract Validation #45580071069 running, Rust Core Tests #45580071318 pending, Authority Native Artifact Builds #45580071097 queued. PR remains draft; normalized verifier booleans are not cryptographic proof and no runtime launch integration is added.
