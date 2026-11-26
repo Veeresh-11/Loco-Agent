@@ -389,8 +389,17 @@ export class RustSidecarClient implements vscodeDisposable {
 interface vscodeDisposable { dispose(): void; }
 
 function protocolError(response: JsonObject): Error {
-  const error = response.error as JsonObject;
-  return new Error(`Sidecar request denied (${String(error.code)}).`);
+  if (response.protocolVersion !== PROTOCOL_VERSION ||
+      response.messageType !== 'error' ||
+      !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'error']) ||
+      !isObject(response.error) ||
+      !hasExactKeys(response.error, ['code', 'message', 'retryable']) ||
+      typeof response.error.code !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(response.error.code) ||
+      typeof response.error.message !== 'string' || response.error.message.length > 2000 ||
+      typeof response.error.retryable !== 'boolean') {
+    return new Error('Invalid sidecar error response.');
+  }
+  return new Error(`Sidecar request denied (${response.error.code}).`);
 }
 
 function hasExactKeys(value: JsonObject, expected: string[]): boolean {
