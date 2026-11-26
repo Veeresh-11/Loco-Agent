@@ -602,3 +602,111 @@ The queue is ordered by dependency. Work only on the first unblocked item, and p
 - **2026-11-26 (Order 2 Windows API contract follow-up):** Re-read the canonical tracker and continued the native filesystem workstream without advancing past its acceptance gate. Updated [PR #112](https://github.com/Veeresh-11/Loco-Agent/pull/112), branch `test/macos-15-firmlink-matrix`, with a source-grounded addendum in `docs/security/WINDOWS_NT_FFI_SDK_AUDIT.md`. The addendum distinguishes (a) Microsoft's general `OBJECT_ATTRIBUTES` definition of `OBJ_DONT_REPARSE` and `RootDirectory` semantics, (b) the user-mode `NtCreateFile` page's narrower `Attributes` wording, (c) an October 19, 2026 Microsoft External Staff moderator answer reporting that Windows SDK 10.0.26100.0 `winternl.h` includes the flag in `OBJ_VALID_ATTRIBUTES`, and (d) a separate November 2–6, 2026 moderator answer cautioning that the exact user-mode, filesystem-relative combination is not established as a version-stable contract. The addendum links the Microsoft documentation and both Q&A answers, and preserves the bounded runtime evidence: raw final/intermediate NTFS junction rejection with `STATUS_REPARSE_POINT_ENCOUNTERED` on Windows Server 2022 build 20348 and Server 2025 build 26100, x64. **Conclusion unchanged:** retain `OBJ_DONT_REPARSE`, post-open reparse checks and identity checks; fail closed; do not claim support for untested Windows versions/filesystems/filter drivers. PR #112's new documentation-only head is `79eeaa29a76d49f380f4c8025edc918c740d258a`; updated audit document blob is `ccb47b4d4355b015c4af8ff7246de751b51592cf`. The PR remains draft/open with no independent reviews. The existing Rust and contract workflows are path-filtered to source/contracts/workflow changes, so this documentation-only commit did not trigger those workflows; no new test result is claimed. No production code changed, no PR merged/closed and no branch deleted. Order 2 remains partially complete, pending authoritative contract resolution or a separately documented supported construction, bounded platform policy and independent native security review.
 
 - **2026-11-26 (Order 2 exact-head test applicability check):** Verified PR #112's latest head `79eeaa29a76d49f380f4c8025edc918c740d258a` against its parent `f0357859b298ee1ea40564deab351d03b1b2fc40`. GitHub commit metadata confirms the new commit changes exactly one file, `docs/security/WINDOWS_NT_FFI_SDK_AUDIT.md`; it changes no Rust source, native probe, workflow, contract or test fixture. The parent code head `f0357859b298ee1ea40564deab351d03b1b2fc40` has the already-verified nine-job Rust Core Tests run [#45365335615](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45365335615) and Contract Validation [#45365335173](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45365335173), both successful. Therefore those runs remain applicable to the unchanged executable/test tree; no new CI result is asserted for the documentation-only commit. Rechecked PR #112 reviews: none are present. This closes the test-applicability bookkeeping item only; it does not close the Windows contract, platform-policy or independent-review gates. No code changes, merges, closures or branch deletions.
+
+---
+
+# Final audit refresh — 2026-11-26 (latest PR #171 reconciliation)
+
+> This section supersedes only earlier time-sensitive inventory counts and stale dependency-candidate status above. Earlier findings and detailed history remain preserved. Exact count inventory below reflects the latest complete list result available in this execution; the connector exposed the first 100 open PRs in descending recency, so it is **not** a complete all-open-PR census.
+
+## Latest repository state
+
+- Repository: `Veeresh-11/Loco-Agent`; default branch: `main`.
+- Latest observed `main` tip after the previous tracker reconciliation: `b402ac9f9c846418112f25f26225f355c236354b`. This is the roadmap update commit from the prior pass.
+- Canonical tracker requested by the project owner: `docs/PROJECT_PROGRESS_TRACKER.md` on branch `docs/project-progress-tracker`; current blob before this update: `d58d4d4178381b6bb162a62bb69230cea51f6cb7`.
+- PR #148 remains open/draft. Its branch is **183 commits ahead and 2 commits behind** `main` at the observed comparison; its diff from the merge base contains only `README.md` (+2) and the new 604-line tracker. Do not merge it as a raw 183-commit feature branch. Rebase/recreate the documentation-only changes onto current `main`, resolve README link/wording conflicts, run docs validation, request review, then merge only the tracker/README change.
+- Current accessible open PR listing returned 100 latest open PRs, #171 through #56; do not report this as the complete open PR count. Earlier 169-branch / 145-open-PR snapshot is historical and must be refreshed with paginated exhaustive inventory during the final secondary audit.
+- Branch API snapshot in the preceding audit showed branches unprotected; the main-branch ruleset/branch-protection configuration still needs owner verification and enforced required checks before sensitive integration.
+
+## Dependency candidate: current decision
+
+### PR #171 is the leading candidate, not production-approved
+
+- PR #171: [isolate VSCE 4.1 packaging toolchain on Node 22](https://github.com/Veeresh-11/Loco-Agent/pull/171); open/draft; head `6c10d33d8967428eb1882708d4041e5ee16d824f`; base `security/azure-node20-compatible-candidate`.
+- Its candidate workflow [#45809718093](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45809718093) succeeded. Artifact #15111510993 was uploaded and PR description reports zero findings for both separated dependency graphs. PR description also reports standard TypeScript CI #45810075549 and standard npm audit #45810079190 succeeded and that the standard audit artifact reported zero findings.
+- PR #171's own validation description explicitly records risks: root `glob` 11/13 and `minimatch` 9/10 are overridden to newer major lines; VSCE's declared `minimatch ^10.2.6` is overridden to 11.0.9; packaging requires Node 22. CI passing does not establish supported upstream API compatibility.
+- Review list checked in this execution returned no submitted review for #171. Do not mark accepted, ready, or production-clean until an independent dependency/API reviewer accepts the exact lockfiles and overrides, Node 22 packaging policy is agreed, and full application-level Azure auth and packaging smoke tests pass.
+- #170 is not the best final candidate: its own description states three high Azure/MSAL findings remained. #168/#169 are alternate Azure/MSAL explorations. #161 (TS-ESLint v7) and #162 (v8) are alternatives, not both to merge; #162's previously inspected audit still had 23 records. #163–#166 are diagnostic candidate PRs, not production dependency changes.
+- No production npm manifest/lockfile promotion is accepted by this update.
+
+### Active dependency decision task
+
+1. Obtain a reviewer who did not author the candidate changes.
+2. Review every root and tool lockfile entry and every `overrides` rule; map the actual consuming API call sites for `glob`, `minimatch`, and `brace-expansion`; add direct regression tests for those call sites.
+3. Decide whether the repository will formally require Node 22 for packaging while retaining Node 20 for extension application checks. Update contributor setup, CI and release docs accordingly.
+4. Test actual authentication-provider flows that use Azure/MSAL, including token acquisition success/failure, refresh, tenant/client configuration, error mapping and cancellation. Package and install the resulting VSIX in a clean VS Code test host.
+5. If review accepts the proposal, move only the final exact dependency graph into the production manifest/lockfiles in a dedicated promotion PR. Run a fresh audit from the committed lockfiles on exact main candidate head; inspect the full JSON, not merely summary counts.
+6. If the review rejects cross-major overrides, test a semver-compatible or isolated toolchain alternative and preserve the affected dependency rather than silently bypassing package contracts.
+
+## Priority order for finishing existing TODOs
+
+Keep scope bounded to existing TODOs and security fixes. New provider families, generalized autonomous workflows, major UI redesigns, remote execution and unrelated product features are next-version work unless required to fix a current acceptance/security defect.
+
+| Order | Remaining work | PR / issue scope | Exit criteria | Estimate |
+|---:|---|---|---|---:|
+| 0 | Finalize canonical tracker and governance | #148, #167, main branch rules | Rebase documentation-only tracker/README diff onto current main; make tracker path canonical from README; enforce PR reviews and CI on main; exact-head docs validation; merge tracker change after independent review | 1–2 days |
+| 1 | Finish dependency/package hygiene | #155–#171 | Independent review of PR #171 exact manifests/lockfiles/overrides; Node 22 packaging policy; Azure auth regression; clean install/compile/test/lint/package on supported Node matrix; zero-findings fresh audit; SBOM/license report; promote one accepted graph only | 2–5 days |
+| 2 | Complete native filesystem acceptance | #33–#78, #100–#121, #74 | Resolve or explicitly constrain macOS firmlink entry behavior; close Windows API-contract uncertainty or maintain a narrower support statement; document exact Linux/Windows/macOS matrix; race/mount/reparse/failure tests; independent native API review | 4–8 days |
+| 3 | Integrate Rust authority and read-only workspace flow | #91–#99, #128–#140 | Reconcile registration factory, versioned protocol, session, TS client and native snapshot adapters into one dependency-ordered stack; launch/IPC trust verification; registration/capture/revoke; prove all reads/disclosure go through Rust; no TS direct FS/process bypass; exact cross-platform integration CI | 4–7 days |
+| 4 | Complete authenticated approval | #15–#21, #79–#90, #149–#151, issue #82 | OS-backed presence/verification on declared platforms; nonce + relying-party/app identity + exact action digest; Rust verification; enrollment/recovery/revocation; anti-replay/expiry/restart; fail-closed headless behavior; independent review | 4–8 days |
+| 5 | Controlled writes and patch application | #22–#25 and authority dependencies | Handle-relative writes, strict bounded patch parsing, fresh target identity/digest, atomic replace/rollback/recovery, approval-bound action, audit records, adversarial race/crash tests | 4–7 days |
+| 6 | Command execution authority | #20–#24 plus #94–#99 and integration tasks | Rust-enforced executable identity, executable allowlist, argument/env/cwd policy, no unsafe shell interpolation, process tree isolation, deadline/output/cancel bounds, approval and audit; prove no TS bypass | 3–6 days |
+| 7 | Python service and bridges — minimum existing scope | Roadmap priorities 6–7 | Inventory existing Python model/RAG functions; define bounded schema and lifecycle; transport/error/timeout/cancellation/backpressure; connect to current TS/Rust route; tests. Defer new provider/UI workflows | 3–6 days |
+| 8 | End-to-end product/security validation | #6–#8 and all accepted work | VS Code Extension Host flows across TS/Rust/Python; supported-OS matrix; read/approval/write/command negative+positive cases; provider/RAG/patch flows; install/upgrade/uninstall/rollback; privacy/disclosure tests | 4–8 days |
+| 9 | Release readiness and primary code/security review | #140–#154 and release docs | Reproducible builds; verifier for trusted provenance and exact file digest; signing/notarization or documented protected install; SBOM/license/dependency audits; VSIX archive checks; install/upgrade/rollback; independent code review and release sign-off | 3–6 days |
+| 10 | Secondary audit and branch/PR cleanup | All open PRs, branches, issues | Independent reviewer audits final main and every open PR/branch. Classify each unique commit; integrate needed code, transfer, supersede or reject with reasons. Close PRs and delete branches only after proving all useful changes are included in main or explicitly deferred/rejected. Verify main is at least as advanced as every retained/reviewed branch; no required work stranded | 3–6 days |
+
+**Planning estimate:** 33–63 focused working days for the remaining existing scope, including the final secondary review/cleanup allowance. This assumes one primary engineer, existing CI runners and no major redesign. Add independent reviewer turnaround, platform hardware/API access, signing credentials and marketplace approval as external elapsed time; calendar completion can be roughly 8–14 weeks with a single engineer, and can extend if review or native-platform proof is delayed. Treat estimates as ranges, not delivery promises.
+
+## Merge strategy — target one authoritative main
+
+"Main ahead of all existing branches" means every required accepted commit is represented in main and every surviving branch has been classified. It does **not** mean force-merging all 169+ branch tips or merging every PR.
+
+1. Protect main first: require exact CI checks, independent reviewer approval, stale review dismissal after new commits, restrict direct push and bypass, and require status checks for any merge.
+2. Rebase/recreate PR #148's documentation-only changes onto current main; do not merge its 183-commit branch history blindly.
+3. Choose one compatible production dependency path. #171 is the current leading candidate but must be independently reviewed and tested; do not merge all alternative candidate PRs.
+4. Merge native filesystem chain in tested dependency order only after independent acceptance. Keep issue #74 open or narrow platform support if authoritative firmlink proof remains unavailable. Keep issue #82 open until authenticated approval is implemented/reviewed.
+5. Merge authority components in a reconciled order: native registry/factory -> protocol DTO/session/handlers -> TypeScript client -> snapshot capture -> approval issue/consume; ensure exact tree and integration tests at each merge.
+6. Only implement/enable writes after native filesystem acceptance + Rust authority + authenticated approval. Only implement/enable commands after separate command policy and sandbox/identity/audit gates.
+7. Merge artifact build/provenance and verifier only after trusted policy, exact-file binding, signing/protected installation and adversarial replacement tests.
+8. After each merge, run tests on the new main SHA, inspect resulting diffs, update tracker and ensure no dependent PR targets stale or unrelated bases.
+9. At the end, perform the independent secondary audit against main. For each open PR and branch, record: head SHA, base SHA, unique commits, changed files, CI applicability, reviews/threads, merge ancestry, destination commit, action (merge/transfer/close/defer/reject). Only then close superseded/duplicate/rejected PRs and delete branches.
+10. Finally fetch every branch tip and compare it to final main. Any branch with required unique work means consolidation is not finished. Do not force-push branches to create a cosmetic ahead count.
+
+## Mandatory quality, security and threat-review gates
+
+### Per-task / per-PR review
+- Exact-head CI: Rust tests, TypeScript compile/Jest/lint, contract/schema checks, native C/SDK probes, package boundary and target OS tests as applicable.
+- Static analysis, format, type checks, dependency audit and secret scanning; pin actions by full commit SHA; least-privilege workflow permissions; no persisted checkout credentials for untrusted build steps.
+- Inspect changes for input validation, path traversal, symlink/reparse/mount races, TOCTOU, identity/content mismatch, bounds/overflow, IPC spoofing, replay, expiry, privilege escalation, logging of secrets, error disclosure, cancellation and cleanup.
+- Review unsafe Rust/FFI, ABI layouts, native API contracts, platform/version differences and fail-closed behavior.
+- Unit, integration, negative, adversarial and regression tests. For security-critical features require independent review before merge/enablement.
+
+### Final primary and secondary audit
+- Independent reviewer must not be an implementation author for the changes being audited.
+- Full diff from main, every unique commit, branch ancestry and PR discussions/review threads.
+- SAST and dependency vulnerability scan; SBOM and license policy; secret scan; provenance/attestation and binary digest verification.
+- Native filesystem and process-boundary threat model; IPC framing/size/authentication, local attacker/same-user malware, workspace hostile-content, package tampering, update/revocation and rollback.
+- Review all public README/docs claims against actual runtime capability. Remove any unearned "production-ready", auto-apply, trusted, secure or supported-platform claims.
+- Verify CI checks are required at the repository ruleset level, not merely passing opportunistically.
+
+### Security capabilities that remain disabled until accepted
+- Workspace writes and patch application.
+- Arbitrary command execution.
+- Sidecar launch as an enforcement authority in the production user path.
+- Human approval grants / execution tokens without a supported OS-backed authenticator and Rust-side verification.
+- Broad macOS firmlink support outside the exact tested/accepted scope.
+
+## Small updates vs next-version scope
+
+**Allowed in this delivery:** bug fixes, security hardening, test coverage, type safety, bounded input/output, accessibility/usability corrections, docs, CI reliability, supported-platform compatibility and small changes needed to complete stated acceptance criteria.
+
+**Defer to next version:** new provider families, major conversational UX redesign, generalized autonomous file editing, remote execution, new marketplace integrations, new broad RAG workflows and features that expand permissions or threat surface without being in the current TODO. Put deferred items in a separate "Next version" backlog with no impact on this release's completion estimate.
+
+## Change log — 2026-11-26 final audit refresh
+
+- Reconfirmed canonical tracker branch/file and latest blob SHA.
+- Reconciled PR #171 as the leading dependency candidate; recorded exact candidate head, successful candidate run/artifact claims from PR description, zero-findings candidate audit claim, and independent override/API review risks.
+- Recorded PR #148's main-vs-tracker divergence and the safe documentation-only rebase/recreate plan.
+- Refined task order, acceptance criteria, remaining effort estimate and the required two-stage review: per-task primary review, then independent secondary audit after all existing TODOs finish.
+- No PRs merged/closed, no branches deleted, no production dependency promotion and no privileged capabilities enabled during this update.
