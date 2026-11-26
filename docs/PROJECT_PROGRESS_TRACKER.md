@@ -977,6 +977,50 @@ Execution result (2026-11-26): Order 0 documentation reconciliation was implemen
 - **Order 3 result:** PR #138 exact-head TypeScript CI is green on both supported Node versions for this branch. The integration assessment is now aligned with that evidence. Independent review, packaged native executable/provenance, activation lifecycle, Rust-owned task-content consumption, legacy bypass inventory/removal, and full cross-layer lifecycle validation remain outstanding. No mainline cutover or privileged operation enablement is claimed.
 
 
+## Code review register — started 2026-11-26
+
+### Scope and counting method
+
+This register covers the currently identified implementation/candidate PR stack and packaging candidate: #112, #128, #130, #131, #133, #135, #136, #137, #138, #140, #141, #143, #145, #147, #150, #151, #152, #153, #154, and #171. Documentation-only PRs #129, #132, #134, #139, #142, and #146 are design/evidence inputs, not counted as code-review units. Superseded failed workflow PR #144 is not counted separately; its descendant #145 is in scope. This is the currently identified candidate set, not yet a repository-wide proof that no other active code PRs exist.
+
+A review unit is one code-bearing PR, including changed source, tests, fixtures, workflow, or packaging files. “Reviewed” means a first-pass source review was actually performed here; it does not mean independent approval. GitHub submitted review state is recorded separately. PRs may overlap files because they are stacked; percentage is PR coverage, not unique-file, line, or risk-weighted coverage.
+
+### Code review inventory
+
+| PR | Code area / changed implementation | Review state | Readiness / result |
+|---|---|---|---|
+| #112 | Native filesystem adapters and platform-specific path handling | Not yet reviewed | Code exists; independent native/platform review required |
+| #128 | Snapshot-bound approval, digest and binding primitives (Rust) | Not yet reviewed | Code exists; stacked on native branch; base reconciliation required |
+| #130 | Process-local workspace registry (Rust) | Not yet reviewed | Code exists |
+| #131 | Native workspace adapter factory (Rust) | Not yet reviewed | Code exists; native contract review required |
+| #133 | Strict protocol v2 DTOs (Rust) | Not yet reviewed | Code exists |
+| #135 | Protocol v2 session, workspace handlers, stdio and Rust tests | Not yet reviewed | Code exists; exact-head Rust matrix and Contract Validation previously green |
+| #136 | TypeScript protocol v2 client and tests | Not yet reviewed | Code exists; recorded TypeScript CI green on its recorded head |
+| #137 | Adversarial protocol v2 handler lifecycle tests (Rust) | Not yet reviewed | Code exists; recorded Rust/contract CI green on its recorded head |
+| #138 | TypeScript client portable-path/error handling, fixtures and regression tests | **First-pass reviewed in this workflow** | Found missing exact-key validation for nested policy-decision DTO; corrected and added regression test in head `7477b4146be22b75d39c5096d22256018710b4a0`. Exact-head CI not yet verified; independent review still absent |
+| #140 | Native authority artifact build workflow | Not yet reviewed | Workflow code exists; artifact/provenance acceptance pending |
+| #141 | Authority artifact provenance attestation workflow | Not yet reviewed | Workflow code exists; trusted-main attestation not yet independently verified |
+| #143 | Immutable workflow action pinning | Not yet reviewed | Workflow code exists |
+| #145 | Immutable-action validator checkout-order correction | Not yet reviewed | Workflow code exists; descendant of failed #144 |
+| #147 | Native artifact verification contract implementation (Rust) | Not yet reviewed | Code exists; trusted provenance evidence remains incomplete |
+| #150 | Approval binding store (Rust) | Not yet reviewed | Code exists; authenticator/user-presence integration absent |
+| #151 | Protocol v2.1 approval binding integration (Rust/TypeScript) | Not yet reviewed | Code exists; platform authenticator integration and independent review remain |
+| #152 | Rust toolchain pinning for authority builds | Not yet reviewed | Workflow code exists |
+| #153 | Authority Cargo dependency lock | Not yet reviewed | Workflow and Cargo.lock changes exist |
+| #154 | VSIX package boundary and artifact build workflow | Not yet reviewed | Packaging code exists; trusted-main attestation skipped on PR event |
+| #171 | Node/VSCE packaging and dependency hygiene candidate | Not yet reviewed | Candidate code exists; dependency override/call-site compatibility review and independent API/security review required |
+
+### Review progress and estimate
+
+- **First-pass PR coverage:** 1 of 20 code-bearing PRs = **5.0%**. This is a PR-count metric, not a claim that 5% of lines or security risk has been reviewed.
+- **First-pass reviewed:** #138 only, covering the changed client, test, and fixture paths at the recorded head; one strict nested-decision DTO finding was fixed with a regression test.
+- **Not yet first-pass reviewed:** 19 of 20 PRs (95.0%).
+- **Independent GitHub approvals:** none recorded in the latest sampled review snapshots for #135, #136, and #138; PR authorship is `Veeresh-11`, so author-authored review activity cannot satisfy independent review. Broader PR review-state sweep remains in progress.
+- **Not ready for implementation review / review blocked by missing implementation:** packaged activation-to-sidecar lifecycle, trusted executable resolver/provenance on main, Rust-owned task-content return/consumption contract, legacy bypass removal, authenticated platform user-presence flow, Rust-enforced writes/patches, and Rust-enforced command execution. These are not represented as completed code in the current candidate PR set; they need implementation/design before meaningful code review.
+- **Estimated effort:** approximately **12–18 reviewer working days** for first-pass review of the remaining 19 PRs, assuming one reviewer can review roughly 1–2 related PRs per day and stacked changes are reviewed in dependency order. Allow another **5–10 reviewer working days** for fixes/re-review and independent specialist security/native-platform review. With one reviewer and normal CI turnaround, a realistic planning range is **3–5 calendar weeks**; this is an estimate, not a committed completion date.
+- **Review order:** #112 native substrate → #128/#130/#131 workspace authority → #133/#135/#137 protocol Rust → #136/#138 TypeScript client → #140/#141/#143/#145/#147/#152/#153/#154 build/provenance/package → #150/#151 approval → #171 dependency/package candidate. Re-review descendants when parent findings affect their assumptions.
+- **Gate:** no PR merge or production enablement follows from this first-pass review register. Independent review, exact-head CI, dependency/base reconciliation, branch governance, and relevant security exit criteria remain mandatory.
+
 ## Execution update — 2026-11-26: Order 3 TypeScript legacy-operation inventory
 
 - Re-read the canonical tracker and refreshed PR #139, #138, #135, and tracker PR #172. PR #138 corrected-head TypeScript CI remains green on Node 20/22 (run #45820432496); PR #135 corrected-head Rust Core Tests (9/9) and Contract Validation remain green. PR #139 remains open/draft. No independent review was returned for #135/#138 in the latest review snapshot.
@@ -985,3 +1029,12 @@ Execution result (2026-11-26): Order 0 documentation reconciliation was implemen
 - The inventory explicitly scopes its findings to the inspected files/symbols and does not claim a complete repository-wide static analysis. It records that the current Rust capture response is acknowledgement-only and therefore cannot yet replace RAG/file-content consumption.
 - PR #139 documentation commit: `4a2be06d7fcb408b2141c3af7b77882c78d4c720`; blob `b5c723cf271f840464765d62b1e6ba005c37a8ad` re-fetched and verified. No CI run was returned for this documentation-only commit. PR #139 remains open/draft; no runtime code or authority capabilities changed.
 - **Order 3 result:** delivered a source-grounded, scoped TypeScript bypass inventory and explicit dispositions. Remaining work is to establish a Rust-owned content-consumption contract, activation-scoped packaged sidecar lifecycle/provenance, disable or migrate direct patch writes and command execution, complete repository-wide reachability review, integrated cross-platform tests, and independent security review. No privileged operation was enabled and no mainline cutover is claimed.
+
+## Execution update — 2026-11-26: Simultaneous code review kickoff
+
+- Re-read the tracker and refreshed the candidate PR inventory across #112, #128–#154, and #171. Confirmed the current implementation stack remains draft/open and separated documentation-only PRs from code-bearing review units. A sampled review-state check of #135, #136, and #138 returned no submitted GitHub reviews or inline review threads.
+- Began first-pass source review on PR #138 while continuing protocol work. Inspected the complete current TypeScript sidecar client and its tests against the Rust protocol DTO/session implementation. Found that the outer decision response required exact keys but the nested `decision` object only validated required field types and tolerated unknown properties, unlike the strict Rust DTO contract. This could allow unexpected fields to be silently accepted in a security-sensitive policy response.
+- Fixed the nested decision validator to require exactly `contractVersion`, `proposalId`, `decision`, `reasonCode`, and `message`; added a regression test that supplies an extra `untrustedGrant` property and asserts fail-closed termination. Commits: client `50c34ccf806c50740227e3efd4f619ac646c8229`, test `7477b4146be22b75d39c5096d22256018710b4a0`. Re-fetched both files and verified the exact-key guard and regression test exist on PR #138 head `7477b4146be22b75d39c5096d22256018710b4a0`.
+- Exact-head CI lookup did not return a workflow run at the time of the latest successful poll attempt; the subsequent run lookup encountered a transient remote protocol disconnect. CI status is therefore **pending/unverified**, not green. No merge or independent approval is claimed.
+- Added the Code review register above: 20 currently identified code-bearing PR units; #138 is the only first-pass reviewed unit so far (5.0% PR coverage); 19 remain. It enumerates code areas, review states, readiness, independent-review gap, ordered review plan, and estimated 12–18 first-pass plus 5–10 specialist/fix reviewer-days (3–5 calendar weeks at one reviewer). Docs-only inputs and superseded #144 are explicitly excluded from the denominator.
+- **Result:** simultaneous code review has started with one concrete strict-DTO finding corrected and regression-covered. Remaining code review and all independent approvals remain outstanding. Production integration, writes, and command execution remain disabled.
