@@ -109,7 +109,6 @@ jobs:
           npm test -- --runInBand
           npm run lint
           npm run package
-          npm run package
           node <<'NODE'
           const assert = require('node:assert/strict');
           const { createRequire } = require('node:module');
