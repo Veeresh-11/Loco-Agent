@@ -2,6 +2,7 @@ name: Azure MSAL Transitive UUID Remediation
 on:
   pull_request:
     paths:
+      - "package-lock.json"
       - ".github/workflows/azure-msal-uuid-remediation.yml"
   workflow_dispatch:
 permissions:
