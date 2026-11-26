@@ -31,7 +31,7 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const p = JSON.parse(fs.readFileSync('package.json','utf8'));
-          p.overrides = {...(p.overrides ?? {}), 'brace-expansion':'1.1.21'};
+          p.overrides = {...(p.overrides ?? {}), 'brace-expansion':'1.1.21', '@isaacs/brace-expansion':'5.0.1'};
           fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
           NODE
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
@@ -39,14 +39,16 @@ jobs:
           const fs = require('node:fs');
           const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
           const entry = lock.packages?.['node_modules/brace-expansion'];
+          const isaacs = lock.packages?.['node_modules/@isaacs/brace-expansion'];
           if (entry?.version !== '1.1.21') throw new Error('Expected root brace-expansion 1.1.21; got '+entry?.version);
-          console.log('Candidate root brace-expansion:',entry.version);
+          if (isaacs?.version !== '5.0.1') throw new Error('Expected @isaacs/brace-expansion 5.0.1; got '+isaacs?.version);
+          console.log('Candidate root brace-expansion:',entry.version,'@isaacs/brace-expansion:',isaacs.version);
           NODE
       - name: Clean install candidate on Node 20
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify installed package and run project checks on Node 20
         run: |
-          node -e "const p=require('brace-expansion/package.json'); if(p.version!=='1.1.21') throw new Error(p.version); console.log(p.version)"
+          node -e "const p=require('brace-expansion/package.json'); const q=require('@isaacs/brace-expansion/package.json'); if(p.version!=='1.1.21'||q.version!=='5.0.1') throw new Error(p.version+' / '+q.version); console.log(p.version,q.version)"
           npm run compile
           npm test -- --runInBand
           npm run lint
