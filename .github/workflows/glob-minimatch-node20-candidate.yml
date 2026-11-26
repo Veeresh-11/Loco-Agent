@@ -62,9 +62,18 @@ jobs:
       - name: Verify installed versions and run project checks on Node 20
         run: |
           node - <<'NODE'
-          for (const name of ['glob','minimatch']) {
-            const p = require(name + '/package.json');
-            console.log(name,p.version,p.engines);
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const rows = Object.entries(lock.packages ?? {}).filter(([entry]) => /(^|\\/)node_modules\\/(glob|minimatch)$/.test(entry));
+          const modern = rows.filter(([entry,p]) => entry.endsWith('/glob') ? Number(p.version.split('.')[0]) >= 9 : Number(p.version.split('.')[0]) >= 7);
+          if (!modern.some(([entry]) => entry.endsWith('/glob')) || !modern.some(([entry]) => entry.endsWith('/minimatch'))) throw new Error('Expected modern glob and minimatch entries are missing');
+          for (const [entry] of modern) {
+            const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(),entry,'package.json'),'utf8'));
+            const [major,minor,patch] = pkg.version.split('.').map(Number);
+            if (entry.endsWith('/glob') && !(major > 14 || (major === 14 && (minor > 0 || (minor === 0 && patch >= 2))))) throw new Error('Unpatched glob: '+entry+' '+pkg.version);
+            if (entry.endsWith('/minimatch') && (major < 11 || (major === 11 && minor === 0 && patch < 8))) throw new Error('Unpatched minimatch: '+entry+' '+pkg.version);
+            console.log(entry,pkg.version,pkg.engines);
           }
           NODE
           npm run compile
@@ -94,7 +103,10 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
-          const rows = Object.entries(lock.packages ?? {}).filter(([path]) => /(^|\/)node_modules\/(glob|minimatch)$/.test(path)).map(([path,p]) => ({path,version:p.version}));
+          const rows = Object.entries(lock.packages ?? {}).filter(([path]) => /(^|\\/)node_modules\\/(glob|minimatch)$/.test(path)).map(([path,p]) => ({path,version:p.version}));
+          const badGlob = rows.filter(x => x.path.endsWith('/glob') && Number(x.version.split('.')[0]) >= 9 && !(Number(x.version.split('.')[0]) > 14 || (Number(x.version.split('.')[0]) === 14 && (Number(x.version.split('.')[1]) > 0 || (Number(x.version.split('.')[1]) === 0 && Number(x.version.split('.')[2]) >= 2)))));
+          const badMinimatch = rows.filter(x => x.path.endsWith('/minimatch') && Number(x.version.split('.')[0]) >= 7 && (Number(x.version.split('.')[0]) < 11 || (Number(x.version.split('.')[0]) === 11 && Number(x.version.split('.')[1]) === 0 && Number(x.version.split('.')[2]) < 8)));
+          if (badGlob.length || badMinimatch.length) throw new Error('Override-free lockfile contains affected packages: '+JSON.stringify({badGlob,badMinimatch}));
           console.log('Override-free reconciled glob/minimatch entries:',JSON.stringify(rows,null,2));
           NODE
       - name: Generate audit report
