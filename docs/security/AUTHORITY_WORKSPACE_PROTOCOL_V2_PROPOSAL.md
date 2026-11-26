@@ -55,7 +55,7 @@ Success response:
   "server": {
     "name": "loco-rust-authority",
     "version": "0.1.0",
-    "capabilities": ["proposal_evaluation", "workspace_registration", "workspace_capture"]
+    "capabilities": ["proposal_evaluation", "workspace_registration", "workspace_capture", "workspace_revocation"]
   }
 }
 ```
@@ -137,7 +137,31 @@ Capture is not an atomic filesystem snapshot. The adapter's identity/content che
 
 ## 7. Revocation and shutdown
 
-A `revokeWorkspace` request accepts only a registered opaque handle. Success reports `revoked: true`; an unknown or already-revoked handle returns a generic not-found error. Revocation drops the adapter and retained root handle. No path or native handle is returned.
+A `revokeWorkspace` request accepts only a registered opaque handle. Its strict request DTO contains exactly `protocolVersion`, `messageType`, `requestId`, and `workspaceHandle`; unknown fields are rejected. The protocol version is exactly `2.0`, the message type is exactly `revokeWorkspace`, the request ID follows the common 1–128 ASCII-character rule, and the handle is exactly 64 lowercase hexadecimal characters.
+
+Request:
+
+```json
+{
+  "protocolVersion": "2.0",
+  "messageType": "revokeWorkspace",
+  "requestId": "revoke-1",
+  "workspaceHandle": "64-lowercase-hex-characters"
+}
+```
+
+Success response:
+
+```json
+{
+  "protocolVersion": "2.0",
+  "messageType": "workspaceRevoked",
+  "requestId": "revoke-1",
+  "revoked": true
+}
+```
+
+If the handle is unknown, already revoked, or not registered in this process, return the generic `WORKSPACE_NOT_FOUND` error using the common error envelope. Do not reveal whether the handle was fabricated, expired, or previously revoked. Successful revocation drops the adapter and retained root handle. No path or native handle is returned. Advertise the `workspace_revocation` capability alongside registration and capture only when this operation is implemented.
 
 Shutdown is accepted only after handshake. It drops the registry before acknowledging shutdown and exiting. EOF, malformed protocol termination, process crash, or restart also drops all process-local registrations. Handles never survive process lifetime.
 
@@ -151,7 +175,7 @@ Use stable, non-path-revealing error codes:
 - `HANDSHAKE_REQUIRED`
 - `INVALID_WORKSPACE_SELECTION`
 - `WORKSPACE_CAPACITY_EXCEEDED`
-- `WORKSPACE_NOT_FOUND`
+- `WORKSPACE_NOT_FOUND` — unknown, expired, revoked, or otherwise unregistered workspace handle (generic response)
 - `INVALID_CAPTURE_REQUEST`
 - `CAPTURE_DENIED`
 - `REQUEST_LIMIT_EXCEEDED`
@@ -169,6 +193,14 @@ States:
 No registration, capture, revocation, or evaluation is accepted before handshake. No request is accepted after shutdown. One request is processed at a time; concurrency is not introduced by this protocol. Registration capacity remains bounded by the registry's current hard cap of 16. All handles are process-local.
 
 ## 10. Required contract and adversarial tests
+
+### Revocation
+- strict request fields are exactly `protocolVersion`, `messageType`, `requestId`, and `workspaceHandle`; reject unknown fields
+- request and success response match the JSON examples in section 7 and echo the request ID
+- handle must be exactly 64 lowercase hexadecimal characters
+- successful revocation drops the retained adapter/root handle and returns only `revoked: true`
+- unknown, fabricated, expired, and already-revoked handles share the generic `WORKSPACE_NOT_FOUND` response
+- advertise `workspace_revocation` only when the revocation handler is available
 
 ### Envelope / lifecycle
 - exact version required; 1.0/2.0 downgrade and cross-version messages rejected
@@ -206,5 +238,7 @@ No registration, capture, revocation, or evaluation is accepted before handshake
 5. Add cross-platform CI and adversarial lifecycle tests.
 6. Keep approval issue/consume separate until this protocol is stable; integrate it only as a Rust-internal operation with fresh recapture.
 7. Obtain independent security review. The separate platform-authenticator decision remains open.
+
+**Contract clarification — revocation DTO and capability:** the handshake capability list includes `workspace_revocation`; section 7 now defines the exact revocation request/response shape, strict fields, handle format, and generic not-found semantics. This is a documentation correction to align the proposal with the DTO/handler/client implementation; it does not add runtime behavior or establish independent acceptance.
 
 **Acceptance criterion:** the sidecar can register a candidate workspace, capture a bounded file through its retained native adapter, and revoke the registration while keeping trusted snapshot metadata in Rust. No writes, patches, commands, authenticated-human-approval claims, or execution capabilities are introduced.
