@@ -126,7 +126,8 @@ The following table is the PR-by-PR register from the 163-PR repository inventor
 | #71 | `test/linux-real-bind-mount-boundary` | `test/windows-real-volume-mountpoint` | Open, draft | Real Linux bind-mount boundary. |
 | #72 | `test/linux-distinct-filesystem-mount-boundary` | `test/linux-real-bind-mount-boundary` | Open, draft | Distinct filesystem mount boundary. |
 | #73 | `test/macos-firmlink-volume-boundary` | `test/linux-distinct-filesystem-mount-boundary` | Open, draft | Initial firmlink boundary test; issue #74 remains authoritative blocker. |
-| #74–#82 | — | — | Issues, not PRs | #74 macOS firmlink acceptance; #82 platform authenticator acceptance. Keep open until their criteria pass. |
+| — | Issue #74 (not a PR) | — | Open issue | macOS firmlink acceptance gate; keep open until authoritative entry semantics or explicitly unsupported policy is approved. |
+| — | Issue #82 (not a PR) | — | Open issue | Platform authenticator acceptance gate; keep open until required native proof and review pass. |
 | #75 | `investigate/macos-firmlink-native-records` | `test/macos-firmlink-volume-boundary` | Open, draft | Native firmlink record probe. |
 | #76 | `investigate/macos-apfs-volume-identity` | `investigate/macos-firmlink-native-records` | Open, draft | APFS System/Data volume-identity tests. |
 | #77 | `security/macos-firmlink-volume-identity` | `investigate/macos-apfs-volume-identity` | Open, draft | Descriptor-derived volume identity; not general firmlink-entry detection. |
