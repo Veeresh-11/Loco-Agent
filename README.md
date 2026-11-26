@@ -1,5 +1,7 @@
 # LOCO Agent
 
+> **Project status and delivery plan:** See [docs/PROJECT_PROGRESS_TRACKER.md](docs/PROJECT_PROGRESS_TRACKER.md) for the canonical task order, PR status, acceptance criteria, dependencies, security gates, and delivery estimates.
+
 A hybrid local + cloud AI assistant for Visual Studio Code that intelligently routes tasks between local LLMs and cloud providers for optimal performance and cost efficiency.
 
 ## Features
@@ -12,7 +14,7 @@ A hybrid local + cloud AI assistant for Visual Studio Code that intelligently ro
   - Local LLMs (Ollama, GPT4All)
 - 📝 **Code Analysis**: Line-by-line code explanation
 - 💡 **Smart Suggestions**: PowerShell and shell command suggestions
-- 🔀 **Intelligent Patching**: Three-way merge with conflict detection and auto-apply patches
+- 🔀 **Patch Workflow**: Three-way merge and conflict detection; automatic application remains subject to the project's security acceptance gates
 - ⚙️ **Configurable**: Flexible settings for provider selection and behavior
 - 📊 **Job Queue**: Processes tasks concurrently with intelligent queuing
 
@@ -36,7 +38,7 @@ A hybrid local + cloud AI assistant for Visual Studio Code that intelligently ro
 - **LOCO: Run Agent** - Execute an AI task on selected code
   - Explain code line-by-line
   - Suggest PowerShell to run
-  - Auto-apply patch
+  - Review a proposed patch
 
 - **LOCO: Open Assistant** - Open the LOCO webview for interactive assistance
 
@@ -108,7 +110,7 @@ src/
 |---------|------|---------|-------------|
 | `loco.provider` | string | `local` | Default AI provider (local, openai, azure, ollama, gpt4all) |
 | `loco.localEndpoint` | string | `http://localhost:9000` | Local server endpoint for local LLMs |
-| `loco.autoApplyPatches` | boolean | `false` | Automatically apply non-conflicting code patches |
+| `loco.autoApplyPatches` | boolean | `false` | Legacy automatic-application setting; keep disabled until the security acceptance gates are met |
 
 ## Development
 
@@ -156,11 +158,9 @@ Run tests with:
 npm test
 ```
 
-## Build Status
+## Development Status
 
-- ✅ TypeScript: No compilation errors
-- ✅ Tests: 10/10 passing
-- ✅ Ready for production deployment
+LOCO Agent is under active development. Historical build and test counts are not a release-readiness claim. Workspace writes, automatic patch application, and command execution remain subject to the security and integration acceptance gates documented in the [project progress tracker](docs/PROJECT_PROGRESS_TRACKER.md). Do not treat this repository state as production-ready until those gates are explicitly completed.
 
 ## License
 
