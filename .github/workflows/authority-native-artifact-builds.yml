@@ -1,0 +1,139 @@
+name: Authority Native Artifact Builds
+
+on:
+  pull_request:
+    paths:
+      - "core/loco-core/**"
+      - ".github/workflows/authority-native-artifact-builds.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "core/loco-core/**"
+      - ".github/workflows/authority-native-artifact-builds.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authority-native-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build authority binary (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            executable: loco-authority
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            executable: loco-authority.exe
+          - os: macos-15
+            target: aarch64-apple-darwin
+            executable: loco-authority
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            executable: loco-authority
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release authority executable
+        run: cargo build --release --manifest-path core/loco-core/Cargo.toml --bin loco-authority --target ${{ matrix.target }}
+
+      - name: Stage executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "dist/authority/${{ matrix.target }}"
+          install "core/loco-core/target/${{ matrix.target }}/release/${{ matrix.executable }}" "dist/authority/${{ matrix.target }}/${{ matrix.executable }}"
+
+      - name: Upload native executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: loco-authority-${{ matrix.target }}
+          path: dist/authority/${{ matrix.target }}/${{ matrix.executable }}
+          if-no-files-found: error
+          retention-days: 14
+
+  package-extension:
+    name: Package VSIX with native authority artifacts
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download native authority artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: loco-authority-*
+          path: dist/authority-artifacts
+
+      - name: Stage platform executables into extension resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage_binary() {
+            local target="$1"
+            local executable="$2"
+            local source="dist/authority-artifacts/loco-authority-${target}/${executable}"
+            local destination="resources/authority/${target}/${executable}"
+            test -f "$source"
+            install -D "$source" "$destination"
+            test -s "$destination"
+          }
+          stage_binary x86_64-unknown-linux-gnu loco-authority
+          stage_binary x86_64-pc-windows-msvc loco-authority.exe
+          stage_binary aarch64-apple-darwin loco-authority
+          stage_binary x86_64-apple-darwin loco-authority
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Compile extension
+        run: npm run compile
+
+      - name: Package VSIX
+        run: npx vsce package --allow-missing-repository
+
+      - name: Verify native executables are included in VSIX
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$(find . -maxdepth 1 -name '*.vsix' -type f -print -quit)"
+          test -n "$package"
+          listing="$(unzip -Z1 "$package")"
+          for path in \
+            extension/resources/authority/x86_64-unknown-linux-gnu/loco-authority \
+            extension/resources/authority/x86_64-pc-windows-msvc/loco-authority.exe \
+            extension/resources/authority/aarch64-apple-darwin/loco-authority \
+            extension/resources/authority/x86_64-apple-darwin/loco-authority; do
+            grep -Fx "$path" <<< "$listing"
+          done
+
+      - name: Upload packaged VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: loco-agent-vsix-with-authority
+          path: "*.vsix"
+          if-no-files-found: error
+          retention-days: 14
