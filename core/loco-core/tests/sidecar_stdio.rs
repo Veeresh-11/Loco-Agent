@@ -256,9 +256,8 @@ fn protocol_v2_unknown_workspace_handle_returns_generic_not_found_error() {
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let messages: Vec<Value> = String::from_utf8(output.stdout).unwrap().lines()
         .map(|line| serde_json::from_str(line).unwrap()).collect();
-    assert_eq!(messages[1]["messageType"], "error");
-    assert_eq!(messages[1]["error"]["code"], "WORKSPACE_NOT_FOUND");
-    assert_eq!(messages[1]["error"]["retryable"], false);
-    assert_eq!(messages[1]["requestId"], "v2-revoke-unknown");
+    let mut expected: Value = serde_json::from_str(include_str!("../../../tests/fixtures/protocol-v2/workspace-not-found-error.json")).unwrap();
+    expected["requestId"] = json!("v2-revoke-unknown");
+    assert_eq!(messages[1], expected);
     assert_eq!(messages[2]["messageType"], "shutdown");
 }
