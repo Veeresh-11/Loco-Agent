@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type * as cp from 'child_process';
@@ -44,8 +46,10 @@ class FakeChild extends EventEmitter {
         response = { protocolVersion: '2.0', messageType: 'error', requestId: request.requestId,
           error: { code: 'WORKSPACE_NOT_FOUND', message: 'Not found.', retryable: false, unexpected: true } };
       } else if (request.messageType === 'revokeWorkspace' && this.mode === 'unknown-revoke') {
-        response = { protocolVersion: '2.0', messageType: 'error', requestId: request.requestId,
-          error: { code: 'WORKSPACE_NOT_FOUND', message: 'Workspace registration was not found.', retryable: false } };
+        response = {
+          ...(JSON.parse(readFileSync(join(__dirname, '../../tests/fixtures/protocol-v2/workspace-not-found-error.json'), 'utf8')) as Record<string, unknown>),
+          requestId: request.requestId
+        };
       } else if (request.messageType === 'revokeWorkspace') {
         response = { protocolVersion: '2.0', messageType: 'workspaceRevoked', requestId: request.requestId, revoked: true };
       } else {
