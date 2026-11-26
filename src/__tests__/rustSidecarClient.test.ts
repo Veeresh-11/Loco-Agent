@@ -10,7 +10,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' = 'normal';
+  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
   workspaceHandle = 'a'.repeat(64);
 
@@ -40,6 +40,9 @@ class FakeChild extends EventEmitter {
           protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
           captured: true, byteLength: this.mode === 'bad-capture' ? request.maxBytes + 1 : 17
         };
+      } else if (request.messageType === 'revokeWorkspace' && this.mode === 'unknown-revoke') {
+        response = { protocolVersion: '2.0', messageType: 'error', requestId: request.requestId,
+          error: { code: 'WORKSPACE_NOT_FOUND', message: 'Workspace registration was not found.', retryable: false } };
       } else if (request.messageType === 'revokeWorkspace') {
         response = { protocolVersion: '2.0', messageType: 'workspaceRevoked', requestId: request.requestId, revoked: true };
       } else {
@@ -90,6 +93,13 @@ describe('RustSidecarClient protocol v2', () => {
     await expect(client.captureWorkspaceFile(handle, 'src/main.rs', 1024))
       .resolves.toEqual({ captured: true, byteLength: 17 });
     await expect(client.revokeWorkspace(handle)).resolves.toBeUndefined();
+  });
+
+  it('surfaces the generic unknown-workspace revocation error without treating it as success', async () => {
+    child.mode = 'unknown-revoke';
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.revokeWorkspace(handle)).rejects.toThrow(/WORKSPACE_NOT_FOUND/);
+    expect(child.killed).toBe(false);
   });
 
   it('sends a strict v2 handshake and does not downgrade to v1', async () => {
