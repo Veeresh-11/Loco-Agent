@@ -1098,3 +1098,9 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - **Diff re-review:** re-fetched the complete PR patch. The lossy conversion is absent; strict Unicode conversion, NUL/length guards and Windows-only regression cases are present. The PR still has no submitted reviews or inline threads. This is source inspection only; CI and independent approval are not complete.
 - PR #131 remains open/draft/unmerged. The validation state is **Contract Validation passed; Rust Core Tests in progress**. Do not mark the factory accepted or advance integration/merge gates until all nine jobs finish successfully and the corrected code receives the required security review.
 - **Next action:** poll exact-head Rust Core Tests run #45837716656 to terminal state; if any job fails, diagnose and fix before retrying. After green, record the terminal result, request/review independent security approval, then proceed to the next dependency-ordered protocol unit (#133). No production activation or privileged operation is enabled.
+
+
+### CI poll follow-up — PR #131 exact head
+
+- Rust Core Tests run #45837716656 advanced: Ubuntu 22.04, Ubuntu 24.04, Ubuntu 26.04, and macOS 15 arm64 completed successfully (4/9 jobs). Windows Server 2022/2025, macOS 15 Intel, and macOS 26 arm64/Intel remained in progress at the latest poll. No failed jobs were reported.
+- Contract Validation remains passed (run #45837716481). Overall Rust matrix remains **in progress**, not green; keep PR #131 draft and do not advance merge/acceptance gates.
