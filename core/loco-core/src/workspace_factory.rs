@@ -72,7 +72,6 @@ pub fn create_workspace_adapter(
 fn windows_selection_to_volume_root(
     selected_root: &Path,
 ) -> Result<(String, String), WorkspaceFactoryError> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
     };
@@ -219,24 +218,21 @@ mod windows_tests {
 
     #[test]
     fn selected_path_validation_rejects_embedded_nul_and_overlong_paths() {
-        use std::path::PathBuf;
-
         assert_eq!(
-            validate_windows_selected_path(Path::new("C:\\\\work\\\\repo\\0hidden")),
+            validate_windows_selected_path(Path::new("C:\\work\\repo\\0hidden")),
             Err(WorkspaceFactoryError::InvalidSelection)
         );
-        let overlong = format!("C:\\\\{}", "a".repeat(32_768));
+        let overlong = format!("C:\\{}", "a".repeat(32_768));
         assert_eq!(
             validate_windows_selected_path(Path::new(&overlong)),
             Err(WorkspaceFactoryError::InvalidSelection)
         );
-        let _ = PathBuf::new();
     }
 
     #[test]
     fn selected_path_validation_rejects_unpaired_utf16_surrogates() {
         use std::os::windows::ffi::OsStringExt;
-        let invalid = std::ffi::OsString::from_wide(&[b'C' as u16, b':' as u16, b'\\\\' as u16, 0xD800]);
+        let invalid = std::ffi::OsString::from_wide(&[b'C' as u16, b':' as u16, b'\\' as u16, 0xD800]);
         let path = std::path::PathBuf::from(invalid);
         assert_eq!(
             validate_windows_selected_path(&path),
