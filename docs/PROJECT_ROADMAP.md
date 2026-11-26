@@ -180,3 +180,22 @@ These legacy feature items should be reviewed as a separate release/consolidatio
 - Do not merge a stacked PR out of dependency order. Merge only after the complete stack is validated and reviewed.
 - Keep issue #74 and issue #82 open until their acceptance criteria are satisfied.
 - Update this roadmap when evidence changes; a design document, prototype, or passing isolated CI job must not be marked as production-complete.
+
+## Latest execution update (2026-11-26)
+
+### Dependency remediation candidate reconciliation
+
+- Live repository check: default branch is `main`. The maintained roadmap on `main` is `docs/PROJECT_ROADMAP.md`; the historical `docs/PROJECT_PROGRESS_TRACKER.md` path is not present on `main`. PR #148 remains an open draft whose branch contains the tracker proposal and README link; do not treat that branch-only file as the current default-branch source of truth.
+- PR #171 (`build: isolate VSCE 4.1 packaging toolchain on Node 22`) is open, draft, and mergeable at head `6c10d33d8967428eb1882708d4041e5ee16d824f`. Its description records successful candidate validation, separately audited root and packaging-tool graphs with zero findings, committed generated lockfiles, passing Node 20/22 application compile/Jest/lint checks, VSIX packaging, standard TypeScript CI, and standard npm audit. PR #171 also explicitly records that independent API/dependency review remains outstanding for cross-major glob/minimatch overrides and for the VSCE minimatch override (outside the declared `^10.2.6` range); Node 22-only packaging requires maintainer acceptance. The evidence in the PR description has not been independently reviewed in this execution.
+- PR #170's candidate description reports three high Azure/MSAL findings remain in its graph; PR #171 isolates the packaging CLI and is the current strongest candidate. Older PRs #164–#170 remain open/draft candidate experiments unless individually reconciled; do not merge or close them merely because #171 is newer.
+- Review query for PR #171 returned no submitted review and no inline review threads. The native filesystem stack PR #112 remains open/draft; review query returned no submitted reviews or inline threads. Thus neither the dependency candidate nor native security stack has independent review approval.
+- The historical progress tracker path was not found on `main`; this roadmap is updated as the default-branch status record. The tracker should be consolidated into this file or PR #148 should be reconciled before the project uses a single canonical tracker URL.
+
+### Current queue and decision
+
+1. **Dependency remediation:** PR #171 candidate is validation-positive but not accepted. Next task is independent review of the exact root/tool lockfile diff and each cross-major override, plus explicit decision on Node 22-only packaging. Only after that should the candidate be promoted into production manifests/lockfiles and run through exact-head CI.
+2. **Native filesystem security:** Priority 1 and 2 remain partially complete. macOS firmlink entry semantics and the Windows `OBJ_DONT_REPARSE` API-contract caveat remain documented; independent cross-platform security review is outstanding. Do not advance privileged operations or close issue #74 on CI evidence alone.
+3. **Approval/security core:** Approval binding and protocol prototypes remain separate from authenticated human approval. Writes, patch application, command execution, sidecar launch as a privileged authority, approval grants, and execution tokens remain disabled until the relevant independent reviews and end-to-end gates pass.
+4. **Tracker hygiene:** reconcile PR #148 with this main-branch roadmap, update README to link to the canonical default-branch document, and ensure future status changes are written to this single file. Until the PR is reconciled, use `docs/PROJECT_ROADMAP.md` on `main` as the accessible live roadmap.
+
+**Execution result:** This pass verified the PR #171 state and review gap and updated the main-branch roadmap. No production dependency files were modified, no PRs were merged or closed, and no privileged capability was enabled. The next actionable task is independent dependency/API review; that review cannot be self-assigned or represented as completed by the implementation author.
