@@ -1,0 +1,160 @@
+name: Glob and Minimatch Node 20 Candidate
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/glob-minimatch-node20-candidate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: glob-minimatch-node20-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Generate semver-safe, brace and glob/minimatch candidate lockfile
+        shell: bash
+        run: |
+          cp package.json "$RUNNER_TEMP/package.json.before"
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund
+          audit_fix_status=$?
+          set -e
+          echo "Semver-safe audit fix exit code: $audit_fix_status"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides = {
+            ...(p.overrides ?? {}),
+            'brace-expansion':'1.1.21',
+            '@isaacs/brace-expansion':'5.0.1',
+            'glob@^11':'14.0.6',
+            'glob@^13':'14.0.6',
+            'minimatch@^9':'11.0.9',
+            'minimatch@^10':'11.0.9'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const rows = Object.entries(lock.packages ?? {}).filter(([path]) => path.endsWith('/node_modules/glob') || path === 'node_modules/glob' || path.endsWith('/node_modules/minimatch') || path === 'node_modules/minimatch').map(([path,p]) => ({path,version:p.version}));
+          const badGlob = rows.filter(x => x.path.endsWith('/glob') && Number(x.version.split('.')[0]) >= 9 && !(Number(x.version.split('.')[0]) > 14 || (Number(x.version.split('.')[0]) === 14 && Number(x.version.split('.')[1]) >= 0 && Number(x.version.split('.')[2]) >= 2)));
+          const badMinimatch = rows.filter(x => { const [major,minor,patch] = x.version.split('.').map(Number); return x.path.endsWith('/minimatch') && major >= 7 && (major < 11 || (major === 11 && minor === 0 && patch < 8)); });
+          if (badGlob.length || badMinimatch.length) throw new Error('Vulnerable glob/minimatch lock entries remain: '+JSON.stringify({badGlob,badMinimatch}));
+          console.log('Candidate glob/minimatch entries:', JSON.stringify(rows,null,2));
+          NODE
+      - name: Clean install candidate on Node 20
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify installed versions and run project checks on Node 20
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const packagePaths = Object.keys(lock.packages ?? {});
+          const packageNames = new Set(['glob','minimatch']);
+          const rows = packagePaths
+            .filter(entry => [...packageNames].some(name => entry.endsWith('/node_modules/'+name) || entry === 'node_modules/'+name))
+            .map(entry => {
+              const installed = JSON.parse(fs.readFileSync(path.join(process.cwd(),entry,'package.json'),'utf8'));
+              return {entry, name: installed.name, version: installed.version};
+            });
+          const modernGlob = rows.filter(row => row.name === 'glob' && Number(row.version.split('.')[0]) >= 9);
+          const modernMinimatch = rows.filter(row => row.name === 'minimatch' && Number(row.version.split('.')[0]) >= 7);
+          if (!modernGlob.length || !modernMinimatch.length) throw new Error('Expected modern glob and minimatch entries are missing');
+          for (const row of modernGlob) {
+            const [major,minor,patch] = row.version.split('.').map(Number);
+            if (!(major > 14 || (major === 14 && (minor > 0 || (minor === 0 && patch >= 2))))) throw new Error('Unpatched glob: '+row.entry+' '+row.version);
+          }
+          for (const row of modernMinimatch) {
+            const [major,minor,patch] = row.version.split('.').map(Number);
+            if (major < 11 || (major === 11 && minor === 0 && patch < 8)) throw new Error('Unpatched minimatch: '+row.entry+' '+row.version);
+          }
+          console.log('Installed modern package versions:', JSON.stringify([...modernGlob,...modernMinimatch],null,2));
+          NODE
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Clean install and run project checks on Node 22
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Restore original manifest, then validate proposed persistent overrides
+        shell: bash
+        run: |
+          cp "$RUNNER_TEMP/package.json.before" package.json
+          cmp package.json "$RUNNER_TEMP/package.json.before"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides = {
+            ...(p.overrides ?? {}),
+            'brace-expansion':'1.1.21',
+            '@isaacs/brace-expansion':'5.0.1',
+            'glob@^11':'14.0.6',
+            'glob@^13':'14.0.6',
+            'minimatch@^9':'11.0.9',
+            'minimatch@^10':'11.0.9'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const rows = Object.entries(lock.packages ?? {}).filter(([entry]) => entry.endsWith('/node_modules/glob') || entry === 'node_modules/glob' || entry.endsWith('/node_modules/minimatch') || entry === 'node_modules/minimatch').map(([entry,p]) => ({entry,version:p.version}));
+          const badGlob = rows.filter(x => x.entry.endsWith('/glob') && Number(x.version.split('.')[0]) >= 9 && !(Number(x.version.split('.')[0]) > 14 || (Number(x.version.split('.')[0]) === 14 && (Number(x.version.split('.')[1]) > 0 || (Number(x.version.split('.')[1]) === 0 && Number(x.version.split('.')[2]) >= 2)))));
+          const badMinimatch = rows.filter(x => { const [major,minor,patch] = x.version.split('.').map(Number); return x.entry.endsWith('/minimatch') && major >= 7 && (major < 11 || (major === 11 && minor === 0 && patch < 8)); });
+          if (badGlob.length || badMinimatch.length) throw new Error('Candidate override lockfile contains affected packages: '+JSON.stringify({badGlob,badMinimatch}));
+          console.log('Reconciled candidate override glob/minimatch entries:',JSON.stringify(rows,null,2));
+          NODE
+      - name: Generate audit report
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" "$GITHUB_STEP_SUMMARY" "$status" <<'NODE'
+          const fs = require('node:fs');
+          const [file, summary, status] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(file,'utf8'));
+          const counts = report.metadata?.vulnerabilities ?? {};
+          const rows = Object.entries(report.vulnerabilities ?? {}).map(([name,v])=>({name,severity:v.severity,range:v.range,nodes:v.nodes}));
+          const lines = ['## Glob/minimatch candidate audit','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s]??0} |`), '', `Audit exit code: ${status}`, `Package records: ${rows.length}`, '', '| Package | Severity | Affected range | Lockfile nodes |','|---|---|---|---|', ...rows.map(r=>`| ${r.name} | ${r.severity} | ${r.range??''} | ${(r.nodes??[]).join(', ')} |`)];
+          fs.appendFileSync(summary,lines.join('\n')+'\n');
+          console.log(JSON.stringify({counts,packageRecords:rows.length,auditExitCode:Number(status)},null,2));
+          NODE
+      - name: Upload candidate lockfile and audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: glob-minimatch-node20-candidate
+          path: |
+            package-lock.json
+            ${{ runner.temp }}/npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
