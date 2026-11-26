@@ -1,0 +1,89 @@
+name: TypeScript-ESLint v8 Compatibility Candidate
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/typescript-eslint-v8-candidate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: typescript-eslint-v8-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Generate candidate lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-fund
+      - name: Assert coordinated TypeScript-ESLint v8 graph
+        run: |
+          node <<'NODE'
+          const lock = require('./package-lock.json');
+          for (const name of ['@typescript-eslint/eslint-plugin', '@typescript-eslint/parser']) {
+            const p = lock.packages[`node_modules/${name}`];
+            if (!p || p.version !== '8.74.0') throw new Error(`Expected ${name}@8.74.0, got ${p?.version}`);
+            if (!p.engines?.node || !p.engines.node.includes('20')) throw new Error(`Unexpected Node engine for ${name}: ${p.engines?.node}`);
+            if (!p.peerDependencies?.eslint?.includes('8.56.0')) throw new Error(`Unexpected ESLint peer range for ${name}: ${p.peerDependencies?.eslint}`);
+            console.log(name, p.version, p.engines.node, p.peerDependencies.eslint);
+          }
+          NODE
+      - name: Validate candidate lockfile on Node 20
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile, test, lint and package on Node 20
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Reinstall candidate on Node 22
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile, test, lint and package on Node 22
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Generate audit report
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" "$GITHUB_STEP_SUMMARY" "$status" <<'NODE'
+          const fs = require('node:fs');
+          const [file, summary, status] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+          const counts = report.metadata?.vulnerabilities ?? {};
+          const rows = Object.entries(report.vulnerabilities ?? {}).map(([name,v]) => ({name,severity:v.severity,direct:v.isDirect,range:v.range,fixAvailable:v.fixAvailable}));
+          const lines = ['## TypeScript-ESLint v8 candidate audit','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s] ?? 0} |`), '', `Audit exit code: ${status}`, `Package records: ${rows.length}`, '', '| Package | Severity | Direct | Affected range | Fix metadata |','|---|---|---:|---|---|', ...rows.map(r=>`| ${r.name} | ${r.severity} | ${r.direct?'yes':'no'} | ${r.range ?? ''} | ${JSON.stringify(r.fixAvailable)} |`)];
+          fs.appendFileSync(summary, lines.join('\n')+'\n');
+          console.log(JSON.stringify({counts,packageRecords:rows.length,auditExitCode:Number(status)},null,2));
+          NODE
+      - name: Upload candidate lockfile and audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: typescript-eslint-v8-candidate
+          path: |
+            package-lock.json
+            ${{ runner.temp }}/npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
