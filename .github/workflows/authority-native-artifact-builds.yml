@@ -182,8 +182,28 @@ jobs:
           # the compiled entrypoint and runtime dependency metadata.
           grep -Fx "extension/out/extension.js" <<< "$listing"
           grep -Fx "extension/package.json" <<< "$listing"
-          if grep -E -- "(^|/)(src|[.]github|coverage|__tests__)/|^extension/dist/|(^|/)core/.*[.]rs$|[.]map$|[.]tsbuildinfo$|(^|/)tsconfig[^/]*[.]json$|(^|/)jest[.]config[.]js$" <<< "$listing"; then
-            echo "VSIX contains excluded source, test, map, or build-config files" >&2
+          # The runtime dependency is declared in package.json and must remain
+          # resolvable from the installed VSIX, not just appear in metadata.
+          grep -Fx "extension/node_modules/uuid/package.json" <<< "$listing"
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          unzip -q "$package" -d "$tmpdir"
+          node - "$tmpdir/extension" <<'NODE'
+          const assert = require("node:assert/strict");
+          const path = require("node:path");
+          const extensionRoot = process.argv[2];
+          const metadata = require(path.join(extensionRoot, "node_modules/uuid/package.json"));
+          const entry = require.resolve("uuid", { paths: [extensionRoot] });
+          assert(entry.startsWith(path.join(extensionRoot, "node_modules/uuid") + path.sep));
+          const uuid = require(entry);
+          assert.equal(typeof uuid.v4, "function");
+          const value = uuid.v4();
+          assert.equal(uuid.validate(value), true);
+          assert.equal(uuid.version(value), 4);
+          console.log("VSIX runtime dependency uuid resolved and executed:", entry);
+          NODE
+          if grep -E -- "^extension/(src|[.]github|coverage|__tests__)/|^extension/dist/|^extension/core/.*[.]rs$|[.]map$|[.]tsbuildinfo$|^extension/tsconfig[^/]*[.]json$|^extension/jest[.]config[.]js$" <<< "$listing"; then
+            echo "VSIX contains excluded repository source, test, map, or build-config files" >&2
             exit 1
           fi
 
