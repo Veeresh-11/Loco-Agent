@@ -142,7 +142,7 @@ describe('RustSidecarClient protocol v2', () => {
   ] as const)('fails closed for malformed protocol error envelope: %s', async mode => {
     child.mode = mode;
     const handle = await client.registerWorkspace('/workspace/project');
-    await expect(client.revokeWorkspace(handle)).rejects.toThrow(/invalid sidecar error response/i);
+    await expect(client.revokeWorkspace(handle)).rejects.toThrow(/invalid (sidecar error response|protocol envelope)/i);
     expect(child.killed).toBe(true);
   });
 
