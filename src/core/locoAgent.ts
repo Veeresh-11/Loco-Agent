@@ -5,7 +5,7 @@ import { ProviderManager } from '../providers/providerManager';
 import { addHistoryEntry } from '../utils/historyStore';
 import { RAGEngine, type RAGChunk } from './ragEngine';
 import { JobQueue } from './jobQueue';
-import { applyThreeWayMerge } from './threeWayMerge.apply';
+import { PatchManager, type PatchBackupRecord } from './patchManager';
 
 export interface AgentTask {
   id?: string;
@@ -24,11 +24,13 @@ export class LOCOAgent {
   private readonly providerManager: ProviderManager;
   private readonly ragEngine: RAGEngine;
   private readonly jobQueue: JobQueue<AgentTask>;
+  private readonly patchManager: PatchManager;
   private readonly execFile = util.promisify(cp.execFile);
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.OutputChannel) {
     this.providerManager = new ProviderManager(context);
     this.ragEngine = new RAGEngine();
+    this.patchManager = new PatchManager(context, output);
     const configuredConcurrency = vscode.workspace.getConfiguration('locoAgent').get<number>('maxConcurrency', 2);
     this.jobQueue = new JobQueue<AgentTask>(Math.min(16, Math.max(1, Math.floor(configuredConcurrency))));
   }
@@ -89,8 +91,51 @@ export class LOCOAgent {
   }
 
   async askStream(job: AgentTask, onChunk: (chunk: string) => void): Promise<void> {
-    const text = await this.runTask(job);
-    onChunk(text);
+    const normalizedTask: AgentTask = {
+      ...job,
+      prompt: (job.prompt ?? job.task ?? '').trim(),
+      complexity: job.complexity ?? this.inferComplexity(job.prompt ?? ''),
+      estimatedTokens: job.estimatedTokens ?? Math.max(256, Math.ceil((job.prompt ?? '').length / 4))
+    };
+
+    await this.jobQueue.enqueue(normalizedTask, async (queuedJob) => {
+      const prompt = queuedJob.prompt ?? '';
+      let response = '';
+      try {
+        await addHistoryEntry(this.context, {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          role: 'user',
+          text: prompt,
+          timestamp: Date.now()
+        });
+      } catch { /* History storage is optional. */ }
+
+      const plan = this.buildPlan(queuedJob);
+      const workspaceContext = await this.ragEngine.retrieve(prompt, 5);
+      const fileText = queuedJob.filePath ? await this.readFile(queuedJob.filePath) : '';
+      const shellStatus = await this.executeShell('git rev-parse --show-toplevel');
+      const fullPrompt = this.composePrompt(queuedJob, plan, workspaceContext, fileText, shellStatus);
+
+      await this.providerManager.generateStream(fullPrompt, chunk => {
+        response += chunk;
+        onChunk(chunk);
+      }, {
+        complexity: queuedJob.complexity,
+        estimatedTokens: queuedJob.estimatedTokens,
+        context: queuedJob.context ?? 'general'
+      });
+
+      if (!response.trim()) throw new Error('The selected provider completed without returning response text.');
+      try {
+        await addHistoryEntry(this.context, {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          role: 'agent',
+          text: response,
+          timestamp: Date.now()
+        });
+      } catch { /* History storage is optional. */ }
+      this.output.appendLine(`LOCO streaming task completed: ${prompt || 'general request'}`);
+    });
   }
 
   async readFile(filePath: string): Promise<string> {
@@ -124,26 +169,15 @@ export class LOCOAgent {
   }
 
   async applyPatch(filePath: string, patch: string, baseSnapshot?: string): Promise<string> {
-    if (!filePath || !patch.trim()) {
-      return 'No patch to apply.';
-    }
+    return this.patchManager.previewAndApply(filePath, patch, baseSnapshot);
+  }
 
-    try {
-      const uri = vscode.Uri.file(filePath);
-      const current = await vscode.workspace.fs.readFile(uri);
-      const original = Buffer.from(current).toString('utf8');
-      const merge = applyThreeWayMerge({
-        base: baseSnapshot ?? original,
-        local: original,
-        remote: patch
-      });
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(merge.merged, 'utf8'));
-      return merge.conflicts
-        ? `Applied patch to ${filePath} with ${merge.conflicts} conflict(s). Review the LOCAL/REMOTE markers.`
-        : `Applied patch to ${filePath}`;
-    } catch {
-      return `Patch could not be written to ${filePath}.`;
-    }
+  getPatchBackups(): PatchBackupRecord[] {
+    return this.patchManager.getBackups();
+  }
+
+  async restorePatchBackup(backupId: string): Promise<string> {
+    return this.patchManager.restoreBackup(backupId);
   }
 
   private buildPlan(job: AgentTask): string[] {
