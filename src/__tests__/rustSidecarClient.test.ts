@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type * as cp from 'child_process';
@@ -10,7 +12,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' = 'normal';
+  mode: 'normal' | 'extra-decision-field' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' | 'malformed-error-version' | 'malformed-error-request-id' | 'malformed-error-code' | 'malformed-error-message' | 'malformed-error-retryable' | 'revoked-capture' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
   workspaceHandle = 'a'.repeat(64);
 
@@ -31,14 +33,37 @@ class FakeChild extends EventEmitter {
         response = {
           protocolVersion: '2.0', messageType: 'decision',
           requestId: this.mode === 'wrong-id' ? 'wrong' : request.requestId,
-          decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Policy result only.' }
+          decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Policy result only.', ...(this.mode === 'extra-decision-field' ? { untrustedGrant: true } : {}) }
         };
       } else if (request.messageType === 'registerWorkspace') {
         response = { protocolVersion: '2.0', messageType: 'workspaceRegistered', requestId: request.requestId, workspaceHandle: this.workspaceHandle };
+      } else if (request.messageType === 'captureWorkspaceFile' && this.mode === 'revoked-capture') {
+        response = {
+          ...(JSON.parse(readFileSync(join(__dirname, '../../tests/fixtures/protocol-v2/capture-denied-error.json'), 'utf8')) as Record<string, unknown>),
+          requestId: request.requestId
+        };
       } else if (request.messageType === 'captureWorkspaceFile') {
         response = {
           protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
           captured: true, byteLength: this.mode === 'bad-capture' ? request.maxBytes + 1 : 17
+        };
+      } else if (request.messageType === 'revokeWorkspace' && this.mode.startsWith('malformed-error')) {
+        response = {
+          protocolVersion: this.mode === 'malformed-error-version' ? '1.0' : '2.0',
+          messageType: 'error',
+          requestId: request.requestId,
+          error: {
+            code: this.mode === 'malformed-error-code' ? 'not a code' : 'WORKSPACE_NOT_FOUND',
+            message: this.mode === 'malformed-error-message' ? 42 : 'Not found.',
+            retryable: this.mode === 'malformed-error-retryable' ? 'false' : false,
+            ...(this.mode === 'malformed-error' ? { unexpected: true } : {})
+          }
+        };
+        if (this.mode === 'malformed-error-request-id') delete response.requestId;
+      } else if (request.messageType === 'revokeWorkspace' && this.mode === 'unknown-revoke') {
+        response = {
+          ...(JSON.parse(readFileSync(join(__dirname, '../../tests/fixtures/protocol-v2/workspace-not-found-error.json'), 'utf8')) as Record<string, unknown>),
+          requestId: request.requestId
         };
       } else if (request.messageType === 'revokeWorkspace') {
         response = { protocolVersion: '2.0', messageType: 'workspaceRevoked', requestId: request.requestId, revoked: true };
@@ -84,12 +109,48 @@ describe('RustSidecarClient protocol v2', () => {
     expect(client.hasCapability('workspace_capture')).toBe(true);
   });
 
+  it('fails closed when a decision payload contains an unknown field', async () => {
+    child.mode = 'extra-decision-field';
+    await expect(client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' }))
+      .rejects.toThrow(/unexpected sidecar decision response/i);
+    expect(child.killed).toBe(true);
+  });
+
   it('registers, captures and revokes a workspace using opaque handles', async () => {
     const handle = await client.registerWorkspace('/workspace/project', 'project');
     expect(handle).toBe(child.workspaceHandle);
     await expect(client.captureWorkspaceFile(handle, 'src/main.rs', 1024))
       .resolves.toEqual({ captured: true, byteLength: 17 });
     await expect(client.revokeWorkspace(handle)).resolves.toBeUndefined();
+  });
+
+  it('surfaces the generic unknown-workspace revocation error without treating it as success', async () => {
+    child.mode = 'unknown-revoke';
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.revokeWorkspace(handle)).rejects.toThrow(/WORKSPACE_NOT_FOUND/);
+    expect(child.killed).toBe(false);
+  });
+
+  it('surfaces the shared capture-denied error after workspace revocation', async () => {
+    child.mode = 'revoked-capture';
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.captureWorkspaceFile(handle, 'src/main.rs', 1024))
+      .rejects.toThrow(/CAPTURE_DENIED/);
+    expect(child.killed).toBe(false);
+  });
+
+  it.each([
+    'malformed-error',
+    'malformed-error-version',
+    'malformed-error-request-id',
+    'malformed-error-code',
+    'malformed-error-message',
+    'malformed-error-retryable'
+  ] as const)('fails closed for malformed protocol error envelope: %s', async mode => {
+    child.mode = mode;
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.revokeWorkspace(handle)).rejects.toThrow(/invalid (sidecar error response|protocol envelope)/i);
+    expect(child.killed).toBe(true);
   });
 
   it('sends a strict v2 handshake and does not downgrade to v1', async () => {
@@ -142,6 +203,12 @@ describe('RustSidecarClient protocol v2', () => {
       .rejects.toThrow(/path/i);
     await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/CON.txt', 1024))
       .rejects.toThrow(/path/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/\u0085name', 1024))
+      .rejects.toThrow(/path/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/\u009fname', 1024))
+      .rejects.toThrow(/path/i);
+    await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/ſon.txt', 1024))
+      .resolves.toEqual({ captured: true, byteLength: 17 });
     await expect(client.captureWorkspaceFile('a'.repeat(64), 'src/main.rs', 10 * 1024 * 1024 + 1))
       .rejects.toThrow(/byte limit/i);
     expect(child.killed).toBe(false);

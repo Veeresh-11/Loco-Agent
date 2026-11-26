@@ -73,7 +73,8 @@ export class RustSidecarClient implements vscodeDisposable {
     }, signal);
     if (response.messageType === 'error') throw protocolError(response);
     if (response.messageType !== 'decision' || !isObject(response.decision) ||
-        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'decision'])) {
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'decision']) ||
+        !hasExactKeys(response.decision, ['contractVersion', 'proposalId', 'decision', 'reasonCode', 'message'])) {
       await this.terminate();
       throw new Error('Unexpected sidecar decision response.');
     }
@@ -389,8 +390,17 @@ export class RustSidecarClient implements vscodeDisposable {
 interface vscodeDisposable { dispose(): void; }
 
 function protocolError(response: JsonObject): Error {
-  const error = response.error as JsonObject;
-  return new Error(`Sidecar request denied (${String(error.code)}).`);
+  if (response.protocolVersion !== PROTOCOL_VERSION ||
+      response.messageType !== 'error' ||
+      !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'error']) ||
+      !isObject(response.error) ||
+      !hasExactKeys(response.error, ['code', 'message', 'retryable']) ||
+      typeof response.error.code !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(response.error.code) ||
+      typeof response.error.message !== 'string' || response.error.message.length > 2000 ||
+      typeof response.error.retryable !== 'boolean') {
+    return new Error('Invalid sidecar error response.');
+  }
+  return new Error(`Sidecar request denied (${response.error.code}).`);
 }
 
 function hasExactKeys(value: JsonObject, expected: string[]): boolean {
@@ -414,15 +424,19 @@ function isSafePortableRelativePath(value: string): boolean {
   return value.split('/').every(component => {
     if (!component || component === '.' || component === '..' || component.endsWith('.') ||
         component.endsWith(' ') || hasForbiddenPathCharacter(component)) return false;
-    const stem = (component.split('.')[0] ?? component).toUpperCase();
+    const stem = asciiUppercase(component.split('.')[0] ?? component);
     return !reserved.has(stem);
   });
+}
+
+function asciiUppercase(value: string): string {
+  return value.replace(/[a-z]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x20));
 }
 
 function hasForbiddenPathCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0;
-    if (code <= 0x1f || code === 0x7f || '<>"|?*'.includes(character)) return true;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || '<>"|?*'.includes(character)) return true;
   }
   return false;
 }
