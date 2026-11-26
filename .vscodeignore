@@ -6,8 +6,6 @@
 .vscode-test/**
 coverage/**
 core/**
-**/core/**
-**/src/**
 dist/**
 src/**
 **/__tests__/**
