@@ -357,3 +357,5 @@ pub mod windows_root_handle;
 pub mod macos_snapshot_adapter;
 
 pub mod workspace_factory;
+
+pub mod authority_protocol_v2;
