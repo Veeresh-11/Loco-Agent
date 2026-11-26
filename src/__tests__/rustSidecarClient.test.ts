@@ -12,7 +12,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' = 'normal';
+  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' | 'revoked-capture' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
   workspaceHandle = 'a'.repeat(64);
 
@@ -37,6 +37,11 @@ class FakeChild extends EventEmitter {
         };
       } else if (request.messageType === 'registerWorkspace') {
         response = { protocolVersion: '2.0', messageType: 'workspaceRegistered', requestId: request.requestId, workspaceHandle: this.workspaceHandle };
+      } else if (request.messageType === 'captureWorkspaceFile' && this.mode === 'revoked-capture') {
+        response = {
+          ...(JSON.parse(readFileSync(join(__dirname, '../../tests/fixtures/protocol-v2/capture-denied-error.json'), 'utf8')) as Record<string, unknown>),
+          requestId: request.requestId
+        };
       } else if (request.messageType === 'captureWorkspaceFile') {
         response = {
           protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
@@ -106,6 +111,14 @@ describe('RustSidecarClient protocol v2', () => {
     child.mode = 'unknown-revoke';
     const handle = await client.registerWorkspace('/workspace/project');
     await expect(client.revokeWorkspace(handle)).rejects.toThrow(/WORKSPACE_NOT_FOUND/);
+    expect(child.killed).toBe(false);
+  });
+
+  it('surfaces the shared capture-denied error after workspace revocation', async () => {
+    child.mode = 'revoked-capture';
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.captureWorkspaceFile(handle, 'src/main.rs', 1024))
+      .rejects.toThrow(/CAPTURE_DENIED/);
     expect(child.killed).toBe(false);
   });
 
