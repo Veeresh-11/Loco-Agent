@@ -158,3 +158,19 @@ Required remediation:
 - The Unix factory tests use `tempdir_in(current_dir())`; CI runners must provide a writable working directory, or the fixture should use a dedicated writable temp parent.
 
 **Disposition:** PR #131 is exact-head CI-green but remains open/draft and not accepted. Fix the Windows conversion finding, rerun full exact-head CI, reconcile the platform-support matrix, and obtain independent security review before merge or protocol integration. No writes, patch execution, command execution, or production authority activation are authorized.
+
+
+## 9. Windows path remediation and exact-head validation — 2026-11-26
+
+The Windows selected-root conversion finding recorded in the PR #131 first-pass review has been addressed in `workspace_factory.rs` at commit `9dbb8179695fe2b2913d93e16af35382ce8452dd`:
+
+- The selected path is converted strictly with `Path::to_str()`; ill-formed UTF-16 is rejected rather than lossily replaced.
+- Embedded NUL and paths exceeding 32,767 UTF-16 code units are rejected before Win32 FFI.
+- Win32 mount and volume outputs are decoded with strict UTF-16 conversion. Security-sensitive path checks no longer use `to_string_lossy()`.
+- Windows-only regression tests cover embedded NUL, overlong input, and unpaired surrogate rejection; normalization tests cover drive paths, extended prefixes, UNC rejection, and traversal.
+
+Exact-head CI is terminal and green:
+- Rust Core Tests [#45837716656](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45837716656): all nine configured jobs passed (Ubuntu 22.04/24.04/26.04; Windows Server 2022/2025; macOS 15 arm64/Intel; macOS 26 arm64/Intel).
+- Contract Validation [#45837716481](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45837716481): passed.
+
+**Disposition:** the original conversion finding is remediated at source level and exact-head CI is green. PR #131 is still open/draft and is not accepted. No independent review submission or inline review thread exists at this checkpoint. An independent security review has been requested in [PR comment](https://github.com/Veeresh-11/Loco-Agent/pull/131#issuecomment-7194690989). The reviewer should specifically assess the Windows path/volume correspondence, extended-length and mount boundaries, UNC fail-closed behavior, root-volume rejection, and x86_64-only support. macOS firmlink and Windows `OBJ_DONT_REPARSE` contract blockers remain separate. No writes, patch execution, command execution, or production authority activation are authorized.
