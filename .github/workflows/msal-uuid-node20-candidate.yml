@@ -70,19 +70,22 @@ jobs:
           node <<'NODE'
           const assert = require('node:assert/strict');
           const { createRequire } = require('node:module');
-          const msalEntry = require.resolve('@azure/msal-node');
+          const vsceEntry = require.resolve('@vscode/vsce');
+          const vsceRequire = createRequire(vsceEntry);
+          const msalEntry = vsceRequire.resolve('@azure/msal-node');
           const msalRequire = createRequire(msalEntry);
           const uuid = msalRequire('uuid');
           const id = uuid.v4();
           assert.equal(uuid.validate(id), true);
           assert.equal(uuid.version(id), 4);
-          const msal = require('@azure/msal-node');
+          const msal = msalRequire('@azure/msal-node');
           assert.equal(typeof msal.PublicClientApplication, 'function');
           const app = new msal.PublicClientApplication({
             auth: { clientId: '00000000-0000-0000-0000-000000000000' }
           });
           assert.equal(typeof app.acquireTokenByDeviceCode, 'function');
           console.log(JSON.stringify({
+            vsceEntry,
             msalEntry,
             uuidResolvedFromMsal: msalRequire.resolve('uuid'),
             uuidVersion: uuid.version(id),
