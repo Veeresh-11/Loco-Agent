@@ -49,7 +49,7 @@ jobs:
               '@azure/identity': '4.13.0'
             }
           };
-          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\\n');
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
           NODE
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           node - <<'NODE'
@@ -103,7 +103,7 @@ jobs:
               '@azure/identity': '4.13.0'
             }
           };
-          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\\n');
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
           NODE
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           npm ci --ignore-scripts --no-audit --no-fund
@@ -129,7 +129,7 @@ jobs:
           const counts = report.metadata?.vulnerabilities ?? {};
           const rows = Object.entries(report.vulnerabilities ?? {}).map(([name,v])=>({name,severity:v.severity,range:v.range,nodes:v.nodes}));
           const lines = ['## Azure Node 20 compatible candidate','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s]??0} |`), '', `Audit exit code: ${status}`, `Package records: ${rows.length}`, '', '| Package | Severity | Affected range | Lockfile nodes |','|---|---|---|---|', ...rows.map(r=>`| ${r.name} | ${r.severity} | ${r.range??''} | ${(r.nodes??[]).join(', ')} |`)];
-          fs.appendFileSync(summary,lines.join('\\n')+'\\n');
+          fs.appendFileSync(summary,lines.join('\n')+'\n');
           console.log(JSON.stringify({counts,packageRecords:rows.length,auditExitCode:Number(status)},null,2));
           NODE
       - name: Upload candidate lockfile and audit report
