@@ -1,6 +1,6 @@
 # LOCO Agent — Project Progress Tracker
 
-**Last reconciled:** 2026-11-25  
+**Last reconciled:** 2026-11-26  
 **Canonical tracker:** This file is the source of truth for roadmap status, task ordering, acceptance criteria, dependencies, and estimates. Update it in the same PR whenever scope or task status changes.
 
 ## How to use this tracker
@@ -23,6 +23,309 @@
 - **Partially complete:** meaningful evidence exists, but one or more exit criteria remain.
 - **Blocked:** cannot safely proceed until a named dependency is resolved.
 - **Complete:** all acceptance criteria pass, required independent review is recorded, integrated into the intended branch, and release/security limitations are documented.
+
+
+
+## Repository-wide audit and reconciled delivery plan — 2026-11-26
+
+### Audit scope and evidence standard
+
+This reconciliation was performed against the live repository on 2026-11-26, not by treating the previous chat summary as authoritative. GitHub branch, pull-request, repository-tree, issue, and file content were queried. The tracker itself was read end-to-end (417 lines). The root README, main roadmap, all ten Markdown files present on `main`, both open security issues, the approval issue/consume design, and the principal architecture/security documents on their historical feature branches were inspected.
+
+**Inventory facts:**
+- Repository: `Veeresh-11/Loco-Agent`; default branch: `main`; main tip observed: `3fb4289dea837aa0f6590353c205c3d0f20bdd99`.
+- Branches: **168 names**, **166 unique tip commits**. Two pairs share identical tips:
+  - `consolidation/validated-feature-stack` and `feat/retrieval-evaluation-baseline` both point at `b2fe9d203f7ee79c3c8e17af4e3e4c5c686f0614`.
+  - `design/authority-approval-issue-consume-contract` and `fix/typescript-portable-path-c1-controls` both point at `25c15b442f1afa2994caed2039b7735a5cff9bfa`.
+- Pull requests: **163 total**: **144 open**, **19 closed**; among the closed PRs, **12 are merged** and **7 are closed without merge**.
+- Every current PR head branch and base branch was present in the fetched branch inventory. Six branch names have no PR for which they are the head: `main`, `design/authority-approval-issue-consume-contract`, `feat/macos-bulk-firmlink-preflight-rebase`, `fix/typescript-sidecar-ci-scope`, `impl/authority-approval-protocol-v21-rebased`, and `security/approval-snapshot-binding`. Those six are not automatically obsolete: some are auxiliary/rebase/reference branches and need explicit keep/delete decisions after dependency comparison.
+- Closed+merged PRs: **#101, #113, #114, #115, #116, #117, #118, #119, #120, #121, #123, #126**. Only **#123 and #126 target `main`** in the current PR inventory. The others were merged into intermediate feature branches; this is not equivalent to integration into `main`.
+- Closed without merge: **#1, #2, #3, #4, #5, #105, #122**. #105 was recorded as superseded by #107. #1–#5 must not be called merged or shipped; their review path is the later #6–#8 feature stack.
+- Open non-draft PRs: **#6, #7, #8**. The remaining open PRs in the retrieved inventory are drafts.
+- The repository-level rulesets listing returned an empty array; fetched branch listings reported `protected: false` for every returned branch, including `main`. The direct branch-protection detail endpoint previously returned 403 to the GitHub App. **Conclusion:** enforcement of required checks/reviews is not evidenced by the available repository view; a repository administrator must confirm organization-level controls and configure branch protection/rulesets. Do not state categorically that no organization policy exists.
+- Two open security issues remain:
+  - [#74 — reliable native macOS firmlink detection](https://github.com/Veeresh-11/Loco-Agent/issues/74), open, 43 comments at last fetch. Its acceptance criteria disallow treating `SF_NOUNLINK`, generic `sunlnk`, or pathname comparisons as `SF_FIRMLINK`; it requires an authoritative pre-open native entry signal or a clearly unsupported/unverified macOS boundary.
+  - [#82 — platform authenticator adapters](https://github.com/Veeresh-11/Loco-Agent/issues/82), open, 1 comment at last fetch. Requires a same-user malware threat model, platform-specific authenticator evidence, nonce/application identity/exact action digest binding independently verified by Rust, enrollment/recovery/revocation, user-presence semantics, and fail-closed behavior. No software-key or UI-click fallback.
+
+### Branch and PR disposition register
+
+The following table is the PR-by-PR register from the 163-PR repository inventory. “Closed / merged” records GitHub PR lifecycle only; it does not imply that the change reached `main`. Open PRs remain unmerged. Exact CI/review evidence belongs in the task rows and the corresponding PR history; where this audit turn could not independently re-query every old run/review, the table deliberately does not invent a fresh status.
+
+| PR | Branch (head) | Base branch | GitHub disposition | Audit interpretation / next action |
+|---:|---|---|---|---|
+| #1 | `docs/accurate-capabilities-and-limitations` | `main` | Closed, unmerged | Documentation change is not in main by virtue of closure. Reconcile current README. |
+| #2 | `ci/automated-quality-gates` | `main` | Closed, unmerged | CI workflow not integrated by this PR into main; verify whether later workflows replace it. |
+| #3 | `feat/safe-patch-preview-rollback` | `ci/automated-quality-gates` | Closed, unmerged | Legacy patch-preview feature candidate; review through #6 stack. |
+| #4 | `feat/real-streaming-provider-tests` | `feat/safe-patch-preview-rollback` | Closed, unmerged | Legacy streaming/provider candidate; review through #6. |
+| #5 | `feat/retrieval-evaluation-baseline` | `feat/real-streaming-provider-tests` | Closed, unmerged | Legacy retrieval benchmark candidate; review through #6. |
+| #6 | `consolidation/validated-feature-stack` | `main` | Open, non-draft | Consolidated legacy feature stack; CI/manual Extension Host gate and independent review still need explicit outcome. |
+| #7 | `fix/retrieval-evaluation-dedup` | `consolidation/validated-feature-stack` | Open, non-draft | Child of #6; exact integration/review status to verify before merge. |
+| #8 | `hardening-path-boundary-tests` | `fix/retrieval-evaluation-dedup` | Open, non-draft | Child of #7; lexical-path tests do not prove native race safety. |
+| #9 | `architecture/polyglot-foundation` | `main` | Open, draft | Original polyglot architecture proposal. |
+| #10 | `architecture/action-contracts` | `architecture/polyglot-foundation` | Open, draft | Versioned action-contract foundation. |
+| #11 | `security/rust-core-policy-prototype` | `architecture/action-contracts` | Open, draft | Rust policy prototype, not production authority. |
+| #12 | `security/rust-workspace-path-validation` | `security/rust-core-policy-prototype` | Open, draft | Workspace-aware path validation. |
+| #13 | `security/bounded-filesystem-ops` | `security/rust-workspace-path-validation` | Open, draft | Bounded file-read prototype, not an accepted read capability. |
+| #14 | `ci/rust-core-tests` | `security/bounded-filesystem-ops` | Open, draft | Rust cross-platform CI foundation. |
+| #15 | `security/action-approval-binding` | `ci/rust-core-tests` | Open, draft | Approval binding prototype. |
+| #16 | `security/persistent-approval-replay-store` | `security/action-approval-binding` | Open, draft | Persistent single-use challenge prototype. |
+| #17 | `security/canonical-action-digest-v1` | `security/persistent-approval-replay-store` | Open, draft | Canonical action digest contract. |
+| #18 | `security/cross-language-contract-verification` | `security/canonical-action-digest-v1` | Open, draft | Cross-language contract verification. |
+| #19 | `security/security-decision-contract-alignment` | `security/cross-language-contract-verification` | Open, draft | Security-decision wire alignment. |
+| #20 | `security/audit-event-contract-validation` | `security/security-decision-contract-alignment` | Open, draft | Bounded audit DTO contract validation. |
+| #21 | `security/rust-audit-event-dto` | `security/audit-event-contract-validation` | Open, draft | Rust audit-event DTO. |
+| #22 | `security/patch-proposal-validation` | `security/rust-audit-event-dto` | Open, draft | Bounded patch proposal validation. |
+| #23 | `security/strict-unified-diff-validation` | `security/patch-proposal-validation` | Open, draft | Strict diff validation. |
+| #24 | `security/controlled-write-design` | `security/strict-unified-diff-validation` | Open, draft | Design only; controlled writes remain unimplemented/disabled. |
+| #25 | `security/workspace-snapshot-contract-v1` | `security/controlled-write-design` | Open, draft | Snapshot contract design. |
+| #26 | `security/workspace-snapshot-adapter-research` | `security/workspace-snapshot-contract-v1` | Open, draft | Adapter research. |
+| #27 | `security/snapshot-payload-validation` | `security/workspace-snapshot-adapter-research` | Open, draft | Snapshot payload validation. |
+| #28 | `security/snapshot-contract-builder` | `security/snapshot-payload-validation` | Open, draft | Snapshot contract builder. |
+| #29 | `security/workspace-snapshot-adapter-contract` | `security/snapshot-contract-builder` | Open, draft | Adapter interface contract. |
+| #30 | `security/snapshot-capture-request` | `security/workspace-snapshot-adapter-contract` | Open, draft | Capture request validation. |
+| #31 | `security/portable-snapshot-path-hardening` | `security/snapshot-capture-request` | Open, draft | Portable snapshot paths. |
+| #32 | `security/snapshot-adapter-request-integration` | `security/portable-snapshot-path-hardening` | Open, draft | Validated capture request integration. |
+| #33 | `security/linux-openat2-acquisition-design` | `security/snapshot-adapter-request-integration` | Open, draft | Linux openat2 design. |
+| #34 | `security/linux-openat2-snapshot-adapter` | `security/linux-openat2-acquisition-design` | Open, draft | Linux handle-relative adapter. |
+| #35 | `security/linux-snapshot-adversarial-tests` | `security/linux-openat2-snapshot-adapter` | Open, draft | Linux adversarial tests. |
+| #36 | `security/snapshot-identity-captured-length` | `security/linux-snapshot-adversarial-tests` | Open, draft | Captured-byte identity/length binding. |
+| #37 | `security/reject-hardlinked-snapshot-targets` | `security/snapshot-identity-captured-length` | Open, draft | Hard-link rejection. |
+| #38 | `security/nonblocking-snapshot-open` | `security/reject-hardlinked-snapshot-targets` | Open, draft | Special target nonblocking open. |
+| #39 | `security/fifo-snapshot-rejection-test` | `security/nonblocking-snapshot-open` | Open, draft | FIFO rejection coverage. |
+| #40 | `security/snapshot-mutation-detection` | `security/fifo-snapshot-rejection-test` | Open, draft | Mutation detection; metadata checks remain best-effort rather than atomic snapshots. |
+| #41 | `security/snapshot-mutation-detection-tests` | `security/snapshot-mutation-detection` | Open, draft | Mutation regression tests. |
+| #42 | `security/snapshot-rename-race-tests` | `security/snapshot-mutation-detection-tests` | Open, draft | Concurrent replacement stress. |
+| #43 | `security/snapshot-rename-race-assert-success` | `security/snapshot-rename-race-tests` | Open, draft | Requires valid captures during replacement stress. |
+| #44 | `security/windows-snapshot-acquisition-design` | `security/snapshot-mutation-detection-tests` | Open, draft | Windows snapshot acquisition design. |
+| #45 | `security/windows-path-validation-cases` | `security/snapshot-mutation-detection-tests` | Open, draft | Cross-platform path-validation cases. |
+| #46 | `security/portable-invalid-character-tests` | `security/snapshot-mutation-detection-tests` | Open, draft | Windows-invalid filename character tests. |
+| #47 | `security/windows-root-handle-acquisition-gate` | `security/windows-snapshot-acquisition-design` | Open, draft | Windows root-handle acquisition gate. |
+| #48 | `security/windows-superscript-device-names` | `security/portable-invalid-character-tests` | Open, draft | Windows reserved device-name hardening. |
+| #49 | `security/shared-portable-path-validator` | `security/windows-superscript-device-names` | Open, draft | Shared portable path validator. |
+| #50 | `security/linux-root-handle-acquisition` | `security/shared-portable-path-validator` | Open, draft | Linux retained-root handle acquisition. |
+| #51 | `security/windows-root-handle-proof` | `security/linux-root-handle-acquisition` | Open, draft | Windows trusted-root proof. |
+| #52 | `security/windows-native-root-prototype` | `security/windows-root-handle-proof` | Open, draft | Windows root and relative-directory-handle prototype. |
+| #53 | `security/windows-bounded-file-snapshot` | `security/windows-native-root-prototype` | Open, draft | Windows bounded file snapshot adapter. |
+| #54 | `security/macos-handle-snapshot-adapter` | `security/windows-bounded-file-snapshot` | Open, draft | macOS handle-relative adapter. |
+| #55 | `security/linux-intermediate-directory-race-tests` | `security/macos-handle-snapshot-adapter` | Open, draft | Linux intermediate-directory race tests. |
+| #56 | `test/macos-intermediate-directory-swap-race` | `security/linux-intermediate-directory-race-tests` | Open, draft | macOS directory swap race tests. |
+| #57 | `test/windows-intermediate-reparse-race` | `test/macos-intermediate-directory-swap-race` | Open, draft | Windows intermediate junction/reparse race tests. |
+| #58 | `test/windows-symlink-reparse-coverage` | `test/windows-intermediate-reparse-race` | Open, draft | Windows symlink/reparse coverage. |
+| #59 | `test/windows-final-file-mutation-race` | `test/windows-symlink-reparse-coverage` | Open, draft | Windows final-file mutation race. |
+| #60 | `test/windows-volume-mountpoint-coverage` | `test/windows-final-file-mutation-race` | Open, draft | Windows volume-mountpoint rejection. |
+| #61 | `security/native-filesystem-api-review` | `test/windows-volume-mountpoint-coverage` | Open, draft | Native API review; see priority B2. |
+| #62 | `fix/linux-snapshot-exact-read-length` | `security/native-filesystem-api-review` | Open, draft | Require exact bounded reads. |
+| #63 | `security/linux-no-mount-crossing` | `fix/linux-snapshot-exact-read-length` | Open, draft | Descendant mount crossing rejection. |
+| #64 | `security/windows-ffi-x64-abi` | `security/linux-no-mount-crossing` | Open, draft | Windows x64 FFI ABI gates. |
+| #65 | `test/windows-preexisting-share-conflict` | `security/windows-ffi-x64-abi` | Open, draft | Windows share-conflict regression. |
+| #66 | `security/windows-file-id-info` | `test/windows-preexisting-share-conflict` | Open, draft | 128-bit handle-derived file identity. |
+| #67 | `security/windows-ntfs-allowlist` | `security/windows-file-id-info` | Open, draft | NTFS-only supported filesystem admission. |
+| #68 | `security/macos-apfs-filesystem-admission` | `security/windows-ntfs-allowlist` | Open, draft | macOS APFS workspace-root admission. |
+| #69 | `test/macos-nested-apfs-mount-boundary` | `security/macos-apfs-filesystem-admission` | Open, draft | Nested APFS mount-boundary test. |
+| #70 | `test/windows-real-volume-mountpoint` | `test/macos-nested-apfs-mount-boundary` | Open, draft | Real Windows secondary-volume mount boundary. |
+| #71 | `test/linux-real-bind-mount-boundary` | `test/windows-real-volume-mountpoint` | Open, draft | Real Linux bind-mount boundary. |
+| #72 | `test/linux-distinct-filesystem-mount-boundary` | `test/linux-real-bind-mount-boundary` | Open, draft | Distinct filesystem mount boundary. |
+| #73 | `test/macos-firmlink-volume-boundary` | `test/linux-distinct-filesystem-mount-boundary` | Open, draft | Initial firmlink boundary test; issue #74 remains authoritative blocker. |
+| #74–#82 | — | — | Issues, not PRs | #74 macOS firmlink acceptance; #82 platform authenticator acceptance. Keep open until their criteria pass. |
+| #75 | `investigate/macos-firmlink-native-records` | `test/macos-firmlink-volume-boundary` | Open, draft | Native firmlink record probe. |
+| #76 | `investigate/macos-apfs-volume-identity` | `investigate/macos-firmlink-native-records` | Open, draft | APFS System/Data volume-identity tests. |
+| #77 | `security/macos-firmlink-volume-identity` | `investigate/macos-apfs-volume-identity` | Open, draft | Descriptor-derived volume identity; not general firmlink-entry detection. |
+| #78 | `docs/macos-volume-boundary-validation` | `security/macos-firmlink-volume-identity` | Open, draft | Records APFS volume-boundary evidence. |
+| #79 | `security/approval-store-input-bounds` | `security/macos-firmlink-volume-identity` | Open, draft | Approval store input bounds. |
+| #80 | `security/approval-store-concurrent-consumption` | `security/approval-store-input-bounds` | Open, draft | Serialized concurrent consumption. |
+| #81 | `design/authenticated-approval-boundary` | `security/approval-store-concurrent-consumption` | Open, draft | Authenticated approval trust-boundary design; not authenticator implementation. |
+| #82 | — | — | Issue, not PR | Platform authenticator implementation and review acceptance. |
+| #83 | `security/rust-owned-approval-clock` | `design/authenticated-approval-boundary` | Open, draft | Rust-owned approval clock. |
+| #84 | `security/random-approval-challenge-nonce` | `security/rust-owned-approval-clock` | Open, draft | Cryptographic approval nonce. |
+| #85 | `security/invalidate-approval-challenges-on-restart` | `security/random-approval-challenge-nonce` | Open, draft | Restart invalidation. |
+| #86 | `security/approval-monotonic-deadlines` | `security/invalidate-approval-challenges-on-restart` | Open, draft | Monotonic deadlines. |
+| #87 | `security/platform-authenticator-review` | `security/approval-monotonic-deadlines` | Open, draft | Platform API capability research; issue #82 remains open. |
+| #88 | `security/bound-approval-challenge-cache` | `security/approval-monotonic-deadlines` | Open, draft | Bounded outstanding challenge state. |
+| #89 | `security/persistent-approval-retention` | `security/bound-approval-challenge-cache` | Open, draft | Bounded challenge retention. |
+| #90 | `security/sqlite-storage-bounds` | `security/persistent-approval-retention` | Open, draft | SQLite/WAL resource boundaries. |
+| #91 | `docs/local-storage-ipc-security-boundary` | `security/sqlite-storage-bounds` | Open, draft | Local storage and IPC boundary documentation. |
+| #92 | `design/rust-sidecar-stdio-protocol` | `docs/local-storage-ipc-security-boundary` | Open, draft | Rust stdio protocol design. |
+| #93 | `feat/rust-sidecar-stdio-server` | `design/rust-sidecar-stdio-protocol` | Open, draft | Bounded Rust stdio sidecar. |
+| #94 | `feat/typescript-rust-sidecar-client` | `feat/rust-sidecar-stdio-server` | Open, draft | TypeScript parent client. |
+| #95 | `docs/typescript-privileged-operation-inventory` | `feat/typescript-rust-sidecar-client` | Open, draft | Privileged operation migration inventory. |
+| #96 | `contract/workspace-read-request-v1` | `docs/typescript-privileged-operation-inventory` | Open, draft | Versioned bounded read request contract. |
+| #97 | `design/secure-workspace-read-acquisition` | `contract/workspace-read-request-v1` | Open, draft | Secure handle-relative acquisition design. |
+| #98 | `docs/complete-typescript-operation-inventory` | `design/secure-workspace-read-acquisition` | Open, draft | Expanded TypeScript filesystem/process/data disclosure inventory. |
+| #99 | `security/typescript-operation-regression-gate` | `docs/complete-typescript-operation-inventory` | Open, draft | Static regression guard for future TypeScript bypasses. |
+| #100 | `investigate/macos-stat-firmlink-flags` | `docs/macos-volume-boundary-validation` | Open, draft | BSD stat/firmlink flags experiment. |
+| #101 | `docs/reconcile-project-roadmap-2026-11-24` | `investigate/macos-stat-firmlink-flags` | Closed, merged | Merged into feature branch, not main. |
+| #102 | `investigate/macos-fcntl-nofirmlink` | `investigate/macos-stat-firmlink-flags` | Open, draft | Native descriptor no-firmlink probe; not accepted authorization signal. |
+| #103 | `feat/macos-firmlink-runtime-capability` | `feat/typescript-rust-sidecar-client` | Open, draft | Runtime capability handshake; does not complete production integration. |
+| #104 | `feat/macos-bulk-firmlink-preflight` | `feat/macos-firmlink-runtime-capability` | Open, draft | Bulk firmlink preflight; fail closed if guarantee unavailable. |
+| #105 | `test/macos-bulk-record-parser-hardening` | `feat/macos-bulk-firmlink-preflight` | Closed, unmerged | Superseded by #107; verify its fixes are carried in the current parser before final closeout. |
+| #106 | `test/macos-firmlink-extended-bulk-evidence` | `feat/macos-bulk-firmlink-preflight` | Open, draft | Bulk record evidence; not an authorization primitive. |
+| #107 | `test/macos-bulk-record-parser-hardening-v2` | `test/macos-firmlink-extended-bulk-evidence` | Open, draft | Parser hardening and malformed-record validation. |
+| #108 | `test/macos-nested-firmlink-preflight` | `test/macos-bulk-record-parser-hardening-v2` | Open, draft | Nested mappings rejected pre-open when detected. |
+| #109 | `docs/macos-firmlink-xnu-security-audit` | `test/macos-nested-firmlink-preflight` | Open, draft | XNU audit; documents limits of bulk metadata and path observations. |
+| #110 | `test/macos-openat-resolve-beneath-firmlink` | `docs/macos-firmlink-xnu-security-audit` | Open, draft | Demonstrates `O_RESOLVE_BENEATH` does not block firmlink traversal. |
+| #111 | `test/macos-26-intel-firmlink-matrix` | `test/macos-openat-resolve-beneath-firmlink` | Open, draft | Explicit Intel macOS 26 runner leg. |
+| #112 | `test/macos-15-firmlink-matrix` | `test/macos-26-intel-firmlink-matrix` | Open, draft | Full macOS 15/26 architecture matrix; exact recorded runner evidence is in CI run history. |
+| #113 | `ci/native-filesystem-platform-matrix` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #114 | `docs/windows-nt-ffi-sdk-audit` | `ci/native-filesystem-platform-matrix` | Closed, merged | Merged into #113 feature branch, not main. |
+| #115 | `ci/ubuntu-version-matrix` | `ci/native-filesystem-platform-matrix` | Closed, merged | Merged into #113 feature branch, not main. |
+| #116 | `test/linux-tmpfs-mount-boundary` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #117 | `test/windows-sdk-abi-probe` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #118 | `test/linux-tmpfs-workspace-root` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #119 | `test/windows-junction-race-retry` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #120 | `test/windows-obj-dont-reparse-runtime-probe` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #121 | `test/linux-bind-mounted-workspace-root` | `test/macos-15-firmlink-matrix` | Closed, merged | Merged into #112 feature branch, not main. |
+| #122 | `docs/reconcile-project-roadmap-2026-11-24` | `main` | Closed, unmerged | No integration; later #123 is merged to main. |
+| #123 | `docs/native-filesystem-roadmap-status-2026-11-24` | `main` | Closed, merged | Merged into main. |
+| #124 | `design/approval-snapshot-binding-v1` | `security/sqlite-storage-bounds` | Open, draft | Snapshot approval v1 design. |
+| #125 | `security/snapshot-bound-approval-store-v1` | `design/approval-snapshot-binding-v1` | Open, draft | Snapshot-bound approval store prototype. |
+| #126 | `docs/roadmap-snapshot-approval-status-2026-11-24` | `main` | Closed, merged | Merged into main. |
+| #127 | `security/snapshot-capture-trust-boundary-audit` | `security/snapshot-bound-approval-store-v1` | Open, draft | Snapshot-capture trust audit. |
+| #128 | `integration/snapshot-approval-native-stack` | `test/macos-15-firmlink-matrix` | Open, draft | Snapshot-bound approval ported onto native stack; integration still gated. |
+| #129 | `design/rust-authority-snapshot-integration` | `integration/snapshot-approval-native-stack` | Open, draft | Rust authority trust-boundary design. |
+| #130 | `security/rust-workspace-registry-v1` | `integration/snapshot-approval-native-stack` | Open, draft | Process-local registry; recorded CI passed, review pending. |
+| #131 | `security/native-workspace-adapter-factory-v1` | `security/rust-workspace-registry-v1` | Open, draft | Native adapter factory; recorded nine-job matrix green, review pending. |
+| #132 | `design/authority-workspace-protocol-v1` | `security/native-workspace-adapter-factory-v1` | Open, draft | Versioned workspace protocol design. |
+| #133 | `impl/authority-protocol-v2-dtos` | `design/authority-workspace-protocol-v1` | Open, draft | Strict v2 DTOs. |
+| #134 | `docs/update-authority-roadmap-stages` | `main` | Open, draft | Adds roadmap stages; current canonical tracker is more recent and supersedes duplicate roadmap-table material, but PR remains open. |
+| #135 | `impl/authority-protocol-v2-session-state` | `impl/authority-protocol-v2-dtos` | Open, draft | Session/registration/capture/revocation handlers. |
+| #136 | `impl/typescript-authority-protocol-v2-client` | `impl/authority-protocol-v2-session-state` | Open, draft | TypeScript protocol v2 client. |
+| #137 | `test/authority-v2-adversarial-handler` | `impl/authority-protocol-v2-session-state` | Open, draft | Adversarial handler lifecycle tests. |
+| #138 | `fix/typescript-portable-path-c1-controls` | `impl/typescript-authority-protocol-v2-client` | Open, draft | TypeScript/Rust portable-path parity. |
+| #139 | `docs/protocol-v2-production-integration-gap` | `impl/typescript-authority-protocol-v2-client` | Open, draft | Documents what is still absent from production wiring. |
+| #140 | `build/authority-native-artifact-matrix` | `docs/protocol-v2-production-integration-gap` | Open, draft | Native build/package matrix, not release attestation. |
+| #141 | `security/authority-build-provenance-attestations` | `build/authority-native-artifact-matrix` | Open, draft | Build provenance workflow; PR runs skip trusted-main attestations. |
+| #142 | `docs/authority-runtime-verification-contract` | `security/authority-build-provenance-attestations` | Open, draft | Proposed hybrid verifier/signing architecture, not approved implementation. |
+| #143 | `ci/pin-authority-workflow-actions` | `security/authority-build-provenance-attestations` | Open, draft | Immutable action pins. |
+| #144 | `ci/enforce-immutable-authority-action-pins` | `ci/pin-authority-workflow-actions` | Open, draft | Immutable SHA validator; initial missing-checkout failure addressed by #145. |
+| #145 | `fix/authority-action-pin-validation-checkout` | `ci/enforce-immutable-authority-action-pins` | Open, draft | Checkout and credential persistence correction; recorded exact-head CI green. |
+| #146 | `docs/authority-attestation-verification-readiness` | `security/authority-build-provenance-attestations` | Open, draft | Readiness assessment; trusted-main evidence/signing/verifier and governance remain unresolved. |
+| #147 | `test/authority-artifact-verification-contract` | `security/authority-build-provenance-attestations` | Open, draft | Policy validation only, not cryptographic verifier. |
+| #148 | `docs/project-progress-tracker` | `main` | Open, draft | Canonical progress tracker branch; this register is being added on this branch. |
+| #149 | `design/authority-approval-binding-v1` | `fix/typescript-portable-path-c1-controls` | Open, draft | Approval issue/consume protocol design, separate from human authentication. |
+| #150 | `impl/authority-approval-registration-binding` | `design/authority-approval-binding-v1` | Open, draft | Registration digest persisted atomically with challenge; recorded Contract and 9-target Rust CI passed; review pending. |
+| #151 | `impl/authority-approval-protocol-v21` | `impl/authority-approval-registration-binding` | Open, draft | Last recorded exact-head Contract, TypeScript Node 20/22 and nine-target Rust CI green; independent review pending. |
+| #152 | `ci/pin-rust-toolchain-version` | `fix/authority-action-pin-validation-checkout` | Open, draft | Rust toolchain 1.100.0 pinned; recorded native/package CI green. |
+| #153 | `ci/lock-authority-cargo-dependencies` | `ci/pin-rust-toolchain-version` | Open, draft | Cargo.lock v4 committed; recorded Contract, native/package/archive and nine-target Rust CI green. |
+| #154 | `ci/vsix-package-boundary` | `ci/lock-authority-cargo-dependencies` | Open, draft | Exact-head native builds, VSIX and archive assertions recorded green. |
+| #155 | `security/npm-audit-report` | `ci/vsix-package-boundary` | Open, draft | Detailed npm audit workflow; initial lockfile audit 32 package records (1 critical, 21 high, 9 moderate, 1 low). |
+| #156 | `security/npm-lockfile-reconciliation` | `security/npm-audit-report` | Open, draft | Revealed stale lockfile root metadata (axios/jest-util mismatched manifest); candidate-only lockfile reconciliation. |
+| #157 | `security/npm-semver-remediation` | `security/npm-lockfile-reconciliation` | Open, draft | Candidate semver-safe npm remediation; does not imply production lockfile fix. |
+| #158 | `security/remove-unused-uuid` | `security/npm-lockfile-reconciliation` | Open, draft | Candidate removal of unused direct uuid dependency; source search found no code import, but branch integration/review pending. |
+| #159 | `security/azure-msal-uuid-remediation` | `security/remove-unused-uuid` | Open, draft | Azure/MSAL candidate; Node 20 compatibility constraints require resolution. |
+| #160 | `security/semver-safe-audit-remediation` | `security/azure-msal-uuid-remediation` | Open, draft | Candidate semver-safe fixes; artifact/review must be current-head verified. |
+| #161 | `security/typescript-eslint-v7-remediation` | `security/azure-msal-uuid-remediation` | Open, draft | TS-ESLint v7 candidate branch; #162 is separate v8 candidate—avoid treating both as simultaneously selected. |
+| #162 | `security/typescript-eslint-v8-remediation` | `security/azure-msal-uuid-remediation` | Open, draft | TS-ESLint v8.74 candidate; #161 and #162 are alternatives pending the same compatibility/audit choice. |
+| #163 | `security/semver-safe-transitive-audit-remediation` | `security/typescript-eslint-v8-remediation` | Open, draft | Semver-safe candidate lockfile generation. |
+| #164 | `security/brace-expansion-node20-candidate` | `security/semver-safe-transitive-audit-remediation` | Open, draft | Exact-head #45768809831 validated Node 20/22 and override-free reproducibility; five audit records remain (0 critical, 2 high, 3 moderate, 0 low). Candidate artifact only; not production lockfile remediation. |
+| #165 | `security/glob-minimatch-node20-candidate` | `security/brace-expansion-node20-candidate` | Open, draft | Head `78db23cd8e9331f7458144ea6e1587ccf874f4d3`; run #45770812749 failed before project checks from over-escaped JavaScript regex; fix committed; corrected run #45778030293 was observed in progress at last check. Candidate install and final audit still not verified. |
+
+**PR inventory cautions:**
+- The register covers every PR number in the fetched 163-PR inventory. For old PRs #1–#147, the “open/draft” and “merged” labels describe live PR metadata; detailed exact-head run/review status is only stated where the tracker already retained evidence or this audit directly verified it. Do not infer green CI or no review from absence of a run in this table.
+- GitHub's branch search and metadata API were available, but the connector enforced a per-turn call cap before 163 individual changed-file/review/job queries could be completed. The branch inventory and PR metadata are complete; a per-PR changed-file / review / latest-CI drill-down for all 163 must be performed in smaller batches in a follow-up audit. The latest 20+ branches' document tree checks were used to find relevant document deltas; this is not a claim that every old code line was independently re-reviewed.
+- No PR was merged or closed as part of this audit.
+
+### Historical document and branch-tip register
+
+The tree audit found that `main` contains 124 tree entries and **10 Markdown documents**: `CHANGELOG.md`, `DEPLOYMENT.md`, `PUBLISH.md`, `QUICK_REFERENCE.md`, `README.md`, `SUMMARY.md`, `USER_MANUAL.md`, `USE_CASES.md`, `docs/PROJECT_ROADMAP.md`, and `docs/security/AUTHORITY_APPROVAL_ISSUE_CONSUME_PROTOCOL_DESIGN.md`.
+
+Key documentation is present on historical feature branches but absent from main at the observed main SHA. These documents must not be assumed to be published/default-branch policy until their PR chains are integrated. The following document families were located and their contents/headings inspected on their owning feature branches:
+
+| Document family | Documents found on branch refs | Main-branch presence at audit |
+|---|---|---|
+| Polyglot architecture | `docs/architecture/POLYGLOT_ARCHITECTURE.md`, `POLYGLOT_MIGRATION_ROADMAP.md`, `RUST_SIDECAR_STDIO_PROTOCOL.md` | Architecture/migration docs absent from main; the main tree has no `docs/architecture` directory. |
+| Historical development roadmap | `docs/project/DEVELOPMENT_STATUS_AND_ROADMAP.md` (multiple revisions, 26–44 KB) | Absent from main. Contains historical PR snapshots #1–#67 and follow-up status; superseded by later consolidated roadmaps but useful for original product and security requirements. |
+| Approval and snapshot | `APPROVAL_TRUST_BOUNDARY.md`, `APPROVAL_SNAPSHOT_BINDING_V1.md`, `RUST_AUTHORITY_SNAPSHOT_INTEGRATION_DESIGN.md`, `AUTHORITY_APPROVAL_ISSUE_CONSUME_PROTOCOL_DESIGN.md` | Only the final issue/consume design is on main. Approval trust/snapshot/integration design remain on feature refs. |
+| Workspace read / TypeScript migration | `TYPESCRIPT_PRIVILEGED_OPERATION_INVENTORY.md`, `WORKSPACE_READ_ACQUISITION_DESIGN.md`, `LOCAL_STORAGE_AND_IPC_SECURITY_BOUNDARY.md`, `PROTOCOL_V2_PRODUCTION_INTEGRATION_GAP.md` | Absent from main. |
+| macOS native boundary | `MACOS_FIRMLINK_EVIDENCE.md`, `MACOS_FIRMLINK_XNU_AUDIT.md`, `MACOS_RESOLVE_BENEATH_FIRMLINK_PROBE.md`, `MACOS_SNAPSHOT_ADAPTER.md`, `MACOS_SNAPSHOT_SUPPORT_MATRIX.md` | Absent from main; relevant evidence is captured in the older main roadmap but underlying supporting docs are branch-only. |
+| Linux/Windows native support | `NATIVE_FILESYSTEM_API_REVIEW.md`, `NATIVE_FILESYSTEM_CI_MATRIX.md`, `NATIVE_FILESYSTEM_SUPPORT_MATRIX.md`, `WINDOWS_NATIVE_ROOT_PROTOTYPE.md`, `WINDOWS_NT_FFI_SDK_AUDIT.md`, `WINDOWS_ROOT_HANDLE_ACQUISITION_GATE.md`, `LINUX_SNAPSHOT_ACQUISITION_PLAN.md`, `WORKSPACE_SNAPSHOT_ADAPTER_RESEARCH.md` | Absent from main. |
+| Runtime provenance | `AUTHORITY_RUNTIME_VERIFICATION_DECISION.md`, `AUTHORITY_ARTIFACT_RUNTIME_VERIFICATION.md`, `AUTHORITY_ATTESTATION_VERIFICATION_READINESS.md` | Absent from main. |
+| Security model | `POLYGLOT_THREAT_MODEL.md`, `CONTROLLED_WRITE_DESIGN.md` | Absent from main. |
+
+Representative branch tree observations:
+- `docs/authority-attestation-verification-readiness`: 219 tree entries, 37 Markdown files.
+- `docs/authority-runtime-verification-contract`: 220 tree entries, 38 Markdown files.
+- `docs/complete-typescript-operation-inventory`: 205 tree entries, 27 Markdown files.
+- `docs/local-storage-ipc-security-boundary`: 185 tree entries, 24 Markdown files.
+- `docs/macos-firmlink-xnu-security-audit`: 199 tree entries, 27 Markdown files.
+- `docs/macos-volume-boundary-validation`: 182 tree entries, 22 Markdown files.
+- `docs/protocol-v2-production-integration-gap`: 217 tree entries, 36 Markdown files.
+- `design/authority-workspace-protocol-v1`: 212 tree entries, 35 Markdown files.
+- `design/rust-authority-snapshot-integration`: 209 tree entries, 34 Markdown files.
+- `security/platform-authenticator-review`: 184 tree entries, 23 Markdown files.
+- `security/native-filesystem-api-review`: 179 tree entries, 22 Markdown files.
+- `design/authenticated-approval-boundary`: 183 tree entries, 23 Markdown files.
+- `design/authority-approval-issue-consume-contract`: 216 tree entries, 35 Markdown files.
+- The current tracker branch tree itself contains 123 entries and 10 Markdown files; it includes `docs/PROJECT_PROGRESS_TRACKER.md` and `docs/PROJECT_ROADMAP.md`, while the default `main` does not contain the tracker.
+
+**Important version reconciliation:**
+- The main roadmap (`docs/PROJECT_ROADMAP.md`, status date 2026-11-24) remains the nine-priority product/security roadmap and separates the older #6–#8 feature stack from the nine migration/security priorities.
+- The living tracker branch (`docs/project-progress-tracker`) is newer than main and should be the operational project record, but PR #148 is still an open draft and the tracker is not yet on main.
+- The approval issue/consume design on main is a newer compact 11.6 KB document than the 7.2 KB draft on the rebased #151 branch. The main document correctly states it is a proposed wire-contract design, not authorized implementation. Keep that distinction.
+- Do not treat a doc as accepted solely because it appears on a feature branch or its PR is closed/merged into another feature branch.
+
+### Documentation findings that require action
+
+1. **README drift (high priority):** The main README still claims the extension auto-applies patches, lists Node.js 16+, and states “Ready for production deployment” with a 10/10 test claim. That conflicts with the later security roadmap, the current staged Rust authority design, and the explicit disabled state for production writes, command execution and sidecar launch. PR #1's documentation alignment was closed unmerged. Create a fresh documentation PR from current main once the supported feature set is verified from source; state precisely what is shipped, what is prototype-only, and what remains disabled.
+2. **Roadmap divergence:** Main `docs/PROJECT_ROADMAP.md` remains dated 2026-11-24, while the tracker has Nov 26 entries and a larger dependency/release register. Merge/publish the tracker or keep a deliberate link from main; avoid parallel, contradictory roadmap documents.
+3. **Branch-only design decisions:** Approval trust boundary, native API review, macOS firmlink evidence, Windows FFI audit, TypeScript privileged-operation inventory and runtime verification decision should be linked from the tracker with their owning branch/PR and their exact accepted revision. They are currently not all discoverable from main.
+4. **Feature completion versus security migration:** The legacy #6–#8 feature stack remains open; PR #1–#5 were closed unmerged. A separate Extension Host smoke test/retrieval evaluation acceptance gate is still required. Do not claim that the security-core work completes the user-facing resume/job-matching product.
+5. **No confirmed branch protection:** Empty repo rulesets collection plus `protected:false` branch results are insufficient evidence of enforced merge checks. Admin confirmation required.
+
+### Reconciled roadmap — corrected order from this audit
+
+The nine original priorities remain, but their execution is staged to avoid parallel work that hides dependencies. The original screenshot's A1–A8 authority stages remain a nested security-core sequence, not a replacement for the product roadmap.
+
+| Seq. | Work package | Current position | Next objective / exit gate | Estimate (working days) |
+|---:|---|---|---|---:|
+| 0 | Repository/PR reconciliation and main-branch governance | **Inventory complete; integration/disposition pending** | Per-PR changed-file/review/CI drill-down in batches; identify obsolete stacks; admin confirms branch protection; define merge order and retire only proven-superseded branches | 1–2 |
+| 1 | Native workspace snapshot acceptance (Linux/Windows/macOS) | **Implementation and test evidence substantial; security acceptance incomplete** | Preserve Linux ext4/bind/tmpfs exact tested support; preserve Windows NTFS/Server 2022/2025 x64 tested support and FFI caveat; preserve macOS 15/26 arm64/Intel volume identity evidence; resolve issue #74 or mark unsupported by policy; resolve Windows OBJ_DONT_REPARSE contract caveat; independent review | 2–5, plus Apple/Windows clarification wait |
+| 2 | Authority registration/capture + approval integration (A1–A7) | **#128–#138 and #149–#151 implementation submitted; recorded exact-head CI for key PRs green; no independent review** | Reconcile and test dependency stack from #128 → #130 → #131 → #132 → #133 → #135 → #136/#137/#138 → #149 → #150 → #151; prove registration lifecycle and captured bytes remain Rust-owned; handle fresh recapture, revocation, replay, expiry, concurrency, restart; keep challenge binding distinct from authenticated human intent | 3–5 |
+| 3 | Platform authenticator and independent security review (A8, issue #82) | **Design/research only; not implemented/approved** | Choose supported platforms and same-user malware model; implement at least one real OS-owned presence/verification path with action/challenge binding verified by Rust; test recovery/revocation/headless conditions; external independent reviewer signs off on A1–A7, native adapters, and authenticator | 4–7 plus reviewer availability |
+| 4 | Runtime artifact verification, provenance, signing and governance | **Build/package workflows and policy-only verifier prototype submitted; actual trust chain absent** | Trusted-main attestations for all subjects; select and integrate maintained cryptographic verifier; verify exact executable bytes at launch without fallback; Windows Authenticode, macOS Developer ID/notarization, Linux protected installation/ACL strategy; SBOM/dependency/license audit; admin-required branch rules; adversarial replacement/tampering | 4–7 plus signing/maintainer setup |
+| 5 | TypeScript production integration and removal of bypasses | **Sidecar transport/protocol client submitted; no complete production task-content path** | Launch only after exact-file verifier; activation-scoped process lifecycle; consume trusted bytes in Rust-owned path; enforce static operation inventory; remove/constrain direct patch, subprocess, history/RAG/editor disclosure bypasses; runtime limits/backpressure/cancellation | 3–5 |
+| 6 | Controlled Rust writes (priority 4 / D1) | **Design/DTO/diff prototypes only; production write disabled** | Handle-relative race-resistant replacement, bounded patch semantics, authenticated approval, fresh snapshot revalidation, audit, rollback/recovery, adversarial tests; only after all prior gates | 4–7 |
+| 7 | Rust authorization and command execution (priority 5 / D2) | **Policy contract/prototype; no accepted executor** | Rust allow/deny/ask enforcement, command executable/args/env/cwd allowlist, timeout/output limits/cancellation, no TS bypass, audited result; only after authenticator and write boundary review | 4–6 |
+| 8 | Python AI service extraction (priority 6 / D3) | **Not implemented as a complete service** | Define Python service protocol, split provider/orchestration/RAG/evaluation/planning, bounded IPC, packaging and tests, ensure model output remains proposal-only | 4–7 |
+| 9 | End-to-end TypeScript/Rust/Python integration + product feature baseline (priorities 7–8 and legacy #6–#8) | **Component tests/clients exist; end-to-end acceptance absent** | Real VS Code → TS → Rust/Python resume + job-description workflow; verify skill extraction/matching/explanations; safe user-approved edits; provider fallback/streaming/RAG/evaluation; Extension Host smoke tests; adversarial cross-platform and privacy regression | 5–8 |
+| 10 | Packaging, release and post-release hardening (priority 9 / D6) | **PR #154 package boundaries and #140–#153 build controls are CI candidates; release still blocked** | Merge approved stack in order; reproducible multi-OS builds; signatures, attestation, verifier, SBOM, license/dependency audit, install/upgrade/rollback/uninstall, marketplace readiness and release docs | 3–5 after gates |
+
+**Estimate interpretation:**
+- Remaining engineering execution: **33–57 working days** across work packages 0–10 (some subpackages can be parallelized only after their prerequisites are stable). This is a planning range, not a promise.
+- External dependencies (Apple clarification/fixture, Windows API contract clarification, independent reviewer availability, signing credentials/admin policy) can add **1–3+ calendar weeks** and cannot be eliminated by faster coding.
+- Practical end-to-end calendar estimate with one primary developer and sequential security gates: **7–11 weeks**. With parallel independent reviewers and release/credentials prepared early, a lower bound of **5–8 weeks** may be achievable.
+- This is the remaining path to a release candidate that includes the security/runtime gates, not a guarantee that every optional product enhancement is complete. A broader production-ready AI product may need additional iteration after user acceptance.
+
+### Where to start after this audit
+
+**Do not start a new feature or create another protocol.** The work already has many stacked prototypes and 144 open PRs; adding another PR before reconciliation increases integration risk.
+
+Start with this ordered checklist:
+1. Recheck #45778030293 for PR #165 and record final exact-head CI/artifact state. Keep #165 candidate-only until audit and API compatibility are independently reviewed.
+2. Reconcile PR #153–#165 as one dependency candidate set. Choose a single TypeScript-ESLint strategy (#161 v7 or #162 v8) and one approved lockfile candidate; do not treat alternatives as simultaneous. Identify and resolve npm audit residuals for Azure/MSAL, vsce, glob, minimatch without force upgrades or hidden workflow-only overrides.
+3. Perform the per-PR review/CI and changed-file drill-down for the full inventory, with priority on #112, #128–#151, #140–#154 and #155–#165. For each PR record head SHA, base SHA, changed file list, exact latest checks, review approvals/requests, merged-to-branch-vs-main, and successor/superseded decision.
+4. Ask a maintainer to configure/confirm branch protection and assign independent reviewers. Keep #74 and #82 open and privileged functionality disabled.
+5. Only after the inventory and governance are reconciled, select the first integration target and merge a validated dependency stack in dependency order. Do not merge 144 open PRs as a batch.
+
+### PR/branch cleanup rules
+
+- Never infer a PR is safe to close just because it is old, draft, behind, or shares a base. Compare its patch and dependency ancestry to the successor first.
+- Explicitly review candidate duplicates/alternatives: #161 vs #162; #157 vs #160; #163/#164/#165 candidate dependency stack; #101/#122/#123 roadmap revisions; #104–#112 firmlink stack; #128–#151 authority stack; #1–#8 legacy feature stack.
+- PR #105 is already closed as superseded by #107. Confirm the replacement commit includes all intended parser fixes before recording it as fully superseded.
+- PRs #113–#121 were merged into the #112 feature branch only; #112 remains an open draft. Reconcile that entire feature stack before any merge to main.
+- Branches without head PRs listed above require explicit retain/delete classification after commit ancestry checks. Do not delete branches during this audit.
+- Two branch pairs share one commit (listed in inventory facts); do not create duplicate PRs from them.
+
+### Audit limitations / remaining verification queue
+
+The GitHub connector returned the full 168-branch listing, full 163-PR metadata list, main and selected historical branch trees, and relevant source documents. The per-turn call budget prevented issuing an independent changed-file, review, and latest-workflow query for every one of the 163 PRs. Accordingly:
+- The branch/PR counts, head/base refs, open/closed/merged/draft state, 166 unique branch tip commits, and the 12 merged / 7 closed-unmerged dispositions are directly inventoried.
+- The key document families and principal historical design versions listed above were located and their content/headings inspected.
+- The exact code patches, latest Actions jobs, reviews and inline threads for every old PR are **not** certified individually by this pass. This is the remaining audit task and is deliberately assigned as work package 0 rather than being described as complete.
+- The audit of branch documents used tree listings from the principal document-bearing and untracked historical branches, not a full byte-by-byte read of every repeated README/user manual file on all 168 branch tips. Common docs have matching blob SHAs across refs; only changed/unique docs should be compared further. The branch tree samples show the main content additions; the unique doc blobs across remaining branches still need a deduplicated comparison pass before this can be called exhaustive.
+
+---
+
+## Historical tracker snapshots (pre-audit)
 
 ## A. Security-core workstream — snapshot, authority and approvals
 
@@ -123,6 +426,8 @@
 **External dependency caveat:** A8 is currently blocked because no independent reviewer is requested/assigned on the inspected PRs. If reviewer availability slips, calendar completion is unbounded regardless of implementation throughput. The estimate assumes review availability; it cannot be treated as a committed date.
 
 This milestone estimate does **not** include production sidecar launch or marketplace release. Trusted-main provenance, verifier/trust-root selection, Windows/macOS signing and platform integrity, repository governance, exact-file binding, platform authenticator validation and independent security approval remain distinct gates and may add **5–10+ working days** or remain blocked by external provisioning/review. Python extraction, full command execution, controlled workspace writes, complete end-to-end product integration and release are separate roadmap milestones.
+
+
 
 ## G. Change log
 
