@@ -190,7 +190,6 @@ fn protocol_v2_register_capture_revoke_and_shutdown_are_correlated() {
     stdout.read_line(&mut line).unwrap();
     let denied: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(denied["messageType"], "error");
-    assert_eq!(replay["protocolVersion"], "2.1");
     assert_eq!(denied["error"]["code"], "CAPTURE_DENIED");
     line.clear();
 
@@ -320,7 +319,7 @@ fn protocol_v21_issues_consumes_and_rejects_replay_of_registration_bound_challen
     stdout.read_line(&mut line).unwrap();
     let replay: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(replay["messageType"], "error");
-    assert_eq!(denied["protocolVersion"], "2.1");
+    assert_eq!(replay["protocolVersion"], "2.1");
     assert_eq!(replay["error"]["code"], "BINDING_CHALLENGE_EXPIRED_OR_CONSUMED");
     line.clear();
 
@@ -380,6 +379,7 @@ fn protocol_v21_revocation_invalidates_challenges_and_commands_are_rejected() {
     stdout.read_line(&mut line).unwrap();
     let denied = serde_json::from_str::<Value>(&line).unwrap();
     assert_eq!(denied["messageType"], "error");
+    assert_eq!(denied["protocolVersion"], "2.1");
     assert_eq!(denied["error"]["code"], "BINDING_CHALLENGE_EXPIRED_OR_CONSUMED");
     line.clear();
 
