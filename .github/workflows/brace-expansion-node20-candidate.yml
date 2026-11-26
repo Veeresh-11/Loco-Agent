@@ -28,6 +28,11 @@ jobs:
         shell: bash
         run: |
           cp package.json "$RUNNER_TEMP/package.json.before"
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund
+          audit_fix_status=$?
+          set -e
+          echo "Semver-safe audit fix exit code: $audit_fix_status"
           node - <<'NODE'
           const fs = require('node:fs');
           const p = JSON.parse(fs.readFileSync('package.json','utf8'));
