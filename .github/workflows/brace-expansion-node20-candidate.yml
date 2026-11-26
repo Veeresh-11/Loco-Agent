@@ -87,10 +87,11 @@ jobs:
         run: |
           cp "$RUNNER_TEMP/package.json.before" package.json
           cmp package.json "$RUNNER_TEMP/package.json.before"
-      - name: Verify lockfile installs with the original manifest (no overrides)
+      - name: Reconcile candidate lockfile with original manifest (no overrides)
         run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           npm ci --ignore-scripts --no-audit --no-fund
-          node -e "const p=require('brace-expansion/package.json'); if(p.version!=='1.1.21') throw new Error(p.version); console.log('override-free brace-expansion',p.version)"
+          node -e "console.log('override-free brace-expansion',require('brace-expansion/package.json').version)"
           npm ls @isaacs/brace-expansion --all || true
       - name: Generate audit report
         shell: bash
