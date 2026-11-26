@@ -190,6 +190,7 @@ fn protocol_v2_register_capture_revoke_and_shutdown_are_correlated() {
     stdout.read_line(&mut line).unwrap();
     let denied: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(denied["messageType"], "error");
+    assert_eq!(replay["protocolVersion"], "2.1");
     assert_eq!(denied["error"]["code"], "CAPTURE_DENIED");
     line.clear();
 
@@ -319,6 +320,7 @@ fn protocol_v21_issues_consumes_and_rejects_replay_of_registration_bound_challen
     stdout.read_line(&mut line).unwrap();
     let replay: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(replay["messageType"], "error");
+    assert_eq!(denied["protocolVersion"], "2.1");
     assert_eq!(replay["error"]["code"], "BINDING_CHALLENGE_EXPIRED_OR_CONSUMED");
     line.clear();
 
@@ -388,6 +390,7 @@ fn protocol_v21_revocation_invalidates_challenges_and_commands_are_rejected() {
     stdout.read_line(&mut line).unwrap();
     let unsupported = serde_json::from_str::<Value>(&line).unwrap();
     assert_eq!(unsupported["messageType"], "error");
+    assert_eq!(unsupported["protocolVersion"], "2.1");
     assert_eq!(unsupported["error"]["code"], "UNSUPPORTED_ACTION");
     line.clear();
 
@@ -462,7 +465,9 @@ fn protocol_v21_re_registration_does_not_rebind_old_challenge_to_new_workspace_h
         "workspaceHandle":old_handle,"relativePath":"README.md","maxBytes":1024
     })).unwrap();
     stdout.read_line(&mut line).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["messageType"], "error");
+    let old_handle_capture = serde_json::from_str::<Value>(&line).unwrap();
+    assert_eq!(old_handle_capture["messageType"], "error");
+    assert_eq!(old_handle_capture["protocolVersion"], "2.1");
     line.clear();
 
     writeln!(stdin, "{}", json!({
@@ -521,6 +526,7 @@ fn protocol_v21_stale_capture_rejects_without_consuming_challenge() {
     stdout.read_line(&mut line).unwrap();
     let stale = serde_json::from_str::<Value>(&line).unwrap();
     assert_eq!(stale["messageType"], "error");
+    assert_eq!(stale["protocolVersion"], "2.1");
     assert_eq!(stale["error"]["code"], "BINDING_MISMATCH");
     line.clear();
 
