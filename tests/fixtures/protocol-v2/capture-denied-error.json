@@ -1,0 +1,10 @@
+{
+  "protocolVersion": "2.0",
+  "messageType": "error",
+  "requestId": "fixture-request",
+  "error": {
+    "code": "CAPTURE_DENIED",
+    "message": "Workspace capture is not permitted.",
+    "retryable": false
+  }
+}
