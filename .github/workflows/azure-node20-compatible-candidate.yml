@@ -50,15 +50,25 @@ jobs:
           NODE
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           node - <<'NODE'
-          const lock = require('./package-lock.json');
-          const identity = lock.packages['node_modules/@azure/identity'];
-          const msal = lock.packages['node_modules/@azure/msal-node'];
-          const vsce = lock.packages['node_modules/@vscode/vsce'];
-          if (identity?.version !== '4.13.0') throw new Error('Expected @azure/identity 4.13.0, got '+identity?.version);
-          if (!identity.engines?.node || !identity.engines.node.includes('20')) throw new Error('Identity candidate engine metadata is not Node 20 compatible: '+JSON.stringify(identity.engines));
-          if (!msal || Number(msal.version.split('.')[0]) >= 5) throw new Error('Expected MSAL Node 3.x LTS, got '+msal?.version);
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const packages = lock.packages ?? {};
+          const identities = Object.entries(packages)
+            .filter(([path, pkg]) => (path === 'node_modules/@azure/identity' || path.endsWith('/node_modules/@azure/identity')) && pkg.name !== 'loco-agent')
+            .map(([path, pkg]) => ({path, version:pkg.version, engines:pkg.engines, dependencies:pkg.dependencies ?? {}}));
+          const msalNodes = Object.entries(packages)
+            .filter(([path]) => path === 'node_modules/@azure/msal-node' || path.endsWith('/node_modules/@azure/msal-node'))
+            .map(([path, pkg]) => ({path, version:pkg.version, engines:pkg.engines}));
+          const vsce = packages['node_modules/@vscode/vsce'];
+          if (identities.length === 0) throw new Error('No installed @azure/identity package exists in the candidate lockfile');
+          const badIdentity = identities.filter(pkg => pkg.version !== '4.13.0');
+          if (badIdentity.length) throw new Error('Expected all @azure/identity instances at 4.13.0: '+JSON.stringify(badIdentity));
+          const nonNode20 = identities.filter(pkg => !pkg.engines?.node || !pkg.engines.node.includes('20'));
+          if (nonNode20.length) throw new Error('Identity candidate engine metadata is not Node 20 compatible: '+JSON.stringify(nonNode20));
+          const badMsal = msalNodes.filter(pkg => !pkg.version || Number(pkg.version.split('.')[0]) >= 5);
+          if (msalNodes.length === 0 || badMsal.length) throw new Error('Expected MSAL Node 3.x candidate instances: '+JSON.stringify({msalNodes,badMsal}));
           if (!vsce?.dependencies?.['@azure/identity']?.includes('^4.1.0')) throw new Error('Unexpected vsce identity dependency range');
-          console.log(JSON.stringify({identity:identity.version,identityEngines:identity.engines,msal:msal.version,msalEngines:msal.engines,vsce:vsce.version},null,2));
+          console.log(JSON.stringify({identities,msalNodes,vsce:vsce.version},null,2));
           NODE
       - name: Clean install and validate Node 20 candidate
         run: |
@@ -102,12 +112,18 @@ jobs:
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           npm ci --ignore-scripts --no-audit --no-fund
           node - <<'NODE'
-          const lock = require('./package-lock.json');
-          const identity = lock.packages['node_modules/@azure/identity'];
-          const msal = lock.packages['node_modules/@azure/msal-node'];
-          if (identity?.version !== '4.13.0') throw new Error('Azure Identity override not retained');
-          if (!msal || Number(msal.version.split('.')[0]) >= 5) throw new Error('Affected MSAL 5+/7 range remains: '+msal?.version);
-          console.log('Verified Azure identity/MSAL candidate:',identity.version,msal.version);
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const packages = lock.packages ?? {};
+          const identities = Object.entries(packages)
+            .filter(([path]) => path === 'node_modules/@azure/identity' || path.endsWith('/node_modules/@azure/identity'))
+            .map(([path,pkg]) => ({path,version:pkg.version,engines:pkg.engines}));
+          const msalNodes = Object.entries(packages)
+            .filter(([path]) => path === 'node_modules/@azure/msal-node' || path.endsWith('/node_modules/@azure/msal-node'))
+            .map(([path,pkg]) => ({path,version:pkg.version}));
+          if (identities.length === 0 || identities.some(pkg => pkg.version !== '4.13.0' || !pkg.engines?.node?.includes('20'))) throw new Error('Azure Identity candidate was not retained at every installed path: '+JSON.stringify(identities));
+          if (msalNodes.length === 0 || msalNodes.some(pkg => !pkg.version || Number(pkg.version.split('.')[0]) >= 5)) throw new Error('Affected MSAL 5+/7 range remains: '+JSON.stringify(msalNodes));
+          console.log('Verified Azure identity/MSAL candidate:',JSON.stringify({identities,msalNodes},null,2));
           NODE
       - name: Generate npm audit report
         shell: bash
