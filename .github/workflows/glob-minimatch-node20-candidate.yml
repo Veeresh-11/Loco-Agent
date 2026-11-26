@@ -51,7 +51,7 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
-          const rows = Object.entries(lock.packages ?? {}).filter(([path]) => /(^|\\/)node_modules\\/(glob|minimatch)$/.test(path)).map(([path,p]) => ({path,version:p.version}));
+          const rows = Object.entries(lock.packages ?? {}).filter(([path]) => path.endsWith('/node_modules/glob') || path === 'node_modules/glob' || path.endsWith('/node_modules/minimatch') || path === 'node_modules/minimatch').map(([path,p]) => ({path,version:p.version}));
           const badGlob = rows.filter(x => x.path.endsWith('/glob') && Number(x.version.split('.')[0]) >= 9 && !(Number(x.version.split('.')[0]) > 14 || (Number(x.version.split('.')[0]) === 14 && Number(x.version.split('.')[1]) >= 0 && Number(x.version.split('.')[2]) >= 2)));
           const badMinimatch = rows.filter(x => { const [major,minor,patch] = x.version.split('.').map(Number); return x.path.endsWith('/minimatch') && major >= 7 && (major < 11 || (major === 11 && minor === 0 && patch < 8)); });
           if (badGlob.length || badMinimatch.length) throw new Error('Vulnerable glob/minimatch lock entries remain: '+JSON.stringify({badGlob,badMinimatch}));
@@ -113,9 +113,9 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
-          const rows = Object.entries(lock.packages ?? {}).filter(([entry]) => /(^|\\/)node_modules\\/(glob|minimatch)$/.test(entry)).map(([entry,p]) => ({entry,version:p.version}));
+          const rows = Object.entries(lock.packages ?? {}).filter(([entry]) => entry.endsWith('/node_modules/glob') || entry === 'node_modules/glob' || entry.endsWith('/node_modules/minimatch') || entry === 'node_modules/minimatch').map(([entry,p]) => ({entry,version:p.version}));
           const badGlob = rows.filter(x => x.entry.endsWith('/glob') && Number(x.version.split('.')[0]) >= 9 && !(Number(x.version.split('.')[0]) > 14 || (Number(x.version.split('.')[0]) === 14 && (Number(x.version.split('.')[1]) > 0 || (Number(x.version.split('.')[1]) === 0 && Number(x.version.split('.')[2]) >= 2)))));
-          const badMinimatch = rows.filter(x => x.entry.endsWith('/minimatch') && Number(x.version.split('.')[0]) >= 7 && (Number(x.version.split('.')[0]) < 11 || (Number(x.version.split('.')[0]) === 11 && Number(x.version.split('.')[1]) === 0 && Number(x.version.split('.')[2]) < 8)));
+          const badMinimatch = rows.filter(x => { const [major,minor,patch] = x.version.split('.').map(Number); return x.path.endsWith('/minimatch') && major >= 7 && (major < 11 || (major === 11 && minor === 0 && patch < 8)); });
           if (badGlob.length || badMinimatch.length) throw new Error('Override-free lockfile contains affected packages: '+JSON.stringify({badGlob,badMinimatch}));
           console.log('Override-free reconciled glob/minimatch entries:',JSON.stringify(rows,null,2));
           NODE
@@ -133,7 +133,7 @@ jobs:
           const counts = report.metadata?.vulnerabilities ?? {};
           const rows = Object.entries(report.vulnerabilities ?? {}).map(([name,v])=>({name,severity:v.severity,range:v.range,nodes:v.nodes}));
           const lines = ['## Glob/minimatch candidate audit','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s]??0} |`), '', `Audit exit code: ${status}`, `Package records: ${rows.length}`, '', '| Package | Severity | Affected range | Lockfile nodes |','|---|---|---|---|', ...rows.map(r=>`| ${r.name} | ${r.severity} | ${r.range??''} | ${(r.nodes??[]).join(', ')} |`)];
-          fs.appendFileSync(summary,lines.join('\\n')+'\\n');
+          fs.appendFileSync(summary,lines.join('\n')+'\n');
           console.log(JSON.stringify({counts,packageRecords:rows.length,auditExitCode:Number(status)},null,2));
           NODE
       - name: Upload candidate lockfile and audit report
