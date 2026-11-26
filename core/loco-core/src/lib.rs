@@ -355,3 +355,5 @@ pub mod windows_root_handle;
 
 #[cfg(target_os = "macos")]
 pub mod macos_snapshot_adapter;
+
+pub mod workspace_factory;

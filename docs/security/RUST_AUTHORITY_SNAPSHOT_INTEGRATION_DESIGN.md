@@ -115,3 +115,62 @@ Consequently, the approval prototype is not yet in the production request path. 
 7. Obtain independent security review before considering any executor.
 
 **Acceptance criterion for this milestone:** the sidecar can register a selected workspace root, retain it in Rust, capture a file through the platform adapter, and bind an approval challenge to that capture — while still performing no file read on behalf of a proposal, no writes, and no command execution.
+
+## 7. Implementation checkpoint — native adapter factory
+
+The process-local registry and platform adapter factory are now implemented as separate Rust APIs:
+
+- `workspace_factory::create_workspace_adapter(selected_root, workspace_id)` dispatches to the native adapter for the current platform.
+- `WorkspaceRegistry::register_selected_workspace(selected_root, workspace_id)` constructs the adapter first, then transfers ownership to the bounded registry and returns an opaque process-local handle.
+- Linux and macOS use their existing native root acquisition constructors. macOS remains restricted to APFS.
+- Windows resolves a selected drive path through Win32 volume APIs to a volume-GUID root and a relative workspace path, then opens components through retained handles. UNC/network paths and unsupported path forms fail closed.
+- The factory and registry do not add stdio messages. The authority process still accepts only handshake, proposal evaluation, and shutdown.
+- The factory's selected-root argument must be supplied by an explicit host workspace-selection flow. This API does not itself authenticate the host process or prove that a user selected the path.
+
+The factory milestone remains unvalidated until its new cross-platform CI matrix passes. It does not close the independent security-review or platform-authenticator gates, and it does not authorize file writes, patch application, or command execution.
+
+
+## 8. First-pass review — PR #131 (2026-11-26)
+
+Reviewed exact head `dc4bb925f8a0c86c3fb30c502144debc333bfc90`, including the platform factory, registry integration, and this design checkpoint.
+
+### Exact-head validation
+
+- Rust Core Tests run [#45437420180](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45437420180): all nine configured jobs passed (Ubuntu 22.04/24.04/26.04, Windows Server 2022/2025, macOS 15 arm64/Intel, macOS 26 arm64/Intel).
+- Contract Validation [#45437420337](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45437420337): passed.
+- GitHub review submissions and inline threads were empty when checked. This is a first-pass review, not independent approval.
+
+### Finding requiring remediation
+
+The Windows path bridge in `workspace_factory.rs::windows_selection_to_volume_root` passes a caller-provided UTF-16 path to `GetVolumePathNameW` without rejecting embedded NUL code units or explicitly bounding input length. It then performs prefix and relative-component checks on `to_string_lossy()`, while the Win32 API resolved the original UTF-16 sequence. Lossy conversion can alter non-Unicode Windows path components; therefore the relative components later opened beneath the volume-GUID root are not proven to correspond exactly to the path resolved by Win32. Embedded NUL can also cause the API to observe a truncated path. PR review comment [#7194545156](https://github.com/Veeresh-11/Loco-Agent/pull/131#issuecomment-7194545156) records the finding.
+
+Required remediation:
+1. Reject embedded NUL and overlong selected-root input before any Win32 API call.
+2. Perform mount-prefix and component extraction on the exact UTF-16 data returned by Win32, or explicitly reject non-Unicode selections before the API call; do not use lossy conversion for a security decision.
+3. Add Windows regression tests for embedded NUL, non-Unicode UTF-16, extended-length paths, mount-prefix boundaries, and root-of-volume selections.
+4. Keep UNC/network and unsupported forms fail-closed; document whether selecting a volume root itself is intentionally unsupported.
+
+### Other acceptance limits
+
+- The factory API does not authenticate the host UI or prove that a path came from an actual user-selection event; this must remain an integration contract, not an implied trust guarantee.
+- The Windows native adapter has an x86_64-only compile-time guard. The support matrix must not imply ARM64 Windows support.
+- macOS firmlink semantics and the Windows `OBJ_DONT_REPARSE` user-mode support contract remain independent Order 2 blockers.
+- The Unix factory tests use `tempdir_in(current_dir())`; CI runners must provide a writable working directory, or the fixture should use a dedicated writable temp parent.
+
+**Disposition:** PR #131 is exact-head CI-green but remains open/draft and not accepted. Fix the Windows conversion finding, rerun full exact-head CI, reconcile the platform-support matrix, and obtain independent security review before merge or protocol integration. No writes, patch execution, command execution, or production authority activation are authorized.
+
+
+## 9. Windows path remediation and exact-head validation — 2026-11-26
+
+The Windows selected-root conversion finding recorded in the PR #131 first-pass review has been addressed in `workspace_factory.rs` at commit `9dbb8179695fe2b2913d93e16af35382ce8452dd`:
+
+- The selected path is converted strictly with `Path::to_str()`; ill-formed UTF-16 is rejected rather than lossily replaced.
+- Embedded NUL and paths exceeding 32,767 UTF-16 code units are rejected before Win32 FFI.
+- Win32 mount and volume outputs are decoded with strict UTF-16 conversion. Security-sensitive path checks no longer use `to_string_lossy()`.
+- Windows-only regression tests cover embedded NUL, overlong input, and unpaired surrogate rejection; normalization tests cover drive paths, extended prefixes, UNC rejection, and traversal.
+
+Exact-head CI is terminal and green:
+- Rust Core Tests [#45837716656](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45837716656): all nine configured jobs passed (Ubuntu 22.04/24.04/26.04; Windows Server 2022/2025; macOS 15 arm64/Intel; macOS 26 arm64/Intel).
+- Contract Validation [#45837716481](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45837716481): passed.
+
+**Disposition:** the original conversion finding is remediated at source level and exact-head CI is green. PR #131 is still open/draft and is not accepted. No independent review submission or inline review thread exists at this checkpoint. An independent security review has been requested in [PR comment](https://github.com/Veeresh-11/Loco-Agent/pull/131#issuecomment-7194690989). The reviewer should specifically assess the Windows path/volume correspondence, extended-length and mount boundaries, UNC fail-closed behavior, root-volume rejection, and x86_64-only support. macOS firmlink and Windows `OBJ_DONT_REPARSE` contract blockers remain separate. No writes, patch execution, command execution, or production authority activation are authorized.

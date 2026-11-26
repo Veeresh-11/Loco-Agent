@@ -6,6 +6,7 @@
 //! from this module and no operation other than bounded snapshot capture exists.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::snapshot_payload::{
     CapturedWorkspaceSnapshot, SnapshotCaptureRequest, SnapshotPayloadError,
@@ -58,9 +59,31 @@ pub struct WorkspaceRegistry {
     adapters: HashMap<WorkspaceHandle, Box<dyn WorkspaceSnapshotAdapter>>,
 }
 
+#[derive(Debug)]
+pub enum WorkspaceRegistrationError {
+    Factory(crate::workspace_factory::WorkspaceFactoryError),
+    Registry(WorkspaceRegistryError),
+}
+
 impl WorkspaceRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Construct and register an adapter from an explicitly selected workspace
+    /// root. The root is untrusted input and is never inferred from a proposal.
+    pub fn register_selected_workspace(
+        &mut self,
+        selected_root: &Path,
+        workspace_id: impl Into<String>,
+    ) -> Result<WorkspaceHandle, WorkspaceRegistrationError> {
+        let adapter = crate::workspace_factory::create_workspace_adapter(
+            selected_root,
+            workspace_id,
+        )
+        .map_err(WorkspaceRegistrationError::Factory)?;
+        self.register(adapter)
+            .map_err(WorkspaceRegistrationError::Registry)
     }
 
     /// Register an already-constructed native adapter and retain ownership.
@@ -215,5 +238,23 @@ mod tests {
         let first = registry.register(adapter()).unwrap();
         let second = registry.register(adapter()).unwrap();
         assert_ne!(first, second);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn selected_workspace_is_constructed_then_owned_by_registry() {
+        let parent = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let selected = parent.path().join("selected");
+        std::fs::create_dir(&selected).unwrap();
+        std::fs::write(selected.join("probe.txt"), b"registered-selection").unwrap();
+
+        let mut registry = WorkspaceRegistry::new();
+        let handle = registry
+            .register_selected_workspace(&selected, "registered-selection")
+            .unwrap();
+        let request = SnapshotCaptureRequest::new("probe.txt", 1024).unwrap();
+        let captured = registry.capture(&handle, &request).unwrap();
+        assert_eq!(captured.bytes(), b"registered-selection");
+        assert_eq!(registry.registered_count(), 1);
     }
 }
