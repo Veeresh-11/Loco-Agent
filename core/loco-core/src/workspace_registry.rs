@@ -122,6 +122,29 @@ impl WorkspaceRegistry {
         adapter.capture(request).map_err(WorkspaceRegistryError::Capture)
     }
 
+    /// Capture using the opaque wire handle without allowing callers to
+    /// construct a WorkspaceHandle. The lookup is process-local and exact.
+    pub fn capture_by_wire_handle(
+        &self,
+        wire_handle: &str,
+        request: &SnapshotCaptureRequest,
+    ) -> Result<CapturedWorkspaceSnapshot, WorkspaceRegistryError> {
+        let (handle, adapter) = self.adapters.iter()
+            .find(|(handle, _)| handle.as_str() == wire_handle)
+            .ok_or(WorkspaceRegistryError::UnknownOrRevokedHandle)?;
+        let _ = handle;
+        adapter.capture(request).map_err(WorkspaceRegistryError::Capture)
+    }
+
+    /// Revoke using an opaque wire handle. Unknown and already-revoked values
+    /// are intentionally indistinguishable to protocol callers.
+    pub fn revoke_by_wire_handle(&mut self, wire_handle: &str) -> bool {
+        let handle = self.adapters.keys()
+            .find(|handle| handle.as_str() == wire_handle)
+            .cloned();
+        handle.is_some_and(|handle| self.adapters.remove(&handle).is_some())
+    }
+
     /// Revoke a handle and drop its retained adapter/root handle.
     pub fn revoke(&mut self, handle: &WorkspaceHandle) -> bool {
         self.adapters.remove(handle).is_some()

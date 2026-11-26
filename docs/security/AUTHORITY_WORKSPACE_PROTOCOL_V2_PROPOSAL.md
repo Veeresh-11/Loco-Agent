@@ -22,6 +22,13 @@ The new contract is protocol **2.0**. The protocol version is exact on every req
 
 All messages are newline-delimited UTF-8 JSON objects. Stdout contains protocol frames only; diagnostics go to stderr. Existing frame, request-ID, per-process request-count, and one-outstanding-request limits remain in force. Every request ID is unique for the process lifetime.
 
+## Implementation checkpoints
+
+- PR #133 adds strict protocol v2 DTOs and lexical validation only; it does not change the production sidecar, which remains protocol 1.0.
+- PR #135 adds a separately testable per-process session state machine: one initial hello, process-lifetime unique request IDs, a 4,096-request budget, handshake-required operation gating, and terminal shutdown.
+- PR #135 wires a separate strict v2 stdio path alongside the existing v1 path. It implements Rust-generated workspace identity, native adapter registration, bounded capture with bytes/metadata discarded before response, opaque-handle revocation, and registry drop on shutdown/EOF. V2 advertises only implemented read-only capabilities.
+- TypeScript client migration, cross-platform end-to-end validation, expanded adversarial lifecycle tests, and independent security review remain gates. The v1 client path remains available during migration.
+
 ## 3. Common envelope
 
 Every request contains:

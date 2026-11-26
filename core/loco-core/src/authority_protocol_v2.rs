@@ -1,8 +1,8 @@
 //! Strict DTOs and lexical validation for the proposed authority stdio protocol v2.0.
 //!
-//! This module intentionally does not implement transport handlers or filesystem
-//! operations. The sidecar remains on protocol 1.0 until the v2 state machine,
-//! lifecycle, and native registration integration are implemented together.
+//! These DTOs define the strict wire contract. The v2 stdio handlers live in
+//! the binary module and delegate filesystem acquisition only to the native
+//! workspace factory and process-local registry.
 
 use serde::{Deserialize, Serialize};
 
