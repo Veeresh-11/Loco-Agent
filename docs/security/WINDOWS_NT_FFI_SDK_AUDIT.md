@@ -125,6 +125,26 @@ The flagged denial value `0xC000050B` equals `STATUS_REPARSE_POINT_ENCOUNTERED`.
 
 This is direct runtime evidence for the exact user-mode, handle-relative `NtCreateFile` call shape on Windows Server 2022 build 20348 and Windows Server 2025 build 26100, both x64/NTFS. It materially narrows the earlier uncertainty about whether the flag is honored by this call shape on these builds. It still does not create a universal or version-stable Microsoft API contract, nor does it cover other Windows releases, architectures, filesystems, or filter drivers. Retain the documentation caveat and fail-closed production behavior pending broader authoritative clarification and independent security review.
 
+
+## Documentation-contract follow-up (2026-11-26)
+
+A further review of Microsoft's current documentation and two October 2026 Microsoft Q&A moderator responses narrows the question but does **not** close the support-contract gate.
+
+### What the sources establish
+
+- The general Microsoft `OBJECT_ATTRIBUTES` reference explicitly defines `OBJ_DONT_REPARSE`: name parsing must not follow reparse points, and encountering one returns `STATUS_REPARSE_POINT_ENCOUNTERED`. It also permits a filesystem directory handle as `RootDirectory` and a relative `ObjectName`: [Microsoft OBJECT_ATTRIBUTES](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes). [Source](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes)
+- Microsoft's user-mode `NtCreateFile` reference documents a relative name through `RootDirectory`, but its function-specific `Attributes` description still says zero or `OBJ_CASE_INSENSITIVE`; it does not expressly list `OBJ_DONT_REPARSE`: [Microsoft NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile). [Source](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)
+- A Microsoft External Staff moderator's October 19, 2026 answer reports that Windows SDK 10.0.26100.0 `winternl.h` lists `OBJ_DONT_REPARSE` under valid `OBJECT_ATTRIBUTES.Attributes` values and includes it in `OBJ_VALID_ATTRIBUTES`. The answer also notes that the user-mode `NtCreateFile` page remains narrower and does not expressly reconcile this exact call shape: [Microsoft Q&A answer](https://learn.microsoft.com/en-us/answers/a/13008163).
+- A separate Microsoft External Staff moderator's November 2–6, 2026 answer advises not to treat user-mode `NtCreateFile` + filesystem `RootDirectory` + `OBJ_DONT_REPARSE` as a fully documented, version-stable security contract, because the function-specific page does not expressly list the flag: [Microsoft Q&A thread](https://learn.microsoft.com/en-us/answers/questions/6056645/does-user-mode-ntcreatefile-support-obj-dont-repar).
+
+### Security interpretation and disposition
+
+The SDK-header evidence strengthens the case that the flag is a valid object-attributes bit in the reviewed SDK. The general structure documentation defines its intended no-reparse behavior. The two Microsoft Q&A responses are moderator guidance, not a replacement specification; the more cautious response explicitly distinguishes implementation observations from a version-stable guarantee. The function-specific page has not been reconciled in the evidence reviewed here.
+
+Together with the repository's raw runtime probes on Windows Server 2022 build 20348 and Server 2025 build 26100 (both x64/NTFS), this supports a bounded empirical statement: the tested user-mode, handle-relative call rejected final and intermediate NTFS junctions with `STATUS_REPARSE_POINT_ENCOUNTERED` on those two builds. It does **not** establish the same behavior for other Windows releases, architectures, filesystems, redirectors, filter drivers, or third-party reparse tags.
+
+**Decision unchanged:** retain `OBJ_DONT_REPARSE`, retain the post-open reparse-attribute and file-identity checks, and fail closed on every unexpected status. Do not remove the flag, weaken the post-open checks, or claim universal Windows support to work around the documentation gap. The remaining gate is authoritative clarification for the exact user-mode combination (or a separately documented supported construction), a deliberately bounded support matrix, and independent native security review. No production authorization or write behavior is enabled by this documentation update.
+
 ## Sources
 
 - Microsoft [`UNICODE_STRING`](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_unicode_string) — field types and byte-count semantics.
