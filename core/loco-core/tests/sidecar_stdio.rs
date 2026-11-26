@@ -189,8 +189,9 @@ fn protocol_v2_register_capture_revoke_and_shutdown_are_correlated() {
     })).unwrap();
     stdout.read_line(&mut line).unwrap();
     let denied: Value = serde_json::from_str(&line).unwrap();
-    assert_eq!(denied["messageType"], "error");
-    assert_eq!(denied["error"]["code"], "CAPTURE_DENIED");
+    let mut expected_denial: Value = serde_json::from_str(include_str!("../../../tests/fixtures/protocol-v2/capture-denied-error.json")).unwrap();
+    expected_denial["requestId"] = json!("v2-capture-after-revoke");
+    assert_eq!(denied, expected_denial);
     line.clear();
 
     writeln!(stdin, "{}", json!({
