@@ -1,0 +1,109 @@
+name: npm Semver-Safe Audit Remediation Candidate
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/npm-semver-safe-audit-remediation.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: npm-semver-safe-audit-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  remediate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Generate semver-compatible remediation candidate
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund 2>&1 | tee "$RUNNER_TEMP/npm-audit-fix.log"
+          audit_fix_status=${PIPESTATUS[0]}
+          set -e
+          echo "npm audit fix exit code: ${audit_fix_status}" | tee -a "$GITHUB_STEP_SUMMARY"
+          # npm audit fix exits nonzero when remaining advisories are present; preserve
+          # the candidate for explicit validation and machine-readable reporting.
+          if [ "$audit_fix_status" -gt 1 ]; then
+            echo "npm audit fix failed unexpectedly" >&2
+            exit "$audit_fix_status"
+          fi
+      - name: Update Azure Identity within the parent semver range
+        shell: bash
+        run: |
+          # @vscode/vsce declares @azure/identity ^4.1.0; constrain this transitive
+          # package to 4.14.1 for the candidate only (do not change package.json).
+          cp package.json "$RUNNER_TEMP/package.json.original"
+          npm pkg set 'overrides.@azure/identity=4.14.1'
+          npm install --package-lock-only --ignore-scripts --no-fund
+          cp "$RUNNER_TEMP/package.json.original" package.json
+          node <<'NODE'
+          const lock = require('./package-lock.json');
+          const identity = lock.packages['node_modules/@azure/identity'];
+          const msal = lock.packages['node_modules/@azure/msal-node'];
+          if (!identity || identity.version !== '4.14.1') throw new Error(`Expected @azure/identity 4.14.1, got ${identity?.version}`);
+          if (!msal || msal.version.split('.')[0] !== '7' || !identity.dependencies?.['@azure/msal-node']?.startsWith('^7.1.0')) throw new Error(`Expected Azure Identity's patched MSAL Node 7.x dependency, got ${msal?.version}`);
+          console.log({identity: identity.version, identityMsalRange: identity.dependencies['@azure/msal-node'], msal: msal.version});
+          NODE
+      - name: Validate candidate lockfile
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Assert critical handlebars fix remains
+        run: node -e "const lock = require('./package-lock.json'); const v = lock.packages['node_modules/handlebars']?.version; if (v !== '4.7.10') { console.error('Expected handlebars 4.7.10, got', v); process.exit(1); } console.log('handlebars', v);"
+      - name: Compile, test, lint and package on Node 20
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Reinstall and validate candidate on Node 22
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile, test, lint and package on Node 22
+        run: |
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Generate candidate audit report
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          audit_status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" "$GITHUB_STEP_SUMMARY" "$audit_status" <<'NODE'
+          const fs = require('node:fs');
+          const [reportPath, summaryPath, exitCode] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+          const counts = report.metadata?.vulnerabilities ?? {};
+          const rows = Object.entries(report.vulnerabilities ?? {}).map(([name, v]) => ({name, severity:v.severity, direct:Boolean(v.isDirect), range:v.range, fixAvailable:v.fixAvailable}));
+          const rank = {critical:0,high:1,moderate:2,low:3,info:4};
+          const summary = ['## Semver-safe npm remediation candidate','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s] ?? 0} |`),'',`Audit command exit code: ${exitCode}`,`Vulnerable package records: ${rows.length}`,'','| Package | Severity | Direct | Affected range | Fix metadata |','|---|---|---:|---|---|',...rows.sort((a,b)=>rank[a.severity]-rank[b.severity]||a.name.localeCompare(b.name)).map(r=>`| ${r.name} | ${r.severity} | ${r.direct?'yes':'no'} | ${r.range ?? ''} | ${JSON.stringify(r.fixAvailable)} |`),'','`npm audit fix --package-lock-only` was used without --force; major-version changes were not requested.'];
+          fs.appendFileSync(summaryPath, summary.join('\n')+'\n');
+          console.log(JSON.stringify({counts,packageRecords:rows.length,npmAuditExitCode:Number(exitCode)},null,2));
+          NODE
+      - name: Upload candidate lockfile and audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-semver-safe-audit-candidate
+          path: |
+            package-lock.json
+            ${{ runner.temp }}/npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
