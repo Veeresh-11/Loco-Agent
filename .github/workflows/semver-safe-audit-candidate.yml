@@ -30,8 +30,13 @@ jobs:
         shell: bash
         run: |
           cp package.json "$RUNNER_TEMP/package.json.before"
+          set +e
           npm audit fix --package-lock-only --ignore-scripts --no-fund
+          audit_fix_status=$?
+          set -e
           cmp package.json "$RUNNER_TEMP/package.json.before"
+          printf '%s\\n' "$audit_fix_status" > "$RUNNER_TEMP/npm-audit-fix-exit-code"
+          echo "npm audit fix exit code: $audit_fix_status (remaining advisories are assessed from the final audit report)"
       - name: Validate candidate lockfile and clean install on Node 20
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Compile, test, lint and package on Node 20
