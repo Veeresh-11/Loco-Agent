@@ -1120,3 +1120,10 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Rust Core Tests run #45837716656 advanced to **7/9 successful jobs**. Windows Server 2022 and macOS 26 arm64 have now passed in addition to the five jobs listed in the prior poll.
 - Only macOS 15 Intel and Windows Server 2025 remain in progress. No failures reported.
 - Contract Validation #45837716481 remains passed. The run is still not terminal; PR #131 remains draft and acceptance is withheld pending the final two jobs and independent security review.
+
+
+### CI poll follow-up 4 — PR #131 exact head
+
+- Rust Core Tests run #45837716656 is now at **8/9 successful jobs**. Windows Server 2025 has passed; macOS 15 Intel is the sole remaining job and was still in progress at the latest poll.
+- The workflow run itself remains in progress. Contract Validation #45837716481 is successful. No failed jobs have been reported.
+- PR #131 remains open/draft/unmerged. Do not proceed to #133 or mark this factory accepted until the final Intel macOS job reaches a successful terminal result and the independent security review gate is addressed.
