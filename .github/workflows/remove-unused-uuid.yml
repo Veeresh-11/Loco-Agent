@@ -36,12 +36,14 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Assert uuid is no longer a root dependency
         run: node -e "const p=require('./package.json');const l=require('./package-lock.json');if(p.dependencies?.uuid||l.packages['']?.dependencies?.uuid){throw new Error('uuid remains a root dependency')}console.log('uuid is not a root dependency')"
-      - name: Compile, test, lint and package
+      - name: Compile, test and lint
         run: |
           npm run compile
           npm test -- --runInBand
           npm run lint
-          npm run package
+      - name: Package VSIX with Node 22 toolchain
+        if: matrix.node == 22
+        run: npm run package
       - name: Generate audit report
         if: matrix.node == 20
         shell: bash
