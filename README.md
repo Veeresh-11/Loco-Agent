@@ -218,8 +218,6 @@ npm run package
 
 To build and package the extension locally:
 
-To build and package the extension locally:
-
 ```powershell
 npm install
 npm run compile
