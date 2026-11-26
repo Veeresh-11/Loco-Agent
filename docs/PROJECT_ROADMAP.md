@@ -1,6 +1,6 @@
 # LOCO Agent — consolidated project roadmap
 
-**Status date:** 2026-11-24  
+**Status date:** 2026-11-25  
 **Source of truth:** The user-prioritized sequence confirmed in the project conversation, reconciled against the repository's open issues, PR descriptions, exact-head CI evidence, and the implementation limitations recorded in the security documentation.
 
 This roadmap preserves the requested order. Work on a later priority may exist as a design, contract, or isolated prototype, but that does not make the priority complete. A task is complete only when its acceptance criteria, integration, tests, security review, and release gates are satisfied.
@@ -11,12 +11,12 @@ This roadmap preserves the requested order. Work on a later priority may exist a
 |---:|---|---|---|
 | 1 | Find and validate reliable macOS firmlink detection | **Partially complete — bulk preflight and descriptor-identity guard tested on macOS 15/26 arm64 + Intel; Apple flag discrepancy and independent review remain** | Authoritative supported firmlink-entry semantics; deterministic native denial on every claimed configuration; exact OS/API evidence; independent security review |
 | 2 | Complete native filesystem API review | **Partially complete — Linux tmpfs and bind-mounted roots, descendant mount rejection, Windows SDK ABI and OBJ_DONT_REPARSE runtime behavior, and macOS 15/26 firmlink matrix tested on named hosted builds; API-contract caveats and independent review remain** | Finish Linux/macOS/Windows API and filesystem/version matrix, race semantics, unsupported cases, and documented fail-closed decisions |
-| 3 | Integrate approval with snapshot identity and freshness | **Partially complete — snapshot-bound approval prototype implemented in draft PR #125; platform authenticator, same-user threat model, independent review, and end-to-end authorization gates remain** | Approval binds exact action + snapshot digest/identity/freshness; replay-safe authenticated approval; Rust independently verifies before use |
+| 3 | Integrate approval with snapshot identity and freshness | **Partially complete — snapshot-bound approval prototype carried on the native stack in draft PR #128; platform authenticator, same-user threat model, independent review, and end-to-end authorization gates remain** | Approval binds exact action + snapshot digest/identity/freshness; replay-safe authenticated approval; Rust independently verifies before use |
 | 4 | Implement controlled Rust workspace writes | **Pending** | Handle-relative, race-resistant write/replace operations with bounded patch validation, authorization, authenticated approval, audit, rollback/recovery and adversarial tests |
 | 5 | Complete Rust authorization and command execution controls | **Pending** | Rust is the enforcing authority for live operations; explicit command policy, executable identity/argument/environment/cwd bounds, cancellation/timeouts/output limits and no TS bypass |
 | 6 | Extract Python AI service | **Pending** | Defined service boundary/protocol, isolated Python service, bounded IPC/lifecycle, tests and packaging; no implicit trust of model output |
-| 7 | Build TypeScript-to-Python/Rust bridges | **Partially complete — Rust transport plus macOS runtime capability handshake** | Production-quality TS↔Rust and TS↔Python clients, versioned contracts, lifecycle/error/cancellation tests, packaged binaries/services |
-| 8 | End-to-end security and integration tests | **Partially complete — component tests exist** | Full VS Code-to-TS-to-Rust/Python workflows, adversarial cross-platform tests, approval/write/command integration, regression and security review |
+| 7 | Build TypeScript-to-Python/Rust bridges | **Partially complete — protocol v2 Rust sidecar handlers and TypeScript client implemented in open draft PRs #135/#136; exact-head CI passed** | Production-path integration, versioned conformance fixtures, lifecycle/error/cancellation tests in the live agent flow, packaged binaries/services |
+| 8 | End-to-end security and integration tests | **Partially complete — component and adversarial stdio lifecycle tests in draft PR #137; exact-head Rust matrix and contract validation passed** | Full VS Code-to-TS-to-Rust/Python workflows, approval/write/command integration, regression and independent security review |
 | 9 | Packaging and release | **Pending** | Reproducible per-platform builds, signed/verified artifacts, install/upgrade/uninstall tests, SBOM/provenance, release notes and marketplace/release gates |
 
 ## Priority 1 — macOS firmlink detection
@@ -128,6 +128,20 @@ Relevant work: PRs #9–#14 and #91–#99.
 - #9 establishes the polyglot architecture proposal; #10–#14 establish the action protocol, Rust policy-core scaffold, path/read prototypes and cross-platform CI.
 - #91 documents local storage and IPC security boundaries; #92 defines the sidecar stdio protocol; #93 implements a bounded Rust sidecar that evaluates proposals; #94 adds a TypeScript parent client.
 - The sidecar currently evaluates proposals only. Its `allow` decision is not an execution capability and it does not yet authorize production filesystem writes or execute commands.
+- **Authority registration/capture sequence (user-prioritized staged plan, 2026-11-25):**
+
+| Stage | Current status | Evidence / remaining gate |
+|---|---|---|
+| Snapshot-bound approval prototype | **PR #128 — draft** | Prototype ported to the native stack; not production approval and not merged |
+| Authority trust-boundary design | **PR #129 — draft** | Design documents Rust-owned acquisition and approval boundaries; not production integration |
+| Process-local workspace registry | **PR #130 — CI green; draft** | Registry owns native adapters behind unpredictable process-local handles; still unmerged |
+| Native adapter factory and registration | **PR #131 — draft; previously validated** | Factory and registry entry point implemented; retain exact-platform scope and independent review as gates |
+| Versioned authority registration/capture protocol | **PR #132 design, PR #133 DTOs, PR #135 Rust handlers, PR #136 TypeScript client — all current exact-head CI green** | PR #137 adds direct adversarial stdio lifecycle tests; its latest nine-platform Rust matrix and contract validation passed. All remain open draft; production workflow integration and independent review remain |
+| Approval issue/consume integration | **Pending** | Wire only after v2 registration/capture is implemented and verified; recapture fresh snapshot inside Rust immediately before issue/consume |
+| Adversarial lifecycle and replay tests | **Partially complete — PR #137 draft** | Direct handler tests cover duplicate IDs, strict DTOs, cross-version rejection, repeated hello, EOF cleanup, oversized frames, retained-handle release and path-free registration errors; approval replay/expiry/stale-snapshot tests remain pending |
+| Independent security review | **Pending / required gate** | Independent review before any privileged executor capability is considered |
+
+The staged sequence has reached the v2 Rust handler and TypeScript client prototypes, with direct adversarial stdio lifecycle coverage. Next, complete cross-layer contract and lifecycle review, integrate fresh snapshot-bound approval only after the native capture trust boundary is independently reviewed, and keep writes/patches/commands disabled. Keep file writes, patch application, and command execution disabled throughout this sequence. A registry, capture acknowledgement, or policy `allow` is not human authentication or execution authority.
 - #95–#99 inventory TypeScript privileged operations, define the bounded workspace-read request contract, design Rust-owned read acquisition, complete the TS operation inventory, and add a TypeScript direct-API regression gate.
 
 Remaining: make Rust the actual enforcement point for the live operation path, integrate approval and snapshot checks, define command allow/deny policy and executable identity, argument/environment/cwd/output/time bounds, process-tree cancellation and audit, and remove or explicitly constrain TypeScript bypasses. No command execution should be enabled by a policy-only response.
