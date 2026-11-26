@@ -75,6 +75,8 @@ mod tests {
             "src/\0name",
             "src/tab\tname",
             "src/new\nline",
+            "src/\u{0085}name",
+            "src/\u{009F}name",
         ] {
             assert!(!is_safe_portable_relative_path(path), "should reject: {path:?}");
         }
@@ -82,7 +84,7 @@ mod tests {
 
     #[test]
     fn accepts_portable_relative_paths_and_dotfiles() {
-        for path in ["src/main.rs", ".env", "src/.config", "docs/readme.md"] {
+        for path in ["src/main.rs", ".env", "src/.config", "docs/readme.md", "src/ſon.txt"] {
             assert!(is_safe_portable_relative_path(path), "should accept: {path:?}");
         }
     }

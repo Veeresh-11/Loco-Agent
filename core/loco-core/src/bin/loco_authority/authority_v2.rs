@@ -261,3 +261,148 @@ pub fn run<R: BufRead, W: Write>(
         }
     }
 }
+
+
+#[cfg(test)]
+mod adversarial_handler_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn hello() -> Vec<u8> {
+        br#"{"protocolVersion":"2.0","messageType":"hello","requestId":"hello-1","client":{"name":"loco-vscode-extension","version":"0.1.0"}}"#.to_vec()
+    }
+
+    fn run_with(first: Vec<u8>, subsequent: Vec<u8>) -> (Result<(), String>, Vec<u8>) {
+        let mut reader = io::BufReader::new(Cursor::new(subsequent));
+        let mut writer = Vec::new();
+        let result = run(first, &mut reader, &mut writer);
+        (result, writer)
+    }
+
+    #[test]
+    fn duplicate_request_id_is_rejected_by_the_stdio_handler() {
+        let handle = "a".repeat(64);
+        let request = format!(
+            r#"{{"protocolVersion":"2.0","messageType":"revokeWorkspace","requestId":"hello-1","workspaceHandle":"{handle}"}}"#
+        );
+        let (result, output) = run_with(hello(), format!("{request}\n").into_bytes());
+        assert!(result.unwrap_err().contains("DUPLICATE_REQUEST_ID"));
+        let response = String::from_utf8(output).unwrap();
+        assert_eq!(response.lines().count(), 1, "duplicate request must not produce a success response");
+    }
+
+    #[test]
+    fn strict_dto_rejects_unknown_fields_before_registry_access() {
+        let handle = "b".repeat(64);
+        let request = format!(
+            r#"{{"protocolVersion":"2.0","messageType":"revokeWorkspace","requestId":"revoke-1","workspaceHandle":"{handle}","unexpected":true}}"#
+        );
+        let (result, _) = run_with(hello(), format!("{request}\n").into_bytes());
+        assert!(result.unwrap_err().contains("invalid revokeWorkspace message"));
+    }
+
+    #[test]
+    fn cross_version_operation_is_rejected_without_downgrade() {
+        let handle = "c".repeat(64);
+        let request = format!(
+            r#"{{"protocolVersion":"1.0","messageType":"revokeWorkspace","requestId":"revoke-1","workspaceHandle":"{handle}"}}"#
+        );
+        let (result, _) = run_with(hello(), format!("{request}\n").into_bytes());
+        assert!(result.unwrap_err().contains("invalid revokeWorkspace message"));
+    }
+
+    #[test]
+    fn a_second_hello_is_rejected_as_a_terminal_protocol_violation() {
+        let second = br#"{"protocolVersion":"2.0","messageType":"hello","requestId":"hello-2","client":{"name":"loco-vscode-extension","version":"0.1.0"}}"#.to_vec();
+        let (result, output) = run_with(hello(), [second, b"\n".to_vec()].concat());
+        assert!(result.unwrap_err().contains("duplicate or unexpected handshake"));
+        assert_eq!(String::from_utf8(output).unwrap().lines().count(), 1);
+    }
+
+    #[test]
+    fn eof_after_handshake_exits_cleanly_and_releases_session_state() {
+        let (result, output) = run_with(hello(), Vec::new());
+        assert!(result.is_ok());
+        let frames: Vec<Value> = String::from_utf8(output).unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["messageType"], "hello");
+    }
+
+    #[test]
+    fn oversized_followup_frame_is_rejected_before_json_parsing() {
+        let oversized = vec![b'x'; MAX_FRAME_BYTES + 1];
+        let (result, _) = run_with(hello(), oversized);
+        assert!(result.unwrap_err().contains("invalid stdio frame"));
+    }
+    #[test]
+    fn invalid_workspace_selection_returns_generic_error_without_path_disclosure() {
+        let missing_fixture = tempfile::tempdir_in(std::env::current_dir().expect("current directory"))
+            .expect("temporary workspace fixture");
+        let missing = missing_fixture.path().to_path_buf();
+        missing_fixture.close().expect("remove temporary workspace fixture");
+        let request = json!({
+            "protocolVersion": "2.0",
+            "messageType": "registerWorkspace",
+            "requestId": "register-invalid",
+            "selectedRoot": missing.to_string_lossy(),
+            "displayName": "invalid-selection"
+        }).to_string();
+        let shutdown = br#"{"protocolVersion":"2.0","messageType":"shutdown","requestId":"shutdown-after-denial"}"#;
+        let mut subsequent = request.into_bytes();
+        subsequent.push(b'\n');
+        subsequent.extend_from_slice(shutdown);
+        subsequent.push(b'\n');
+
+        let (result, output) = run_with(hello(), subsequent);
+        assert!(result.is_ok(), "a denied registration must not corrupt the session: {result:?}");
+        let output = String::from_utf8(output).expect("handler output is UTF-8");
+        assert!(!output.contains(&missing.to_string_lossy().to_string()));
+        let frames: Vec<Value> = output.lines()
+            .map(|line| serde_json::from_str(line).expect("valid response frame"))
+            .collect();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames[1]["messageType"], "error");
+        assert_eq!(frames[1]["error"]["code"], "INVALID_WORKSPACE_SELECTION");
+        assert_eq!(frames[1]["error"]["message"], "Workspace selection could not be registered.");
+        assert_eq!(frames[2]["messageType"], "shutdown");
+    }
+
+    #[test]
+    fn eof_after_workspace_registration_releases_retained_root_handle() {
+        let parent = std::env::current_dir().expect("current directory");
+        let workspace = tempfile::tempdir_in(parent).expect("temporary workspace");
+        let request = json!({
+            "protocolVersion": "2.0",
+            "messageType": "registerWorkspace",
+            "requestId": "register-1",
+            "selectedRoot": workspace.path().to_string_lossy(),
+            "displayName": "eof-cleanup-test"
+        })
+        .to_string();
+
+        let mut request_frame = request;
+        request_frame.push('\n');
+        let (result, output) = run_with(hello(), request_frame.into_bytes());
+        assert!(result.is_ok(), "EOF should terminate the session cleanly: {result:?}");
+
+        let frames: Vec<Value> = String::from_utf8(output)
+            .expect("handler output is UTF-8")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("valid response frame"))
+            .collect();
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[1]["messageType"], "workspaceRegistered");
+        assert_eq!(frames[1]["requestId"], "register-1");
+        assert_eq!(frames[1]["workspaceHandle"].as_str().map(str::len), Some(64));
+
+        // Closing/removing the selected root after EOF proves the handler dropped
+        // its registry and the adapter's retained native root handle.
+        workspace
+            .close()
+            .expect("EOF must release the registered workspace root");
+    }
+
+}
