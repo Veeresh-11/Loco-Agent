@@ -84,6 +84,11 @@ jobs:
             auth: { clientId: '00000000-0000-0000-0000-000000000000' }
           });
           assert.equal(typeof app.acquireTokenByDeviceCode, 'function');
+          // Exercise MSAL's actual GuidGenerator -> uuid v4 call, not only uuid's standalone API.
+          assert.equal(typeof msal.CryptoProvider, 'function');
+          const msalGuid = new msal.CryptoProvider().createNewGuid();
+          assert.equal(uuid.validate(msalGuid), true);
+          assert.equal(uuid.version(msalGuid), 4);
           console.log(JSON.stringify({
             vsceEntry,
             msalEntry,
@@ -104,6 +109,22 @@ jobs:
           npm test -- --runInBand
           npm run lint
           npm run package
+          npm run package
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { createRequire } = require('node:module');
+          const vsceRequire = createRequire(require.resolve('@vscode/vsce'));
+          const msalEntry = vsceRequire.resolve('@azure/msal-node');
+          const msalRequire = createRequire(msalEntry);
+          const msal = msalRequire('@azure/msal-node');
+          assert.equal(typeof msal.CryptoProvider, 'function');
+          const guid = new msal.CryptoProvider().createNewGuid();
+          const uuidRequire = createRequire(msalEntry);
+          const uuid = uuidRequire('uuid');
+          assert.equal(uuid.validate(guid), true);
+          assert.equal(uuid.version(guid), 4);
+          console.log(JSON.stringify({msalEntry,actualMsalGuidGenerator:true,uuidVersion:4},null,2));
+          NODE
       - name: Verify candidate graph is persistent when regenerated
         run: |
           cp "$RUNNER_TEMP/package.json.original" package.json
