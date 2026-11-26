@@ -1,0 +1,153 @@
+name: Azure Identity 4.13.1 MSAL 5.1.5+ Node 20 Candidate
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/azure-identity-4131-msal51-node20-candidate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: azure-identity-4131-msal51-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Generate semver-safe candidate and apply candidate-only overrides
+        shell: bash
+        run: |
+          cp package.json "$RUNNER_TEMP/package.json.original"
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund
+          audit_fix_status=$?
+          set -e
+          echo "Semver-safe audit fix exit code: $audit_fix_status"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides = {
+            ...(p.overrides ?? {}),
+            'brace-expansion': '1.1.21',
+            '@isaacs/brace-expansion': '5.0.1',
+            'glob@^11': '14.0.6',
+            'glob@^13': '14.0.6',
+            'minimatch@^9': '11.0.9',
+            'minimatch@^10': '11.0.9',
+            '@azure/identity': '4.13.1'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const packages = lock.packages ?? {};
+          const identities = Object.entries(packages)
+            .filter(([path, pkg]) => (path === 'node_modules/@azure/identity' || path.endsWith('/node_modules/@azure/identity')) && pkg.name !== 'loco-agent')
+            .map(([path, pkg]) => ({path, version:pkg.version, engines:pkg.engines, dependencies:pkg.dependencies ?? {}}));
+          const msalNodes = Object.entries(packages)
+            .filter(([path]) => path === 'node_modules/@azure/msal-node' || path.endsWith('/node_modules/@azure/msal-node'))
+            .map(([path, pkg]) => ({path, version:pkg.version, engines:pkg.engines}));
+          const vsce = packages['node_modules/@vscode/vsce'];
+          if (identities.length === 0) throw new Error('No installed @azure/identity package exists in the candidate lockfile');
+          const badIdentity = identities.filter(pkg => pkg.version !== '4.13.1');
+          if (badIdentity.length) throw new Error('Expected all @azure/identity instances at 4.13.1: '+JSON.stringify(badIdentity));
+          const nonNode20 = identities.filter(pkg => !pkg.engines?.node || !pkg.engines.node.includes('20'));
+          if (nonNode20.length) throw new Error('Identity candidate engine metadata is not Node 20 compatible: '+JSON.stringify(nonNode20));
+          const badMsal = msalNodes.filter(pkg => { const [major,minor,patch] = (pkg.version ?? '').split('.').map(Number); return !pkg.version || major < 5 || (major === 5 && (minor < 1 || (minor === 1 && patch < 5))) || Boolean(pkg.dependencies?.uuid); });
+          if (msalNodes.length === 0 || badMsal.length) throw new Error('Expected MSAL Node >=5.1.5 with no uuid dependency: '+JSON.stringify({msalNodes,badMsal}));
+          if (!vsce?.dependencies?.['@azure/identity']?.includes('^4.1.0')) throw new Error('Unexpected vsce identity dependency range');
+          console.log(JSON.stringify({identities,msalNodes,vsce:vsce.version},null,2));
+          NODE
+      - name: Clean install and validate Node 20 candidate
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Clean install and validate Node 22 candidate
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+      - name: Verify restored manifest and proposed persistent candidate graph
+        shell: bash
+        run: |
+          cp "$RUNNER_TEMP/package.json.original" package.json
+          cmp package.json "$RUNNER_TEMP/package.json.original"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides = {
+            ...(p.overrides ?? {}),
+            'brace-expansion': '1.1.21',
+            '@isaacs/brace-expansion': '5.0.1',
+            'glob@^11': '14.0.6',
+            'glob@^13': '14.0.6',
+            'minimatch@^9': '11.0.9',
+            'minimatch@^10': '11.0.9',
+            '@azure/identity': '4.13.1'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const packages = lock.packages ?? {};
+          const identities = Object.entries(packages)
+            .filter(([path]) => path === 'node_modules/@azure/identity' || path.endsWith('/node_modules/@azure/identity'))
+            .map(([path,pkg]) => ({path,version:pkg.version,engines:pkg.engines}));
+          const msalNodes = Object.entries(packages)
+            .filter(([path]) => path === 'node_modules/@azure/msal-node' || path.endsWith('/node_modules/@azure/msal-node'))
+            .map(([path,pkg]) => ({path,version:pkg.version,dependencies:pkg.dependencies ?? {}}));
+          if (identities.length === 0 || identities.some(pkg => pkg.version !== '4.13.1' || !pkg.engines?.node?.includes('20'))) throw new Error('Azure Identity candidate was not retained at every installed path: '+JSON.stringify(identities));
+          if (msalNodes.length === 0 || msalNodes.some(pkg => { const [major,minor,patch] = (pkg.version ?? '').split('.').map(Number); return !pkg.version || major < 5 || (major === 5 && (minor < 1 || (minor === 1 && patch < 5))) || Boolean(pkg.dependencies?.uuid); })) throw new Error('MSAL Node must be >=5.1.5 and declare no uuid dependency: '+JSON.stringify(msalNodes));
+          console.log('Verified Azure identity/MSAL candidate:',JSON.stringify({identities,msalNodes},null,2));
+          NODE
+      - name: Generate npm audit report
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          audit_status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" "$GITHUB_STEP_SUMMARY" "$audit_status" <<'NODE'
+          const fs = require('node:fs');
+          const [file, summary, status] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(file,'utf8'));
+          const counts = report.metadata?.vulnerabilities ?? {};
+          const rows = Object.entries(report.vulnerabilities ?? {}).map(([name,v])=>({name,severity:v.severity,range:v.range,nodes:v.nodes}));
+          const lines = ['## Azure Node 20 compatible candidate','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s]??0} |`), '', `Audit exit code: ${status}`, `Package records: ${rows.length}`, '', '| Package | Severity | Affected range | Lockfile nodes |','|---|---|---|---|', ...rows.map(r=>`| ${r.name} | ${r.severity} | ${r.range??''} | ${(r.nodes??[]).join(', ')} |`)];
+          fs.appendFileSync(summary,lines.join('\n')+'\n');
+          console.log(JSON.stringify({counts,packageRecords:rows.length,auditExitCode:Number(status)},null,2));
+          NODE
+      - name: Upload candidate lockfile and audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: azure-node20-compatible-candidate
+          path: |
+            package-lock.json
+            ${{ runner.temp }}/npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
