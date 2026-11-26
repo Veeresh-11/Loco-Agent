@@ -10,7 +10,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' = 'normal';
+  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
   workspaceHandle = 'a'.repeat(64);
 
@@ -40,6 +40,9 @@ class FakeChild extends EventEmitter {
           protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
           captured: true, byteLength: this.mode === 'bad-capture' ? request.maxBytes + 1 : 17
         };
+      } else if (request.messageType === 'revokeWorkspace' && this.mode === 'malformed-error') {
+        response = { protocolVersion: '2.0', messageType: 'error', requestId: request.requestId,
+          error: { code: 'WORKSPACE_NOT_FOUND', message: 'Not found.', retryable: false, unexpected: true } };
       } else if (request.messageType === 'revokeWorkspace' && this.mode === 'unknown-revoke') {
         response = { protocolVersion: '2.0', messageType: 'error', requestId: request.requestId,
           error: { code: 'WORKSPACE_NOT_FOUND', message: 'Workspace registration was not found.', retryable: false } };
@@ -99,6 +102,13 @@ describe('RustSidecarClient protocol v2', () => {
     child.mode = 'unknown-revoke';
     const handle = await client.registerWorkspace('/workspace/project');
     await expect(client.revokeWorkspace(handle)).rejects.toThrow(/WORKSPACE_NOT_FOUND/);
+    expect(child.killed).toBe(false);
+  });
+
+  it('rejects malformed protocol error envelopes instead of trusting extra fields', async () => {
+    child.mode = 'malformed-error';
+    const handle = await client.registerWorkspace('/workspace/project');
+    await expect(client.revokeWorkspace(handle)).rejects.toThrow(/invalid sidecar error response/i);
     expect(child.killed).toBe(false);
   });
 
