@@ -173,7 +173,7 @@ fn validate_windows_selected_path(selected_root: &Path) -> Result<String, Worksp
     let selected = selected_root
         .to_str()
         .ok_or(WorkspaceFactoryError::InvalidSelection)?;
-    if selected.contains('\\0')
+    if selected.chars().any(|character| character == '\0')
         || selected.encode_utf16().count() > MAX_WINDOWS_PATH_UNITS
     {
         return Err(WorkspaceFactoryError::InvalidSelection);
@@ -219,7 +219,7 @@ mod windows_tests {
     #[test]
     fn selected_path_validation_rejects_embedded_nul_and_overlong_paths() {
         assert_eq!(
-            validate_windows_selected_path(Path::new("C:\\work\\repo\\0hidden")),
+            validate_windows_selected_path(Path::new(&format!("C:\\work\\repo{}hidden", '\0'))),
             Err(WorkspaceFactoryError::InvalidSelection)
         );
         let overlong = format!("C:\\{}", "a".repeat(32_768));
