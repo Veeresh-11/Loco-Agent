@@ -304,6 +304,21 @@ fn store_error_code(error: &StoreError) -> &'static str {
     }
 }
 
+fn send_error_v21<W: Write>(
+    writer: &mut W,
+    request_id: &str,
+    code: &str,
+    message: &str,
+    retryable: bool,
+) -> io::Result<()> {
+    write_message(writer, &json!({
+        "protocolVersion": AUTHORITY_PROTOCOL_V21,
+        "messageType": "error",
+        "requestId": request_id,
+        "error": { "code": code, "message": message, "retryable": retryable }
+    }))
+}
+
 fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &mut W) -> Result<(), String> {
     let text = std::str::from_utf8(&first_frame).map_err(|_| "frame is not UTF-8".to_string())?;
     let value: Value = serde_json::from_str(text).map_err(|_| "frame is not valid JSON".to_string())?;
@@ -339,7 +354,7 @@ fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &
                 let workspace_id = random_workspace_identity()?;
                 match registry.register_selected_workspace(Path::new(&request.selected_root), workspace_id) {
                     Ok(handle) => write_message(writer, &json!({"protocolVersion":AUTHORITY_PROTOCOL_V21,"messageType":"workspaceRegistered","requestId":request.request_id,"workspaceHandle":handle.as_str()})).map_err(|e|e.to_string())?,
-                    Err(_) => send_error(writer,&request.request_id,"INVALID_WORKSPACE_SELECTION","Workspace selection could not be registered.",false).map_err(|e|e.to_string())?,
+                    Err(_) => send_error_v21(writer,&request.request_id,"INVALID_WORKSPACE_SELECTION","Workspace selection could not be registered.",false).map_err(|e|e.to_string())?,
                 }
             }
             "captureWorkspaceFile" => {
@@ -355,7 +370,7 @@ fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &
                         write_message(writer, &json!({"protocolVersion":AUTHORITY_PROTOCOL_V21,"messageType":"workspaceFileCaptured",
                             "requestId":request.request_id,"captured":true,"byteLength":byte_length})).map_err(|e|e.to_string())?;
                     }
-                    Err(_) => send_error(writer,&request.request_id,"CAPTURE_DENIED","Workspace file capture was denied.",false).map_err(|e|e.to_string())?,
+                    Err(_) => send_error_v21(writer,&request.request_id,"CAPTURE_DENIED","Workspace file capture was denied.",false).map_err(|e|e.to_string())?,
                 }
             }
             "issueBindingChallenge" => {
@@ -364,11 +379,11 @@ fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &
                 session.accept_operation(&request.request_id).map_err(|e| { let (code, _) = session_error(e); format!("{code}: invalid protocol session") })?;
                 let capture_request = match capture_request_for_action(&request.action) {
                     Ok(request) => request,
-                    Err(code) => { send_error(writer,&request.request_id,code,"The requested action cannot be bound to a workspace snapshot.",false).map_err(|e|e.to_string())?; continue; }
+                    Err(code) => { send_error_v21(writer,&request.request_id,code,"The requested action cannot be bound to a workspace snapshot.",false).map_err(|e|e.to_string())?; continue; }
                 };
                 let captured = match registry.capture_by_wire_handle(&request.workspace_handle,&capture_request) {
                     Ok(captured) => captured,
-                    Err(_) => { send_error(writer,&request.request_id,"CAPTURE_DENIED","Workspace capture was denied.",false).map_err(|e|e.to_string())?; continue; }
+                    Err(_) => { send_error_v21(writer,&request.request_id,"CAPTURE_DENIED","Workspace capture was denied.",false).map_err(|e|e.to_string())?; continue; }
                 };
                 match approvals.issue_for_registration(&request.action,&captured,&request.workspace_handle,request.ttl_seconds) {
                     Ok(challenge) => write_message(writer,&json!({
@@ -376,7 +391,7 @@ fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &
                         "challengeId":challenge.challenge_id,"actionDigest":challenge.action_digest,
                         "snapshotDigest":challenge.snapshot_digest,"expiresAtUnix":challenge.expires_at_unix
                     })).map_err(|e|e.to_string())?,
-                    Err(error) => { let code=store_error_code(&error); send_error(writer,&request.request_id,code,"Binding challenge could not be issued.",false).map_err(|e|e.to_string())?; }
+                    Err(error) => { let code=store_error_code(&error); send_error_v21(writer,&request.request_id,code,"Binding challenge could not be issued.",false).map_err(|e|e.to_string())?; }
                 }
             }
             "consumeBindingChallenge" => {
@@ -385,15 +400,15 @@ fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &
                 session.accept_operation(&request.request_id).map_err(|e| { let (code, _) = session_error(e); format!("{code}: invalid protocol session") })?;
                 let capture_request = match capture_request_for_action(&request.action) {
                     Ok(request) => request,
-                    Err(code) => { send_error(writer,&request.request_id,code,"The requested action cannot be verified.",false).map_err(|e|e.to_string())?; continue; }
+                    Err(code) => { send_error_v21(writer,&request.request_id,code,"The requested action cannot be verified.",false).map_err(|e|e.to_string())?; continue; }
                 };
                 let captured = match registry.capture_by_wire_handle(&request.workspace_handle,&capture_request) {
                     Ok(captured) => captured,
-                    Err(_) => { send_error(writer,&request.request_id,"BINDING_CHALLENGE_EXPIRED_OR_CONSUMED","Binding challenge is unavailable.",false).map_err(|e|e.to_string())?; continue; }
+                    Err(_) => { send_error_v21(writer,&request.request_id,"BINDING_CHALLENGE_EXPIRED_OR_CONSUMED","Binding challenge is unavailable.",false).map_err(|e|e.to_string())?; continue; }
                 };
                 match approvals.consume_for_registration(&request.challenge_id,&request.action,&captured,&request.workspace_handle) {
                     Ok(()) => write_message(writer,&json!({"protocolVersion":AUTHORITY_PROTOCOL_V21,"messageType":"bindingVerified","requestId":request.request_id,"bindingVerified":true})).map_err(|e|e.to_string())?,
-                    Err(error) => { let code=store_error_code(&error); send_error(writer,&request.request_id,code,"Binding challenge could not be verified.",false).map_err(|e|e.to_string())?; }
+                    Err(error) => { let code=store_error_code(&error); send_error_v21(writer,&request.request_id,code,"Binding challenge could not be verified.",false).map_err(|e|e.to_string())?; }
                 }
             }
             "revokeWorkspace" => {
@@ -402,11 +417,11 @@ fn run_v21<R: BufRead, W: Write>(first_frame: Vec<u8>, reader: &mut R, writer: &
                 session.accept_operation(&request.request_id).map_err(|e| { let (code, _) = session_error(e); format!("{code}: invalid protocol session") })?;
                 if registry.revoke_by_wire_handle(&request.workspace_handle) {
                     if approvals.revoke_registration(&request.workspace_handle).is_err() {
-                        send_error(writer,&request.request_id,"BINDING_STORE_UNAVAILABLE","Workspace was revoked but pending bindings could not be cleared.",false).map_err(|e|e.to_string())?;
+                        send_error_v21(writer,&request.request_id,"BINDING_STORE_UNAVAILABLE","Workspace was revoked but pending bindings could not be cleared.",false).map_err(|e|e.to_string())?;
                     } else {
                         write_message(writer,&json!({"protocolVersion":AUTHORITY_PROTOCOL_V21,"messageType":"workspaceRevoked","requestId":request.request_id,"revoked":true})).map_err(|e|e.to_string())?;
                     }
-                } else { send_error(writer,&request.request_id,"WORKSPACE_NOT_FOUND","Workspace registration was not found.",false).map_err(|e|e.to_string())?; }
+                } else { send_error_v21(writer,&request.request_id,"WORKSPACE_NOT_FOUND","Workspace registration was not found.",false).map_err(|e|e.to_string())?; }
             }
             "evaluate" => {
                 let request: EvaluateRequestV21 = serde_json::from_value(value).map_err(|_| "invalid evaluate message".to_string())?;
