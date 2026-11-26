@@ -30,6 +30,8 @@ jobs:
         shell: bash
         run: |
           cp package.json "$RUNNER_TEMP/package.json.before"
+          npm update brace-expansion@1.1.21 --package-lock-only --ignore-scripts --no-fund
+          node -e 'const p=require("./package-lock.json").packages["node_modules/brace-expansion"]; if (!p || p.version !== "1.1.21") { console.error("Expected root brace-expansion 1.1.21", p?.version); process.exit(1); }'
           set +e
           npm audit fix --package-lock-only --ignore-scripts --no-fund
           audit_fix_status=$?
