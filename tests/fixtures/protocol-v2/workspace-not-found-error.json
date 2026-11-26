@@ -1,0 +1,10 @@
+{
+  "protocolVersion": "2.0",
+  "messageType": "error",
+  "requestId": "fixture-request",
+  "error": {
+    "code": "WORKSPACE_NOT_FOUND",
+    "message": "Workspace registration was not found.",
+    "retryable": false
+  }
+}
