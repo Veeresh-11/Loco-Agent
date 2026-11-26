@@ -75,7 +75,7 @@ Before replacing `RAGEngine` or `LOCOAgent.readFile` access, design a Rust-owned
 - Rust v2 handler/session implementation: draft PR #135; recorded exact-head Rust and contract CI passed.
 - TypeScript v2 client: draft PR #136; recorded exact-head TypeScript CI passed.
 - Direct adversarial Rust handler tests: draft PR #137; recorded exact-head nine-platform Rust matrix and contract validation passed.
-- TypeScript/Rust portable-path parity: draft PR #138; recorded exact-head TypeScript CI passed.
+- TypeScript/Rust portable-path parity and protocol error-envelope validation: draft PR #138 at corrected head `852c844ec06e79fb8ca50d54501f2f94474b8a38`; TypeScript CI run [#45820432496](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45820432496) completed successfully on Node 20 and Node 22. The current suite includes shared `WORKSPACE_NOT_FOUND`/`CAPTURE_DENIED` error fixtures, unknown-handle and post-revocation capture-denial behavior, strict nested error-envelope validation, and six malformed-envelope fail-closed cases. This remains fake-child client validation, not packaged activation-to-sidecar integration.
 - Production extension integration, packaged native executable, Rust-owned task-content consumption, legacy bypass removal, authenticated approval, and independent review: **not complete**.
 
 ## Security invariants retained
