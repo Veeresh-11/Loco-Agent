@@ -126,7 +126,7 @@ describe('RustSidecarClient protocol v2', () => {
     child.mode = 'malformed-error';
     const handle = await client.registerWorkspace('/workspace/project');
     await expect(client.revokeWorkspace(handle)).rejects.toThrow(/invalid sidecar error response/i);
-    expect(child.killed).toBe(false);
+    expect(child.killed).toBe(true);
   });
 
   it('sends a strict v2 handshake and does not downgrade to v1', async () => {
