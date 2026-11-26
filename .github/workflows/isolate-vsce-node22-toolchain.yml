@@ -94,6 +94,8 @@ jobs:
           NODE
       - name: Package VSIX using isolated Node 22 toolchain
         run: npm run package
+      - name: Verify minimatch ignore/include behavior in the VSIX archive
+        run: node tools/vsce/test-ignore-patterns.js
       - name: Generate separate root and packaging-tool audit reports
         shell: bash
         run: |
