@@ -1,0 +1,180 @@
+name: MSAL UUID Node 20 Compatibility Candidate
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/msal-uuid-node20-candidate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: msal-uuid-node20-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Generate candidate-only MSAL UUID override
+        shell: bash
+        run: |
+          cp package.json "$RUNNER_TEMP/package.json.original"
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund
+          status=$?
+          set -e
+          echo "Semver-safe audit fix exit code: $status"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides = {
+            ...(p.overrides ?? {}),
+            'brace-expansion': '1.1.21',
+            '@isaacs/brace-expansion': '5.0.1',
+            'glob@^11': '14.0.6',
+            'glob@^13': '14.0.6',
+            'minimatch@^9': '11.0.9',
+            'minimatch@^10': '11.0.9',
+            '@azure/identity': '4.13.0',
+            '@azure/msal-node': { uuid: '11.1.1' }
+          };
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package-lock.json','utf8')).packages ?? {};
+          const msal = Object.entries(p).filter(([k]) => k.endsWith('/node_modules/@azure/msal-node') || k === 'node_modules/@azure/msal-node');
+          const uuids = Object.entries(p).filter(([k]) => k.endsWith('/node_modules/uuid') || k === 'node_modules/uuid').map(([path,v])=>({path,version:v.version}));
+          if (!msal.length) throw new Error('MSAL Node is absent from candidate lock');
+          const bad = uuids.filter(x => x.version !== '11.1.1');
+          if (bad.length) throw new Error('UUID override not applied to all lockfile UUID instances: '+JSON.stringify(bad));
+          console.log(JSON.stringify({msal:msal.map(([path,v])=>({path,version:v.version,uuid:v.dependencies?.uuid})),uuids},null,2));
+          NODE
+      - name: Clean install and validate Node 20
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { createRequire } = require('node:module');
+          const vsceEntry = require.resolve('@vscode/vsce');
+          const vsceRequire = createRequire(vsceEntry);
+          const msalEntry = vsceRequire.resolve('@azure/msal-node');
+          const msalRequire = createRequire(msalEntry);
+          const uuid = msalRequire('uuid');
+          const id = uuid.v4();
+          assert.equal(uuid.validate(id), true);
+          assert.equal(uuid.version(id), 4);
+          const msal = msalRequire('@azure/msal-node');
+          assert.equal(typeof msal.PublicClientApplication, 'function');
+          const app = new msal.PublicClientApplication({
+            auth: { clientId: '00000000-0000-0000-0000-000000000000' }
+          });
+          assert.equal(typeof app.acquireTokenByDeviceCode, 'function');
+          // Exercise MSAL's actual GuidGenerator -> uuid v4 call, not only uuid's standalone API.
+          assert.equal(typeof msal.CryptoProvider, 'function');
+          const msalGuid = new msal.CryptoProvider().createNewGuid();
+          assert.equal(uuid.validate(msalGuid), true);
+          assert.equal(uuid.version(msalGuid), 4);
+          console.log(JSON.stringify({
+            vsceEntry,
+            msalEntry,
+            uuidResolvedFromMsal: msalRequire.resolve('uuid'),
+            uuidVersion: uuid.version(id),
+            publicClientApplicationLoaded: true
+          }, null, 2));
+          NODE
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Clean install and validate Node 22
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+          npm run package
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { createRequire } = require('node:module');
+          const vsceRequire = createRequire(require.resolve('@vscode/vsce'));
+          const msalEntry = vsceRequire.resolve('@azure/msal-node');
+          const msalRequire = createRequire(msalEntry);
+          const msal = msalRequire('@azure/msal-node');
+          assert.equal(typeof msal.CryptoProvider, 'function');
+          const guid = new msal.CryptoProvider().createNewGuid();
+          const uuidRequire = createRequire(msalEntry);
+          const uuid = uuidRequire('uuid');
+          assert.equal(uuid.validate(guid), true);
+          assert.equal(uuid.version(guid), 4);
+          console.log(JSON.stringify({msalEntry,actualMsalGuidGenerator:true,uuidVersion:4},null,2));
+          NODE
+      - name: Verify candidate graph is persistent when regenerated
+        run: |
+          cp "$RUNNER_TEMP/package.json.original" package.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides = {
+            ...(p.overrides ?? {}),
+            'brace-expansion': '1.1.21',
+            '@isaacs/brace-expansion': '5.0.1',
+            'glob@^11': '14.0.6',
+            'glob@^13': '14.0.6',
+            'minimatch@^9': '11.0.9',
+            'minimatch@^10': '11.0.9',
+            '@azure/identity': '4.13.0',
+            '@azure/msal-node': { uuid: '11.1.1' }
+          };
+          fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync('package-lock.json','utf8')).packages ?? {};
+          const uuids = Object.entries(p).filter(([k]) => k.endsWith('/node_modules/uuid') || k === 'node_modules/uuid').map(([path,v])=>({path,version:v.version}));
+          if (!uuids.length || uuids.some(x => x.version !== '11.1.1')) throw new Error('Persistent UUID candidate failed: '+JSON.stringify(uuids));
+          console.log('Persistent UUID candidate verified:',JSON.stringify(uuids,null,2));
+          NODE
+      - name: Generate fresh npm audit report
+        shell: bash
+        run: |
+          set +e
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json"
+          audit_status=$?
+          set -e
+          node - "$RUNNER_TEMP/npm-audit.json" "$GITHUB_STEP_SUMMARY" "$audit_status" <<'NODE'
+          const fs = require('node:fs');
+          const [file, summary, status] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(file,'utf8'));
+          const counts = report.metadata?.vulnerabilities ?? {};
+          const rows = Object.entries(report.vulnerabilities ?? {}).map(([name,v])=>({name,severity:v.severity,range:v.range,nodes:v.nodes}));
+          const lines = ['## MSAL UUID Node 20 candidate','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${counts[s]??0} |`), '', `Audit exit code: ${status}`, `Package records: ${rows.length}`, '', '| Package | Severity | Affected range | Lockfile nodes |','|---|---|---|---|', ...rows.map(r=>`| ${r.name} | ${r.severity} | ${r.range??''} | ${(r.nodes??[]).join(', ')} |`)];
+          fs.appendFileSync(summary,lines.join('\n')+'\n');
+          console.log(JSON.stringify({counts,packageRecords:rows.length,auditExitCode:Number(status)},null,2));
+          NODE
+      - name: Upload candidate lockfile and audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: msal-uuid-node20-candidate
+          path: |
+            package-lock.json
+            ${{ runner.temp }}/npm-audit.json
+          if-no-files-found: error
+          retention-days: 14
