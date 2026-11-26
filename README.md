@@ -12,7 +12,7 @@ A hybrid local + cloud AI assistant for Visual Studio Code that intelligently ro
   - Local LLMs (Ollama, GPT4All)
 - 📝 **Code Analysis**: Line-by-line code explanation
 - 💡 **Smart Suggestions**: PowerShell and shell command suggestions
-- 🔀 **Intelligent Patching**: Three-way merge with conflict detection and auto-apply patches
+- 🔀 **Patch Workflow (legacy)**: Three-way merge with conflict detection; patch application is not security-certified for autonomous workspace writes
 - ⚙️ **Configurable**: Flexible settings for provider selection and behavior
 - 📊 **Job Queue**: Processes tasks concurrently with intelligent queuing
 
@@ -36,7 +36,7 @@ A hybrid local + cloud AI assistant for Visual Studio Code that intelligently ro
 - **LOCO: Run Agent** - Execute an AI task on selected code
   - Explain code line-by-line
   - Suggest PowerShell to run
-  - Auto-apply patch
+  - Review task results and proposed changes (patch application remains subject to the legacy implementation and is not security-certified)
 
 - **LOCO: Open Assistant** - Open the LOCO webview for interactive assistance
 
@@ -57,7 +57,7 @@ A hybrid local + cloud AI assistant for Visual Studio Code that intelligently ro
 - **LOCOAgent**: Main orchestrator managing job queue and provider routing
 - **Job Queue**: Concurrent task processing with configurable concurrency
 - **Routing Policy**: Intelligent selection between local/cloud based on latency and cost
-- **Three-Way Merge**: Handles code patching with conflict detection
+- **Three-Way Merge (legacy)**: Provides merge/conflict-handling code; this is not evidence of a security-approved write capability
 
 ### Providers
 
@@ -108,7 +108,7 @@ src/
 |---------|------|---------|-------------|
 | `loco.provider` | string | `local` | Default AI provider (local, openai, azure, ollama, gpt4all) |
 | `loco.localEndpoint` | string | `http://localhost:9000` | Local server endpoint for local LLMs |
-| `loco.autoApplyPatches` | boolean | `false` | Automatically apply non-conflicting code patches |
+| `loco.autoApplyPatches` | boolean | `false` | Legacy patch-application setting; keep disabled. Workspace-write safety has not passed the project's security acceptance gates. |
 
 ## Development
 
@@ -156,11 +156,13 @@ Run tests with:
 npm test
 ```
 
-## Build Status
+## Development and release status
 
-- ✅ TypeScript: No compilation errors
-- ✅ Tests: 10/10 passing
-- ✅ Ready for production deployment
+LOCO Agent is an actively developed project, **not currently declared production-ready**. The default `main` branch is the legacy TypeScript extension baseline. The Rust authority integration, authenticated approval, native filesystem acceptance, controlled workspace writes, command policy, trusted artifact verification, and complete platform/release validation are not yet accepted on `main`.
+
+The README's historical test counts are not a current release qualification. Before relying on a build, run the current repository CI and review its exact commit. Keep `loco.autoApplyPatches` disabled; do not treat legacy patch-application behavior as a security-approved autonomous write path.
+
+See the [canonical project progress tracker](docs/PROJECT_PROGRESS_TRACKER.md) for current status, acceptance gates, supported-platform limitations, and release criteria.
 
 ## License
 
