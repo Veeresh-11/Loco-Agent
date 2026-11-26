@@ -15,7 +15,7 @@ jobs:
   candidate:
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -28,6 +28,21 @@ jobs:
           cache: npm
       - name: Generate candidate lockfile
         run: npm install --package-lock-only --ignore-scripts --no-fund
+      - name: Commit reconciled candidate lockfile to this PR branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/typescript-eslint-v8-remediation'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(deps): reconcile TypeScript-ESLint v8 lockfile"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${BRANCH}"
+          else
+            echo "Candidate lockfile already matches the branch."
+          fi
       - name: Assert coordinated TypeScript-ESLint v8 graph
         run: |
           node <<'NODE'
