@@ -12,7 +12,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' | 'malformed-error-version' | 'malformed-error-request-id' | 'malformed-error-code' | 'malformed-error-message' | 'malformed-error-retryable' | 'revoked-capture' = 'normal';
+  mode: 'normal' | 'extra-decision-field' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' | 'malformed-error-version' | 'malformed-error-request-id' | 'malformed-error-code' | 'malformed-error-message' | 'malformed-error-retryable' | 'revoked-capture' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
   workspaceHandle = 'a'.repeat(64);
 
@@ -33,7 +33,7 @@ class FakeChild extends EventEmitter {
         response = {
           protocolVersion: '2.0', messageType: 'decision',
           requestId: this.mode === 'wrong-id' ? 'wrong' : request.requestId,
-          decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Policy result only.' }
+          decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Policy result only.', ...(this.mode === 'extra-decision-field' ? { untrustedGrant: true } : {}) }
         };
       } else if (request.messageType === 'registerWorkspace') {
         response = { protocolVersion: '2.0', messageType: 'workspaceRegistered', requestId: request.requestId, workspaceHandle: this.workspaceHandle };
@@ -107,6 +107,13 @@ describe('RustSidecarClient protocol v2', () => {
     expect(decision.decision).toBe('allow');
     expect(decision.proposalId).toBe('p-1');
     expect(client.hasCapability('workspace_capture')).toBe(true);
+  });
+
+  it('fails closed when a decision payload contains an unknown field', async () => {
+    child.mode = 'extra-decision-field';
+    await expect(client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' }))
+      .rejects.toThrow(/unexpected sidecar decision response/i);
+    expect(child.killed).toBe(true);
   });
 
   it('registers, captures and revokes a workspace using opaque handles', async () => {
