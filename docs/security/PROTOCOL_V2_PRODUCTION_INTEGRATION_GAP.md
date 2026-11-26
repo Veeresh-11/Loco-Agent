@@ -22,6 +22,25 @@ The following repository paths were inspected on 2026-11-25:
 | Agent task path | `src/core/locoAgent.ts` performs file reads through `vscode.workspace.fs`, runs bounded Git status commands with `execFile`, and contains a direct patch-write method | The current task path bypasses the Rust authority for these operations |
 | Capture response | The v2 client returns only `{ captured: true, byteLength }`; file bytes and trusted snapshot metadata are not exposed to TypeScript | The current capture API cannot replace the agent's text/file-context reads without a separately designed Rust-owned consumption path |
 
+## Source-level legacy operation inventory (verified 2026-11-26)
+
+The following inventory was checked against the extension and client source at this assessment revision. It identifies current TypeScript paths that are outside the Rust v2 authority client; it is an inventory, not an assertion that every path is reachable from the same UI command.
+
+| Source | Observed operation | Current boundary | Required disposition before claiming Rust enforcement |
+|---|---|---|---|
+| `src/core/ragEngine.ts` | `workspace.findFiles`, `workspace.fs.stat`, and `workspace.fs.readFile` over up to 300 workspace files (1 MB per-file limit), then caches/chunks text in TypeScript | Direct workspace enumeration and content acquisition in the extension process; no Rust handle or snapshot binding | Replace with a Rust-owned acquisition/consumption design; prove task-used bytes are the validated Rust-acquired bytes |
+| `src/core/locoAgent.ts` — `runTask` / `readFile` | Task flow retrieves RAG context and independently reads `job.filePath` using `workspace.fs.readFile` | Direct TypeScript read is included in provider prompt | Remove this bypass only after a Rust content-consumption interface and end-to-end identity/freshness tests exist |
+| `src/core/locoAgent.ts` — `applyPatch` | Reads target file, computes three-way merge, and writes merged bytes with `workspace.fs.writeFile` | Direct workspace write in TypeScript; no Rust authorization or approval transport | Keep disabled/unreachable from production task flow until Rust write enforcement and authenticated approval are implemented and reviewed |
+| `src/core/locoAgent.ts` — `executeShell` | Uses `child_process.execFile` for two hard-coded Git commands: `rev-parse --show-toplevel` and `status --short --branch`, with a 5-second timeout | Bounded read-only Git metadata command; not routed through Rust | Explicitly classify as non-privileged metadata or move under a reviewed Rust contract; do not generalize this allowlist into arbitrary command authority |
+| `src/extension.ts` — run command | Passes active editor language, filesystem path, and selected/full document text into `LOCOAgent.runTask` | Editor text is acquired by VS Code before the agent task; no Rust snapshot binding | Treat editor-buffer context as a separate acquisition source; define how unsaved buffers are represented and bound before asserting snapshot consistency |
+| `src/runners/powershellRunner.ts` | Invokes `powershell.exe` via `execFile` after a modal user confirmation; 20,000-character script cap and 30-second timeout | Direct process execution in TypeScript. Source search did not establish an in-repository call site in the inspected code | Do not claim it is behind Rust approval; audit reachability/callers separately and keep arbitrary command execution disabled in the production task path |
+
+Additional classification:
+- `src/extension.ts` exports history to a path explicitly selected through the VS Code save dialog. This is a user-directed history export, not evidence of workspace patch authority.
+- `src/utils/historyStore.ts` stores history in VS Code `globalState`; this is extension state, not a workspace file operation.
+- The current Rust v2 capture API returns an acknowledgement and byte length only. It does not return task-consumable content, so it cannot yet replace the RAG or `readFile` paths above.
+- This inventory is scoped to the files and symbols listed; it is not a complete repository-wide static analysis or proof that no other filesystem/process path exists.
+
 ## Required integration sequence
 
 ### 1. Native executable delivery and launch contract
