@@ -13,8 +13,11 @@ use std::time::Duration;
 use crate::approval_binding::{action_digest, verify_approval_binding, ApprovalChallenge, ApprovalError};
 use crate::approval_clock::{ApprovalClock, ApprovalClockError, SystemApprovalClock};
 use crate::ProposedAction;
+use crate::canonical_snapshot_digest::canonical_snapshot_binding_digest;
+use crate::snapshot_payload::CapturedWorkspaceSnapshot;
 
 pub const MAX_APPROVAL_TTL_SECONDS: u64 = 300;
+pub const MAX_APPROVAL_SNAPSHOT_AGE: Duration = Duration::from_secs(30);
 pub const MAX_OUTSTANDING_APPROVAL_CHALLENGES: usize = 1024;
 pub const MAX_PERSISTED_APPROVAL_CHALLENGES: u64 = 4096;
 pub const APPROVAL_RETENTION_BATCH_SIZE: u64 = 256;
@@ -67,6 +70,15 @@ fn process_epoch() -> Result<&'static str, StoreError> {
         Ok(epoch) => Ok(epoch.as_str()),
         Err(_) => Err(StoreError::RuntimeEpochUnavailable),
     }
+}
+
+fn ensure_snapshot_fresh(snapshot: &CapturedWorkspaceSnapshot, now: Duration) -> Result<(), StoreError> {
+    let captured_at = snapshot.captured_at_monotonic();
+    let age = now.checked_sub(captured_at).ok_or(StoreError::Binding(ApprovalError::SnapshotStale))?;
+    if age > MAX_APPROVAL_SNAPSHOT_AGE {
+        return Err(StoreError::Binding(ApprovalError::SnapshotStale));
+    }
+    Ok(())
 }
 
 fn prune_and_check_capacity(
@@ -159,6 +171,7 @@ impl ApprovalStore {
              CREATE TABLE IF NOT EXISTS approval_challenges (
                 challenge_id TEXT PRIMARY KEY,
                 action_digest TEXT NOT NULL,
+                snapshot_digest TEXT NOT NULL DEFAULT '',
                 expires_at INTEGER NOT NULL,
                 consumed_at INTEGER NULL,
                 process_epoch TEXT NOT NULL DEFAULT ''
@@ -170,6 +183,21 @@ impl ApprovalStore {
                 process_epoch TEXT NOT NULL
              );"
         )?;
+
+        // Old action-only rows receive an empty snapshot digest and are unusable.
+        // The process epoch also rotates on startup, invalidating all old challenges.
+        let has_snapshot_digest: bool = {
+            let mut statement = conn.prepare("PRAGMA table_info(approval_challenges)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            let found = columns.filter_map(Result::ok).any(|name| name == "snapshot_digest");
+            found
+        };
+        if !has_snapshot_digest {
+            conn.execute(
+                "ALTER TABLE approval_challenges ADD COLUMN snapshot_digest TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
 
         // Migrate stores created before process epochs were introduced. Existing
         // rows receive an empty epoch and therefore become unusable (fail closed).
@@ -216,6 +244,7 @@ impl ApprovalStore {
     pub fn issue(
         &mut self,
         action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
         ttl_seconds: u64,
     ) -> Result<ApprovalChallenge, StoreError> {
         if !(1..=MAX_APPROVAL_TTL_SECONDS).contains(&ttl_seconds) {
@@ -224,15 +253,19 @@ impl ApprovalStore {
         let challenge_id = generate_challenge_id().map_err(StoreError::Entropy)?;
         let now = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
+        ensure_snapshot_fresh(snapshot, monotonic_now)?;
+        crate::approval_binding::validate_action_snapshot_binding(action, snapshot).map_err(StoreError::Binding)?;
         let monotonic_deadline = monotonic_now.checked_add(Duration::from_secs(ttl_seconds)).ok_or(StoreError::InvalidChallenge)?;
         let expires_at_unix = now.checked_add(ttl_seconds).ok_or(StoreError::InvalidChallenge)?;
         if expires_at_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
         let digest = action_digest(action).map_err(|_| StoreError::InvalidChallenge)?;
+        let snapshot_digest = canonical_snapshot_binding_digest(snapshot.snapshot());
         let challenge = ApprovalChallenge {
             challenge_id,
             action_digest: digest,
+            snapshot_digest,
             expires_at_unix,
         };
         // Always acquire SQLite's write reservation before the shared deadline
@@ -250,9 +283,9 @@ impl ApprovalStore {
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?;
         prune_and_check_capacity(&mut deadlines, monotonic_now)?;
         tx.execute(
-            "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at, process_epoch)
-             VALUES (?1, ?2, ?3, NULL, ?4)",
-            params![challenge.challenge_id, challenge.action_digest, challenge.expires_at_unix as i64, self.process_epoch],
+            "INSERT INTO approval_challenges(challenge_id, action_digest, snapshot_digest, expires_at, consumed_at, process_epoch)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+            params![challenge.challenge_id, challenge.action_digest, challenge.snapshot_digest, challenge.expires_at_unix as i64, self.process_epoch],
         )?;
         deadlines.insert(challenge.challenge_id.clone(), monotonic_deadline);
         if let Err(error) = tx.commit() {
@@ -268,12 +301,14 @@ impl ApprovalStore {
         &mut self,
         challenge_id: &str,
         action: &ProposedAction,
+        snapshot: &CapturedWorkspaceSnapshot,
     ) -> Result<(), StoreError> {
         if !is_valid_challenge_id(challenge_id) {
             return Err(StoreError::InvalidChallenge);
         }
         let now_unix = self.clock.now_unix_seconds().map_err(StoreError::Clock)?;
         let monotonic_now = self.clock.monotonic_now().map_err(StoreError::Clock)?;
+        ensure_snapshot_fresh(snapshot, monotonic_now)?;
         if now_unix > i64::MAX as u64 {
             return Err(StoreError::InvalidChallenge);
         }
@@ -282,12 +317,12 @@ impl ApprovalStore {
         // serializes concurrent consumers across independent SQLite connections.
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         Self::ensure_active_epoch(&tx, &self.process_epoch)?;
-        let record: Option<(String, u64, Option<u64>, String)> = tx.query_row(
-            "SELECT action_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
+        let record: Option<(String, String, u64, Option<u64>, String)> = tx.query_row(
+            "SELECT action_digest, snapshot_digest, expires_at, consumed_at, process_epoch FROM approval_challenges WHERE challenge_id=?1",
             params![challenge_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         ).optional()?;
-        let (digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
+        let (digest, snapshot_digest, expires_at, consumed_at, challenge_epoch) = record.ok_or(StoreError::NotFound)?;
         if challenge_epoch != self.process_epoch { return Err(StoreError::AlreadyConsumedOrExpired); }
         let monotonic_deadline = MONOTONIC_DEADLINES.get_or_init(|| Mutex::new(HashMap::new()))
             .lock().map_err(|_| StoreError::Clock(ApprovalClockError::ClockStatePoisoned))?
@@ -301,9 +336,10 @@ impl ApprovalStore {
         let challenge = ApprovalChallenge {
             challenge_id: challenge_id.to_string(),
             action_digest: digest,
+            snapshot_digest,
             expires_at_unix: expires_at,
         };
-        verify_approval_binding(&challenge, action, now_unix).map_err(StoreError::Binding)?;
+        verify_approval_binding(&challenge, action, snapshot, now_unix).map_err(StoreError::Binding)?;
         let changed = tx.execute(
             "UPDATE approval_challenges SET consumed_at=?2
              WHERE challenge_id=?1 AND consumed_at IS NULL AND expires_at>?2",
@@ -364,10 +400,27 @@ mod tests {
     }
 
     fn sample_action() -> ProposedAction {
-        ProposedAction::RunCommand {
-            executable: "echo".into(), args: vec!["hello".into()],
-            working_directory: Some(".".into()), timeout_ms: Some(1000),
-        }
+        ProposedAction::ReadFile { path: "src/lib.rs".into(), max_bytes: Some(4096) }
+    }
+
+    fn sample_snapshot_at(captured_at: Duration) -> CapturedWorkspaceSnapshot {
+        let bytes = b"captured";
+        let contract = crate::snapshot_payload::build_snapshot_contract(
+            "workspace-test", "src/lib.rs", "opaque-file-id", bytes,
+        ).unwrap();
+        CapturedWorkspaceSnapshot::new_at(contract, bytes.to_vec(), captured_at).unwrap()
+    }
+
+    fn issue(store: &mut ApprovalStore, action: &ProposedAction, ttl: u64) -> Result<ApprovalChallenge, StoreError> {
+        let captured_at = store.clock.monotonic_now().unwrap();
+        let snapshot = sample_snapshot_at(captured_at);
+        store.issue(action, &snapshot, ttl)
+    }
+
+    fn consume(store: &mut ApprovalStore, challenge_id: &str, action: &ProposedAction) -> Result<(), StoreError> {
+        let captured_at = store.clock.monotonic_now().unwrap();
+        let snapshot = sample_snapshot_at(captured_at);
+        store.consume(challenge_id, action, &snapshot)
     }
     fn test_store_at(now: u64) -> (ApprovalStore, Arc<TestClock>) {
         let clock = Arc::new(TestClock::new(now));
@@ -382,14 +435,14 @@ mod tests {
     fn store_issues_and_consumes_using_its_own_clock() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 30).unwrap();
+        let challenge = issue(&mut store, &action, 30).unwrap();
         assert_eq!(challenge.expires_at_unix, 130);
         clock.set(129);
         clock.advance_monotonic(29_000);
-        store.consume(&challenge.challenge_id, &action).unwrap();
+        consume(&mut store, &challenge.challenge_id, &action).unwrap();
         assert!(store.is_consumed(&challenge.challenge_id).unwrap());
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
@@ -398,11 +451,11 @@ mod tests {
     fn expired_challenge_rejected_using_internal_time() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 10).unwrap();
+        let challenge = issue(&mut store, &action, 10).unwrap();
         clock.set(110);
         clock.advance_monotonic(10_000);
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
@@ -503,11 +556,90 @@ mod tests {
     fn monotonic_deadline_expires_even_when_wall_clock_does_not_advance() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 5).unwrap();
+        let challenge = issue(&mut store, &action, 5).unwrap();
         clock.advance_monotonic(5_000);
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn legacy_action_only_rows_migrate_with_empty_snapshot_digest_and_fail_closed() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE approval_challenges (
+                challenge_id TEXT PRIMARY KEY,
+                action_digest TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                consumed_at INTEGER NULL
+             );"
+        ).unwrap();
+        let action = sample_action();
+        let challenge_id = "a".repeat(64);
+        conn.execute(
+            "INSERT INTO approval_challenges(challenge_id, action_digest, expires_at, consumed_at)
+             VALUES (?1, ?2, 200, NULL)",
+            params![challenge_id, action_digest(&action).unwrap()],
+        ).unwrap();
+
+        let clock = Arc::new(TestClock::new(100));
+        let mut store = ApprovalStore::initialize_with_epoch(
+            conn, clock, "new-process-epoch".into(),
+        ).unwrap();
+        let migrated_digest: String = store.conn.query_row(
+            "SELECT snapshot_digest FROM approval_challenges WHERE challenge_id=?1",
+            params![challenge_id],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(migrated_digest.is_empty(), "legacy action-only rows must not gain a snapshot binding");
+
+        let snapshot = sample_snapshot_at(Duration::from_millis(0));
+        assert!(matches!(
+            store.consume(&challenge_id, &action, &snapshot),
+            Err(StoreError::AlreadyConsumedOrExpired)
+        ));
+    }
+
+    #[test]
+    fn stale_snapshot_is_rejected_at_issue_and_consume() {
+        let (mut store, clock) = test_store_at(100);
+        let action = sample_action();
+        let stale = sample_snapshot_at(Duration::from_millis(0));
+        clock.advance_monotonic(MAX_APPROVAL_SNAPSHOT_AGE.as_millis() as u64 + 1);
+        assert!(matches!(
+            store.issue(&action, &stale, 30),
+            Err(StoreError::Binding(ApprovalError::SnapshotStale))
+        ));
+
+        let (mut store, clock) = test_store_at(100);
+        let fresh = sample_snapshot_at(Duration::from_millis(0));
+        let challenge = store.issue(&action, &fresh, 30).unwrap();
+        clock.advance_monotonic(MAX_APPROVAL_SNAPSHOT_AGE.as_millis() as u64 + 1);
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action, &fresh),
+            Err(StoreError::Binding(ApprovalError::SnapshotStale))
+        ));
+        assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
+    }
+
+    #[test]
+    fn changed_snapshot_identity_is_rejected_without_consuming() {
+        let (mut store, _) = test_store_at(100);
+        let action = sample_action();
+        let original = sample_snapshot_at(Duration::from_millis(0));
+        let challenge = store.issue(&action, &original, 30).unwrap();
+        let bytes = b"captured";
+        let changed_contract = crate::snapshot_payload::build_snapshot_contract(
+            "workspace-test", "src/lib.rs", "different-file-id", bytes,
+        ).unwrap();
+        let changed = CapturedWorkspaceSnapshot::new_at(
+            changed_contract, bytes.to_vec(), Duration::from_millis(0),
+        ).unwrap();
+        assert!(matches!(
+            store.consume(&challenge.challenge_id, &action, &changed),
+            Err(StoreError::Binding(ApprovalError::SnapshotDigestMismatch))
         ));
         assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
     }
@@ -516,13 +648,10 @@ mod tests {
     fn action_mismatch_does_not_consume() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 30).unwrap();
-        let modified = ProposedAction::RunCommand {
-            executable: "echo".into(), args: vec!["changed".into()],
-            working_directory: Some(".".into()), timeout_ms: Some(1000),
-        };
+        let challenge = issue(&mut store,&action, 30).unwrap();
+        let modified = ProposedAction::ReadFile { path: "src/lib.rs".into(), max_bytes: Some(2048) };
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &modified),
+            consume(&mut store, &challenge.challenge_id, &modified),
             Err(StoreError::Binding(ApprovalError::DigestMismatch))
         ));
         assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
@@ -532,8 +661,8 @@ mod tests {
     fn issued_challenges_have_distinct_random_ids() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        let first = store.issue(&action, 30).unwrap();
-        let second = store.issue(&action, 30).unwrap();
+        let first = issue(&mut store,&action, 30).unwrap();
+        let second = issue(&mut store,&action, 30).unwrap();
         assert_ne!(first.challenge_id, second.challenge_id);
     }
 
@@ -541,7 +670,7 @@ mod tests {
     fn unknown_challenge_rejected() {
         let (mut store, _) = test_store_at(100);
         assert!(matches!(
-            store.consume(&"0".repeat(64), &sample_action()),
+            consume(&mut store, &"0".repeat(64), &sample_action()),
             Err(StoreError::NotFound)
         ));
     }
@@ -550,9 +679,9 @@ mod tests {
     fn issue_rejects_invalid_ttl() {
         let (mut store, _) = test_store_at(100);
         let action = sample_action();
-        assert!(matches!(store.issue(&action, 0), Err(StoreError::InvalidChallenge)));
+        assert!(matches!(issue(&mut store, &action, 0), Err(StoreError::InvalidChallenge)));
         assert!(matches!(
-            store.issue(&action, MAX_APPROVAL_TTL_SECONDS + 1),
+            issue(&mut store, &action, MAX_APPROVAL_TTL_SECONDS + 1),
             Err(StoreError::InvalidChallenge)
         ));
     }
@@ -560,7 +689,7 @@ mod tests {
     #[test]
     fn challenge_ids_are_256_bit_hex_values() {
         let (mut store, _) = test_store_at(100);
-        let challenge = store.issue(&sample_action(), 30).unwrap();
+        let challenge = issue(&mut store, &sample_action(), 30).unwrap();
         assert!(is_valid_challenge_id(&challenge.challenge_id));
         assert_eq!(challenge.challenge_id.len(), 64);
     }
@@ -569,7 +698,7 @@ mod tests {
     fn issue_rejects_expiry_outside_sqlite_integer_range() {
         let (mut store, _) = test_store_at(i64::MAX as u64);
         assert!(matches!(
-            store.issue(&sample_action(), 1),
+            issue(&mut store, &sample_action(), 1),
             Err(StoreError::InvalidChallenge)
         ));
     }
@@ -578,10 +707,10 @@ mod tests {
     fn clock_failure_fails_closed_without_consuming() {
         let (mut store, clock) = test_store_at(100);
         let action = sample_action();
-        let challenge = store.issue(&action, 30).unwrap();
+        let challenge = issue(&mut store,&action, 30).unwrap();
         clock.fail_with(ApprovalClockError::ClockMovedBackward);
         assert!(matches!(
-            store.consume(&challenge.challenge_id, &action),
+            consume(&mut store,&challenge.challenge_id, &action),
             Err(StoreError::Clock(ApprovalClockError::ClockMovedBackward))
         ));
         assert!(!store.is_consumed(&challenge.challenge_id).unwrap());
@@ -596,7 +725,7 @@ mod tests {
         let mut first = ApprovalStore::initialize_with_epoch(
             Connection::open(&database).unwrap(), first_clock, "process-one".into()
         ).unwrap();
-        let challenge = first.issue(&action, 60).unwrap();
+        let challenge = issue(&mut first, &action, 60).unwrap();
 
         let second_clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(1_001));
         let mut second = ApprovalStore::initialize_with_epoch(
@@ -604,11 +733,11 @@ mod tests {
         ).unwrap();
 
         assert!(matches!(
-            first.consume(&challenge.challenge_id, &action),
+            consume(&mut first, &challenge.challenge_id, &action),
             Err(StoreError::StaleRuntime)
         ));
         assert!(matches!(
-            second.consume(&challenge.challenge_id, &action),
+            consume(&mut second, &challenge.challenge_id, &action),
             Err(StoreError::AlreadyConsumedOrExpired)
         ));
     }
@@ -620,7 +749,7 @@ mod tests {
         let action = sample_action();
         let clock: Arc<dyn ApprovalClock> = Arc::new(TestClock::new(499));
         let mut issuer = ApprovalStore::initialize(Connection::open(&database).unwrap(), clock.clone()).unwrap();
-        let challenge = issuer.issue(&action, 1).unwrap();
+        let challenge = issue(&mut issuer, &action, 1).unwrap();
         let first = ApprovalStore::initialize(Connection::open(&database).unwrap(), clock.clone()).unwrap();
         let second = ApprovalStore::initialize(Connection::open(&database).unwrap(), clock).unwrap();
         let barrier = Arc::new(Barrier::new(3));
@@ -632,7 +761,7 @@ mod tests {
         let first_thread = std::thread::spawn(move || {
             let mut store = first;
             first_barrier.wait();
-            match store.consume(&first_challenge_id, &first_action) {
+            match consume(&mut store, &first_challenge_id, &first_action) {
                 Ok(()) => true,
                 Err(StoreError::AlreadyConsumedOrExpired) => false,
                 Err(error) => panic!("unexpected first consumer error: {error:?}"),
@@ -643,7 +772,7 @@ mod tests {
         let second_thread = std::thread::spawn(move || {
             let mut store = second;
             second_barrier.wait();
-            match store.consume(&second_challenge_id, &action) {
+            match consume(&mut store, &second_challenge_id, &action) {
                 Ok(()) => true,
                 Err(StoreError::AlreadyConsumedOrExpired) => false,
                 Err(error) => panic!("unexpected second consumer error: {error:?}"),

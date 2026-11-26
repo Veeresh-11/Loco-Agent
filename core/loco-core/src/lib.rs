@@ -329,6 +329,7 @@ pub mod approval_clock;
 pub mod approval_store;
 
 pub mod canonical_action_digest;
+pub mod canonical_snapshot_digest;
 
 pub mod security_decision_contract;
 
