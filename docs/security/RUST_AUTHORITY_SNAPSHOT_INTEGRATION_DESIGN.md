@@ -128,3 +128,33 @@ The process-local registry and platform adapter factory are now implemented as s
 - The factory's selected-root argument must be supplied by an explicit host workspace-selection flow. This API does not itself authenticate the host process or prove that a user selected the path.
 
 The factory milestone remains unvalidated until its new cross-platform CI matrix passes. It does not close the independent security-review or platform-authenticator gates, and it does not authorize file writes, patch application, or command execution.
+
+
+## 8. First-pass review — PR #131 (2026-11-26)
+
+Reviewed exact head `dc4bb925f8a0c86c3fb30c502144debc333bfc90`, including the platform factory, registry integration, and this design checkpoint.
+
+### Exact-head validation
+
+- Rust Core Tests run [#45437420180](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45437420180): all nine configured jobs passed (Ubuntu 22.04/24.04/26.04, Windows Server 2022/2025, macOS 15 arm64/Intel, macOS 26 arm64/Intel).
+- Contract Validation [#45437420337](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45437420337): passed.
+- GitHub review submissions and inline threads were empty when checked. This is a first-pass review, not independent approval.
+
+### Finding requiring remediation
+
+The Windows path bridge in `workspace_factory.rs::windows_selection_to_volume_root` passes a caller-provided UTF-16 path to `GetVolumePathNameW` without rejecting embedded NUL code units or explicitly bounding input length. It then performs prefix and relative-component checks on `to_string_lossy()`, while the Win32 API resolved the original UTF-16 sequence. Lossy conversion can alter non-Unicode Windows path components; therefore the relative components later opened beneath the volume-GUID root are not proven to correspond exactly to the path resolved by Win32. Embedded NUL can also cause the API to observe a truncated path. PR review comment [#7194545156](https://github.com/Veeresh-11/Loco-Agent/pull/131#issuecomment-7194545156) records the finding.
+
+Required remediation:
+1. Reject embedded NUL and overlong selected-root input before any Win32 API call.
+2. Perform mount-prefix and component extraction on the exact UTF-16 data returned by Win32, or explicitly reject non-Unicode selections before the API call; do not use lossy conversion for a security decision.
+3. Add Windows regression tests for embedded NUL, non-Unicode UTF-16, extended-length paths, mount-prefix boundaries, and root-of-volume selections.
+4. Keep UNC/network and unsupported forms fail-closed; document whether selecting a volume root itself is intentionally unsupported.
+
+### Other acceptance limits
+
+- The factory API does not authenticate the host UI or prove that a path came from an actual user-selection event; this must remain an integration contract, not an implied trust guarantee.
+- The Windows native adapter has an x86_64-only compile-time guard. The support matrix must not imply ARM64 Windows support.
+- macOS firmlink semantics and the Windows `OBJ_DONT_REPARSE` user-mode support contract remain independent Order 2 blockers.
+- The Unix factory tests use `tempdir_in(current_dir())`; CI runners must provide a writable working directory, or the fixture should use a dedicated writable temp parent.
+
+**Disposition:** PR #131 is exact-head CI-green but remains open/draft and not accepted. Fix the Windows conversion finding, rerun full exact-head CI, reconcile the platform-support matrix, and obtain independent security review before merge or protocol integration. No writes, patch execution, command execution, or production authority activation are authorized.
