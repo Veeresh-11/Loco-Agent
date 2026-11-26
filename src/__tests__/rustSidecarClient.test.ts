@@ -12,7 +12,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' | 'revoked-capture' = 'normal';
+  mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' | 'unknown-revoke' | 'malformed-error' | 'malformed-error-version' | 'malformed-error-request-id' | 'malformed-error-code' | 'malformed-error-message' | 'malformed-error-retryable' | 'revoked-capture' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
   workspaceHandle = 'a'.repeat(64);
 
@@ -47,9 +47,19 @@ class FakeChild extends EventEmitter {
           protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
           captured: true, byteLength: this.mode === 'bad-capture' ? request.maxBytes + 1 : 17
         };
-      } else if (request.messageType === 'revokeWorkspace' && this.mode === 'malformed-error') {
-        response = { protocolVersion: '2.0', messageType: 'error', requestId: request.requestId,
-          error: { code: 'WORKSPACE_NOT_FOUND', message: 'Not found.', retryable: false, unexpected: true } };
+      } else if (request.messageType === 'revokeWorkspace' && this.mode.startsWith('malformed-error')) {
+        response = {
+          protocolVersion: this.mode === 'malformed-error-version' ? '1.0' : '2.0',
+          messageType: 'error',
+          requestId: request.requestId,
+          error: {
+            code: this.mode === 'malformed-error-code' ? 'not a code' : 'WORKSPACE_NOT_FOUND',
+            message: this.mode === 'malformed-error-message' ? 42 : 'Not found.',
+            retryable: this.mode === 'malformed-error-retryable' ? 'false' : false,
+            ...(this.mode === 'malformed-error' ? { unexpected: true } : {})
+          }
+        };
+        if (this.mode === 'malformed-error-request-id') delete response.requestId;
       } else if (request.messageType === 'revokeWorkspace' && this.mode === 'unknown-revoke') {
         response = {
           ...(JSON.parse(readFileSync(join(__dirname, '../../tests/fixtures/protocol-v2/workspace-not-found-error.json'), 'utf8')) as Record<string, unknown>),
@@ -122,8 +132,15 @@ describe('RustSidecarClient protocol v2', () => {
     expect(child.killed).toBe(false);
   });
 
-  it('rejects malformed protocol error envelopes instead of trusting extra fields', async () => {
-    child.mode = 'malformed-error';
+  it.each([
+    'malformed-error',
+    'malformed-error-version',
+    'malformed-error-request-id',
+    'malformed-error-code',
+    'malformed-error-message',
+    'malformed-error-retryable'
+  ] as const)('fails closed for malformed protocol error envelope: %s', async mode => {
+    child.mode = mode;
     const handle = await client.registerWorkspace('/workspace/project');
     await expect(client.revokeWorkspace(handle)).rejects.toThrow(/invalid sidecar error response/i);
     expect(child.killed).toBe(true);
