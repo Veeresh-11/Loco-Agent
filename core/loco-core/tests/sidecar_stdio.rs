@@ -237,7 +237,7 @@ fn protocol_v2_handshake_advertises_only_implemented_read_only_capabilities() {
 }
 
 #[test]
-fn protocol_v2_unknown_and_already_revoked_handles_share_the_same_error() {
+fn protocol_v2_unknown_workspace_handle_returns_generic_not_found_error() {
     let mut input = Vec::new();
     line(&hello_v2("v2-boot"), &mut input);
     let fabricated = "a".repeat(64);
