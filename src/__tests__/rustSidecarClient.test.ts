@@ -13,6 +13,7 @@ class FakeChild extends EventEmitter {
   mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' = 'normal';
   capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation', 'approval_binding_challenge'];
   workspaceHandle = 'a'.repeat(64);
+  lastShutdownProtocolVersion?: string;
 
   constructor() {
     super();
@@ -50,6 +51,7 @@ class FakeChild extends EventEmitter {
       } else if (request.messageType === 'consumeBindingChallenge') {
         response = { protocolVersion, messageType: 'bindingVerified', requestId: request.requestId, bindingVerified: true };
       } else {
+        if (request.messageType === 'shutdown') this.lastShutdownProtocolVersion = protocolVersion;
         response = { protocolVersion, messageType: 'shutdown', requestId: request.requestId, accepted: true };
       }
       const frame = this.mode === 'oversized' && request.messageType === 'evaluate'
@@ -95,6 +97,16 @@ describe('RustSidecarClient protocol v2', () => {
     expect(challenge.challengeId).toBe('b'.repeat(64));
     await expect(client.consumeBindingChallenge(handle, challenge.challengeId, action))
       .resolves.toEqual({ bindingVerified: true });
+  });
+
+  it('uses the negotiated protocol version for graceful shutdown', async () => {
+    client = new RustSidecarClient({
+      resolveExecutable: () => '/extension/bin/loco-authority', extensionVersion: '0.1.0', protocolVersion: '2.1',
+      spawnProcess: () => child as unknown as cp.ChildProcessWithoutNullStreams, sleep: async () => undefined
+    });
+    await client.start();
+    await client.shutdown();
+    expect(child.lastShutdownProtocolVersion).toBe('2.1');
   });
 
   it('keeps binding challenge methods unavailable to protocol 2.0 clients', async () => {
