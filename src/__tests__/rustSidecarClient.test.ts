@@ -11,8 +11,9 @@ class FakeChild extends EventEmitter {
   signalCode: NodeJS.Signals | null = null;
   killed = false;
   mode: 'normal' | 'wrong-id' | 'oversized' | 'stall-evaluate' | 'stall-hello' | 'legacy' | 'bad-capture' = 'normal';
-  capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation'];
+  capabilities = ['proposal_evaluation', 'workspace_registration', 'workspace_capture', 'workspace_revocation', 'approval_binding_challenge'];
   workspaceHandle = 'a'.repeat(64);
+  lastShutdownProtocolVersion?: string;
 
   constructor() {
     super();
@@ -20,30 +21,38 @@ class FakeChild extends EventEmitter {
       const request = JSON.parse(chunk.toString('utf8').trim());
       if ((this.mode === 'stall-evaluate' && request.messageType === 'evaluate') ||
           (this.mode === 'stall-hello' && request.messageType === 'hello')) return;
-      const protocolVersion = this.mode === 'legacy' ? '1.0' : '2.0';
+      const protocolVersion = this.mode === 'legacy' ? '1.0' : String(request.protocolVersion ?? '2.0');
       let response: Record<string, unknown>;
       if (request.messageType === 'hello') {
-        response = {
-          protocolVersion, messageType: 'hello', requestId: request.requestId,
-          server: { name: 'loco-rust-authority', version: '0.1.0', capabilities: this.capabilities }
-        };
+        response = protocolVersion === '2.1'
+          ? { protocolVersion, messageType: 'hello', requestId: request.requestId,
+              negotiatedProtocolVersion: '2.1', supportedProtocolVersions: ['2.0', '2.1'],
+              server: { name: 'loco-rust-authority', version: '0.1.0', capabilities: this.capabilities } }
+          : { protocolVersion, messageType: 'hello', requestId: request.requestId,
+              server: { name: 'loco-rust-authority', version: '0.1.0', capabilities: this.capabilities } };
       } else if (request.messageType === 'evaluate') {
         response = {
-          protocolVersion: '2.0', messageType: 'decision',
+          protocolVersion, messageType: 'decision',
           requestId: this.mode === 'wrong-id' ? 'wrong' : request.requestId,
           decision: { contractVersion: '1.0', proposalId: 'p-1', decision: 'allow', reasonCode: 'POLICY_ALLOWED', message: 'Policy result only.' }
         };
       } else if (request.messageType === 'registerWorkspace') {
-        response = { protocolVersion: '2.0', messageType: 'workspaceRegistered', requestId: request.requestId, workspaceHandle: this.workspaceHandle };
+        response = { protocolVersion, messageType: 'workspaceRegistered', requestId: request.requestId, workspaceHandle: this.workspaceHandle };
       } else if (request.messageType === 'captureWorkspaceFile') {
         response = {
-          protocolVersion: '2.0', messageType: 'workspaceFileCaptured', requestId: request.requestId,
+          protocolVersion, messageType: 'workspaceFileCaptured', requestId: request.requestId,
           captured: true, byteLength: this.mode === 'bad-capture' ? request.maxBytes + 1 : 17
         };
       } else if (request.messageType === 'revokeWorkspace') {
-        response = { protocolVersion: '2.0', messageType: 'workspaceRevoked', requestId: request.requestId, revoked: true };
+        response = { protocolVersion, messageType: 'workspaceRevoked', requestId: request.requestId, revoked: true };
+      } else if (request.messageType === 'issueBindingChallenge') {
+        response = { protocolVersion, messageType: 'bindingChallengeIssued', requestId: request.requestId,
+          challengeId: 'b'.repeat(64), actionDigest: 'c'.repeat(64), snapshotDigest: 'd'.repeat(64), expiresAtUnix: 2_000_000_000 };
+      } else if (request.messageType === 'consumeBindingChallenge') {
+        response = { protocolVersion, messageType: 'bindingVerified', requestId: request.requestId, bindingVerified: true };
       } else {
-        response = { protocolVersion: '2.0', messageType: 'shutdown', requestId: request.requestId, accepted: true };
+        if (request.messageType === 'shutdown') this.lastShutdownProtocolVersion = protocolVersion;
+        response = { protocolVersion, messageType: 'shutdown', requestId: request.requestId, accepted: true };
       }
       const frame = this.mode === 'oversized' && request.messageType === 'evaluate'
         ? Buffer.concat([Buffer.alloc(12 * 1024 * 1024 + 1, 0x61), Buffer.from('\n')])
@@ -76,6 +85,46 @@ describe('RustSidecarClient protocol v2', () => {
   });
 
   afterEach(async () => client.shutdown());
+
+  it('negotiates protocol 2.1 and issues/consumes a binding verification result', async () => {
+    client = new RustSidecarClient({
+      resolveExecutable: () => '/extension/bin/loco-authority', extensionVersion: '0.1.0', protocolVersion: '2.1',
+      spawnProcess: () => child as unknown as cp.ChildProcessWithoutNullStreams, sleep: async () => undefined
+    });
+    const handle = await client.registerWorkspace('/workspace/project');
+    const action = { type: 'read_file' as const, path: 'src/main.rs', maxBytes: 1024 };
+    const challenge = await client.issueBindingChallenge(handle, action, 60);
+    expect(challenge.challengeId).toBe('b'.repeat(64));
+    await expect(client.consumeBindingChallenge(handle, challenge.challengeId, action))
+      .resolves.toEqual({ bindingVerified: true });
+  });
+
+  it('uses the negotiated protocol version for graceful shutdown', async () => {
+    client = new RustSidecarClient({
+      resolveExecutable: () => '/extension/bin/loco-authority', extensionVersion: '0.1.0', protocolVersion: '2.1',
+      spawnProcess: () => child as unknown as cp.ChildProcessWithoutNullStreams, sleep: async () => undefined
+    });
+    await client.start();
+    await client.shutdown();
+    expect(child.lastShutdownProtocolVersion).toBe('2.1');
+  });
+
+  it('keeps binding challenge methods unavailable to protocol 2.0 clients', async () => {
+    await expect(client.issueBindingChallenge('a'.repeat(64), { type: 'read_file', path: 'src/main.rs' }, 60))
+      .rejects.toThrow(/protocol 2.1/i);
+  });
+
+  it('validates binding action and TTL before sending a request', async () => {
+    client = new RustSidecarClient({
+      resolveExecutable: () => '/extension/bin/loco-authority', extensionVersion: '0.1.0', protocolVersion: '2.1',
+      spawnProcess: () => child as unknown as cp.ChildProcessWithoutNullStreams, sleep: async () => undefined
+    });
+    await expect(client.issueBindingChallenge('a'.repeat(64), { type: 'read_file', path: '../secret' }, 60))
+      .rejects.toThrow(/path/i);
+    await expect(client.issueBindingChallenge('a'.repeat(64), { type: 'read_file', path: 'src/main.rs' }, 301))
+      .rejects.toThrow(/TTL/i);
+    expect(child.killed).toBe(false);
+  });
 
   it('requires a v2 handshake and correlates a policy decision', async () => {
     const decision = await client.evaluate({ contractVersion: '1.0', proposalId: 'p-1' });
