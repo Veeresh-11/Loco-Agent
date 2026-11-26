@@ -44,16 +44,18 @@ jobs:
           const fs = require('node:fs');
           const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
           const entry = lock.packages?.['node_modules/brace-expansion'];
-          const isaacs = lock.packages?.['node_modules/@isaacs/brace-expansion'];
+          const isaacs = Object.entries(lock.packages ?? {}).filter(([path]) => path === 'node_modules/@isaacs/brace-expansion' || path.endsWith('/node_modules/@isaacs/brace-expansion'));
           if (entry?.version !== '1.1.21') throw new Error('Expected root brace-expansion 1.1.21; got '+entry?.version);
-          if (isaacs?.version !== '5.0.1') throw new Error('Expected @isaacs/brace-expansion 5.0.1; got '+isaacs?.version);
-          console.log('Candidate root brace-expansion:',entry.version,'@isaacs/brace-expansion:',isaacs.version);
+          if (isaacs.length === 0 || isaacs.some(([,pkg]) => pkg.version !== '5.0.1')) throw new Error('Expected every @isaacs/brace-expansion lockfile entry to be 5.0.1; got '+JSON.stringify(isaacs.map(([path,pkg])=>({path,version:pkg.version}))));
+          console.log('Candidate root brace-expansion:',entry.version,'@isaacs/brace-expansion entries:',JSON.stringify(isaacs.map(([path,pkg])=>({path,version:pkg.version}))));
           NODE
       - name: Clean install candidate on Node 20
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify installed package and run project checks on Node 20
         run: |
-          node -e "const p=require('brace-expansion/package.json'); const q=require('@isaacs/brace-expansion/package.json'); if(p.version!=='1.1.21'||q.version!=='5.0.1') throw new Error(p.version+' / '+q.version); console.log(p.version,q.version)"
+          node -e "const p=require('brace-expansion/package.json'); if(p.version!=='1.1.21') throw new Error(p.version); console.log('brace-expansion',p.version)"
+          npm ls @isaacs/brace-expansion --all
+          npm ls @isaacs/brace-expansion --all | grep -q '@isaacs/brace-expansion@5.0.1'
           npm run compile
           npm test -- --runInBand
           npm run lint
@@ -66,7 +68,9 @@ jobs:
       - name: Clean install and run project checks on Node 22
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          node -e "const p=require('brace-expansion/package.json'); if(p.version!=='1.1.21') throw new Error(p.version); console.log(p.version)"
+          node -e "const p=require('brace-expansion/package.json'); if(p.version!=='1.1.21') throw new Error(p.version); console.log('brace-expansion',p.version)"
+          npm ls @isaacs/brace-expansion --all
+          npm ls @isaacs/brace-expansion --all | grep -q '@isaacs/brace-expansion@5.0.1'
           npm run compile
           npm test -- --runInBand
           npm run lint
