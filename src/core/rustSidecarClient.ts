@@ -73,7 +73,8 @@ export class RustSidecarClient implements vscodeDisposable {
     }, signal);
     if (response.messageType === 'error') throw protocolError(response);
     if (response.messageType !== 'decision' || !isObject(response.decision) ||
-        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'decision'])) {
+        !hasExactKeys(response, ['protocolVersion', 'messageType', 'requestId', 'decision']) ||
+        !hasExactKeys(response.decision, ['contractVersion', 'proposalId', 'decision', 'reasonCode', 'message'])) {
       await this.terminate();
       throw new Error('Unexpected sidecar decision response.');
     }
