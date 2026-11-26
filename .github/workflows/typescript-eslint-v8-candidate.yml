@@ -36,7 +36,7 @@ jobs:
             const p = lock.packages[`node_modules/${name}`];
             if (!p || p.version !== '8.74.0') throw new Error(`Expected ${name}@8.74.0, got ${p?.version}`);
             if (!p.engines?.node || !p.engines.node.includes('20')) throw new Error(`Unexpected Node engine for ${name}: ${p.engines?.node}`);
-            if (!p.peerDependencies?.eslint?.includes('8.56.0')) throw new Error(`Unexpected ESLint peer range for ${name}: ${p.peerDependencies?.eslint}`);
+            if (!p.peerDependencies?.eslint?.includes('8.57.0')) throw new Error(`Unexpected ESLint peer range for ${name}: ${p.peerDependencies?.eslint}`);
             console.log(name, p.version, p.engines.node, p.peerDependencies.eslint);
           }
           NODE
