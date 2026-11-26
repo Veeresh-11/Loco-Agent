@@ -287,7 +287,7 @@ export class RustSidecarClient implements vscodeDisposable {
     if (this.started && !this.busy) {
       try {
         const response = await this.exchange({
-          protocolVersion: PROTOCOL_VERSION,
+          protocolVersion: this.protocolVersion,
           messageType: 'shutdown',
           requestId: randomUUID()
         }, this.options.shutdownTimeoutMs ?? 2000);
