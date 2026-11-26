@@ -44,10 +44,7 @@ jobs:
             'glob@^13': '14.0.6',
             'minimatch@^9': '11.0.9',
             'minimatch@^10': '11.0.9',
-            '@vscode/vsce': {
-              ...(p.overrides?.['@vscode/vsce'] ?? {}),
-              '@azure/identity': '4.13.0'
-            }
+            '@azure/identity': '4.13.0'
           };
           fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
           NODE
@@ -98,10 +95,7 @@ jobs:
             'glob@^13': '14.0.6',
             'minimatch@^9': '11.0.9',
             'minimatch@^10': '11.0.9',
-            '@vscode/vsce': {
-              ...(p.overrides?.['@vscode/vsce'] ?? {}),
-              '@azure/identity': '4.13.0'
-            }
+            '@azure/identity': '4.13.0'
           };
           fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
           NODE
