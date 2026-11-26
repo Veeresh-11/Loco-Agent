@@ -5,5 +5,8 @@
   "description": "Isolated VS Code extension packaging toolchain for LOCO Agent",
   "devDependencies": {
     "@vscode/vsce": "4.1.0"
+  },
+  "overrides": {
+    "minimatch": "11.0.9"
   }
 }
