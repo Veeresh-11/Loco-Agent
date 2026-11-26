@@ -54,7 +54,7 @@ jobs:
           const identity = lock.packages['node_modules/@azure/identity'];
           const msal = lock.packages['node_modules/@azure/msal-node'];
           if (!identity || identity.version !== '4.14.1') throw new Error(`Expected @azure/identity 4.14.1, got ${identity?.version}`);
-          if (!msal || !/^7\\./.test(msal.version) || !identity.dependencies?.['@azure/msal-node']?.startsWith('^7.1.0')) throw new Error(`Expected Azure Identity's patched MSAL Node 7.x dependency, got ${msal?.version}`);
+          if (!msal || msal.version.split('.')[0] !== '7' || !identity.dependencies?.['@azure/msal-node']?.startsWith('^7.1.0')) throw new Error(`Expected Azure Identity's patched MSAL Node 7.x dependency, got ${msal?.version}`);
           console.log({identity: identity.version, identityMsalRange: identity.dependencies['@azure/msal-node'], msal: msal.version});
           NODE
       - name: Validate candidate lockfile
