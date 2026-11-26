@@ -115,7 +115,7 @@ jobs:
           const lock = JSON.parse(fs.readFileSync('package-lock.json','utf8'));
           const rows = Object.entries(lock.packages ?? {}).filter(([entry]) => entry.endsWith('/node_modules/glob') || entry === 'node_modules/glob' || entry.endsWith('/node_modules/minimatch') || entry === 'node_modules/minimatch').map(([entry,p]) => ({entry,version:p.version}));
           const badGlob = rows.filter(x => x.entry.endsWith('/glob') && Number(x.version.split('.')[0]) >= 9 && !(Number(x.version.split('.')[0]) > 14 || (Number(x.version.split('.')[0]) === 14 && (Number(x.version.split('.')[1]) > 0 || (Number(x.version.split('.')[1]) === 0 && Number(x.version.split('.')[2]) >= 2)))));
-          const badMinimatch = rows.filter(x => { const [major,minor,patch] = x.version.split('.').map(Number); return x.path.endsWith('/minimatch') && major >= 7 && (major < 11 || (major === 11 && minor === 0 && patch < 8)); });
+          const badMinimatch = rows.filter(x => { const [major,minor,patch] = x.version.split('.').map(Number); return x.entry.endsWith('/minimatch') && major >= 7 && (major < 11 || (major === 11 && minor === 0 && patch < 8)); });
           if (badGlob.length || badMinimatch.length) throw new Error('Override-free lockfile contains affected packages: '+JSON.stringify({badGlob,badMinimatch}));
           console.log('Override-free reconciled glob/minimatch entries:',JSON.stringify(rows,null,2));
           NODE
