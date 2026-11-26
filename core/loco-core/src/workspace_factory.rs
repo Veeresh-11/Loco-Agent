@@ -77,14 +77,9 @@ fn windows_selection_to_volume_root(
         GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
     };
 
-    if !selected_root.is_absolute() {
-        return Err(WorkspaceFactoryError::InvalidSelection);
-    }
-
-    let selected = selected_root.to_string_lossy();
-    let selected_wide: Vec<u16> = selected_root
-        .as_os_str()
-        .encode_wide()
+    let selected = validate_windows_selected_path(selected_root)?;
+    let selected_wide: Vec<u16> = selected
+        .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
 
@@ -129,6 +124,9 @@ fn windows_selection_to_volume_root(
     let volume_guid_root = String::from_utf16(&volume_buffer[..volume_end])
         .map_err(|_| WorkspaceFactoryError::InvalidSelection)?;
 
+    // Both values are now valid Unicode strings decoded strictly from the
+    // exact UTF-16 values used/returned by Win32. Never make path decisions on
+    // a lossy representation of the caller's original OsStr.
     let selected_normalized = normalize_windows_drive_path(&selected)
         .ok_or(WorkspaceFactoryError::InvalidSelection)?;
     let mount_normalized = normalize_windows_drive_path(&mount)
@@ -161,6 +159,27 @@ fn windows_selection_to_volume_root(
     }
 
     Ok((volume_guid_root, components.join("/")))
+}
+
+#[cfg(target_os = "windows")]
+fn validate_windows_selected_path(selected_root: &Path) -> Result<String, WorkspaceFactoryError> {
+    const MAX_WINDOWS_PATH_UNITS: usize = 32_767;
+
+    if !selected_root.is_absolute() {
+        return Err(WorkspaceFactoryError::InvalidSelection);
+    }
+
+    // Windows paths are UTF-16. Reject ill-formed UTF-16 rather than silently
+    // replacing code units, and reject NUL before passing the path to Win32.
+    let selected = selected_root
+        .to_str()
+        .ok_or(WorkspaceFactoryError::InvalidSelection)?;
+    if selected.contains('\\0')
+        || selected.encode_utf16().count() > MAX_WINDOWS_PATH_UNITS
+    {
+        return Err(WorkspaceFactoryError::InvalidSelection);
+    }
+    Ok(selected.to_owned())
 }
 
 #[cfg(target_os = "windows")]
@@ -197,6 +216,33 @@ fn normalize_windows_drive_path(value: &str) -> Option<String> {
 #[cfg(all(test, target_os = "windows"))]
 mod windows_tests {
     use super::*;
+
+    #[test]
+    fn selected_path_validation_rejects_embedded_nul_and_overlong_paths() {
+        use std::path::PathBuf;
+
+        assert_eq!(
+            validate_windows_selected_path(Path::new("C:\\\\work\\\\repo\\0hidden")),
+            Err(WorkspaceFactoryError::InvalidSelection)
+        );
+        let overlong = format!("C:\\\\{}", "a".repeat(32_768));
+        assert_eq!(
+            validate_windows_selected_path(Path::new(&overlong)),
+            Err(WorkspaceFactoryError::InvalidSelection)
+        );
+        let _ = PathBuf::new();
+    }
+
+    #[test]
+    fn selected_path_validation_rejects_unpaired_utf16_surrogates() {
+        use std::os::windows::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_wide(&[b'C' as u16, b':' as u16, b'\\\\' as u16, 0xD800]);
+        let path = std::path::PathBuf::from(invalid);
+        assert_eq!(
+            validate_windows_selected_path(&path),
+            Err(WorkspaceFactoryError::InvalidSelection)
+        );
+    }
 
     #[test]
     fn windows_path_normalization_accepts_drive_paths_and_extended_prefix() {
