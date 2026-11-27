@@ -788,6 +788,55 @@ mod tests {
  }
 
  #[test]
+ fn opened_system_data_firmlinks_are_rejected_by_handle_volume_identity() {
+  use std::os::unix::fs::MetadataExt;
+
+  let system_root = File::open("/System").unwrap();
+  let data_root = File::open("/System/Volumes/Data").unwrap();
+  let system_id = filesystem_id(&system_root).unwrap();
+  let data_id = filesystem_id(&data_root).unwrap();
+  assert_ne!(system_id, data_id,
+   "System and Data must expose distinct f_fsid identities");
+  assert_eq!(system_root.metadata().unwrap().dev(), data_root.metadata().unwrap().dev(),
+   "fixture must preserve the same-st_dev case so f_fsid is the discriminating identity");
+
+  let mut source_paths = vec![
+   PathBuf::from("/Users"),
+   PathBuf::from("/Applications"),
+   PathBuf::from("/Library"),
+   PathBuf::from("/private"),
+  ];
+  let firmlinks = std::fs::read_to_string("/usr/share/firmlinks")
+   .expect("macOS system firmlink map");
+  for line in firmlinks.lines() {
+   let mut fields = line.split_whitespace();
+   let source = match fields.next() { Some(value) => value, None => continue };
+   if Path::new(source).starts_with("/System/Library") {
+    source_paths.push(PathBuf::from(source));
+   }
+  }
+
+  assert!(source_paths.len() > 4, "runner must provide nested System/Data firmlink fixtures");
+  for source in source_paths {
+   let parent_path = source.parent().expect("firmlink source parent");
+   let name = source.file_name().and_then(|value| value.to_str())
+    .expect("UTF-8 firmlink source name");
+   let parent = File::open(parent_path)
+    .unwrap_or_else(|error| panic!("open firmlink parent {}: {error}", parent_path.display()));
+   assert_eq!(filesystem_id(&parent).unwrap(), system_id,
+    "firmlink source parent must be on the System volume: {}", parent_path.display());
+
+   // This deliberately bypasses the earlier bulk preflight and opens the
+   // real firmlink relative to the retained parent handle. The post-open
+   // f_fsid check must identify the Data-volume target before any read.
+   let opened = open_dir(&parent, name)
+    .unwrap_or_else(|error| panic!("open firmlink target {}/{}: {error:?}", parent_path.display(), name));
+   assert_eq!(filesystem_id(&opened).unwrap(), data_id,
+    "opened firmlink target must be identified as Data volume: {}", source.display());
+  }
+ }
+
+ #[test]
  fn bulk_preflight_rejects_nested_system_data_firmlinks() {
   let firmlinks = std::fs::read_to_string("/usr/share/firmlinks")
    .expect("macOS system firmlink map");
