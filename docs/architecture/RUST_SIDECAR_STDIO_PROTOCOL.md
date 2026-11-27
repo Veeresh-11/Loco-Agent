@@ -37,11 +37,11 @@ Capabilities are descriptive runtime feature probes, not authorization grants.
 
 - `proposal_evaluation`: the Rust policy evaluator is available.
 - `macos_fcntl_getpath_nofirmlink`: on macOS, the sidecar opened its current working directory and successfully queried command 102 (`F_GETPATH_NOFIRMLINK`) with a bounded `MAXPATHLEN` buffer during startup.
-- `macos_attr_cmnex_nofirmlinkpath`: on macOS, the sidecar successfully queried `ATTR_CMNEXT_NOFIRMLINKPATH` for its current working directory using `getattrlistat` with `FSOPT_NOFOLLOW_ANY | FSOPT_RESOLVE_BENEATH | FSOPT_ATTR_CMN_EXTENDED`.
+- `macos_attr_cmnex_nofirmlinkpath`: on macOS, the sidecar successfully enumerated the root directory's `System` entry with `getattrlistbulk`, requesting `ATTR_CMNEXT_NOFIRMLINKPATH` through `FSOPT_ATTR_CMN_EXTENDED`.
 - Both macOS capabilities are omitted on non-macOS systems and when their respective probes fail for any reason. The sidecar remains available for proposal evaluation.
-- The snapshot adapter requires the extended-attribute capability for its pre-open child-entry check and the fcntl capability for the post-open descriptor cross-check; if either is unavailable, workspace snapshot acquisition fails closed.
+- The snapshot adapter requires the extended-attribute capability for its pre-open child-entry check and the fcntl capability for the post-open descriptor cross-check; if either is unavailable, workspace snapshot acquisition fails closed. Each `getattrlistbulk` scan uses a fresh directory file description to avoid shared offsets across concurrent captures, is bounded to 16,384 entries, and compares the returned entry path with the retained parent descriptor path plus the requested name.
 - The capability is only a process/host availability signal. It does not guarantee that every later descriptor query succeeds, does not prove workspace ancestry, and does not authorize file access.
-- The macOS snapshot adapter must query every retained descriptor, compare its firmlink-free path against the retained root path using component-aware containment, preserve `f_fsid` checks and handle-relative opens, and fail closed if a query fails.
+- The macOS snapshot adapter uses the bulk entry path only as a fail-closed pre-open signal, then preserves handle-relative `openat`, `O_NOFOLLOW`, post-open descriptor path checks, component-aware containment, and `f_fsid` checks. The path is not a standalone authorization grant.
 - The TypeScript parent validates capability names and exposes them to future feature gates. Unknown well-formed capabilities are retained but never interpreted as permissions.
 
 ## Message types
