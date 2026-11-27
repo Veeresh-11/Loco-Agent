@@ -1521,7 +1521,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/macos-intermediate-directory-swap-race` | Ancestry/diff checked: 0 ahead / 210 behind current feature base, no unique changes; inherited source review pending |
 | `test/macos-nested-apfs-mount-boundary` | Ancestry/diff checked: 0 ahead / 159 behind current feature base, no unique changes; inherited source review pending |
 | `test/macos-nested-firmlink-preflight` | Scoped source/doc review completed; 25 ahead / 0 behind feature base, diverged 9 ahead / 15 behind #107; no PR; parser/doc findings recorded; full branch review pending |
-| `test/macos-openat-resolve-beneath-firmlink` | Pending — branch-level source review not yet completed |
+| `test/macos-openat-resolve-beneath-firmlink` | PR #110 scoped source review completed; probe hardened at 33549eb; exact-head CI pending; full branch review/independent security review pending |
 | `test/windows-final-file-mutation-race` | Pending — branch-level source review not yet completed |
 | `test/windows-intermediate-reparse-race` | Pending — branch-level source review not yet completed |
 | `test/windows-junction-race-retry` | Pending — branch-level source review not yet completed |
@@ -1606,3 +1606,15 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Branch inventory remains 175. The rows distinguish scoped review and ancestry-only checks from full review. **All branches reviewed: NO.**
 - No PRs merged/closed and no branches deleted. Issue #74 and independent native security review remain open gates.
 - Next task: review `test/macos-openat-resolve-beneath-firmlink` as the next code-bearing native branch, comparing its API evidence, native probe, parser, and support-matrix claims against the current #106/#107 stack.
+
+
+## Execution update — 2026-11-27: PR #110 openat-beneath probe review
+
+- Reviewed PR #110 (`test/macos-openat-resolve-beneath-firmlink`) against its PR #109 XNU-audit base. PR #110 head before the review fix was `a50177ea675db654fd7a2f625d5bd7910bb35665`; the branch is 13 commits ahead / 0 behind its base and changes the macOS workflow, adapter regression test, native probe, and supporting security docs.
+- The adapter regression intentionally bypasses bulk preflight, opens OS-provided firmlinks relative to retained parent descriptors, and checks parent System versus opened Data `f_fsid`. This is the right security boundary for the tested System/Data case, subject to platform support limits and independent review.
+- Found diagnostic correctness gaps in `scripts/macos-openat-resolve-beneath-firmlink-probe.c`: ordinary controls were allowed to fail under `O_RESOLVE_BENEATH` without failing the probe; every flagged-open error was classified as a policy block rather than requiring `ENOTCAPABLE`; and failed `F_GETPATH_NOFIRMLINK` observations were logged but did not fail the test. Several output strings also used escaped backslash-n sequences, collapsing log records.
+- Fixed in commit `33549ebfddf06c4025f3b2a900eab161c7375c8c`: ordinary controls must open, only `ENOTCAPABLE` is an acceptable mapped-entry block, descriptor path evidence is mandatory for baseline and successful flagged opens, and log records use real newlines. No production authorization logic changed.
+- Exact-head CI for `33549ebf...`: Rust Core Tests [#45999159794](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159794) and Contract Validation [#45999159812](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159812) were in progress at last poll. Previous runs #45982960193/#45982960286 passed on superseded head `a50177e...` and do not validate this fix.
+- PR #110 remains draft/open. Do not merge until both exact-head workflows pass, the current macOS probe output is inspected, and independent native security review is complete.
+- Branch inventory remains 175; **All branches reviewed: NO.** PR #110 is a scoped source review only; full branch history review and the remainder of the branch queue remain outstanding. No PRs were merged/closed and no branches deleted.
+- Next task: poll exact-head PR #110 CI and inspect the macOS job log for the new baseline/control assertions. Then continue with the next unreviewed branch in the native dependency order.
