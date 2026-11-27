@@ -140,6 +140,7 @@ const MAX_BULK_RECORD_BYTES: usize = 64 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BulkEntryRecord {
  name: Vec<u8>,
+ // Diagnostic metadata only; never use raw flags as firmlink authorization.
  flags: u32,
  no_firmlink_path: PathBuf,
 }
