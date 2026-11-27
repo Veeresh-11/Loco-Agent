@@ -187,6 +187,7 @@ pub enum WindowsRootError {
     NotDirectory,
     VolumeIdentityChanged,
     MetadataUnavailable,
+    InvalidFileIdentity,
     NotRegularFile,
     InvalidWorkspaceId,
 }
@@ -429,7 +430,18 @@ fn query_file_identity(file: &File) -> Result<WindowsFileIdentity, WindowsRootEr
             size_of::<FileIdInfo>() as u32)
     };
     if ok == 0 { return Err(WindowsRootError::MetadataUnavailable); }
-    Ok(WindowsFileIdentity { volume_serial: information.volume_serial_number, file_id: information.file_id })
+    let file_id = validate_file_id(information.file_id)?;
+    Ok(WindowsFileIdentity { volume_serial: information.volume_serial_number, file_id })
+}
+
+fn validate_file_id(file_id: [u8; 16]) -> Result<[u8; 16], WindowsRootError> {
+    // Windows documents an all-zero FILE_ID_128 when the filesystem does not
+    // support 128-bit identifiers. Never turn that sentinel into an identity:
+    // distinct objects could otherwise collide in snapshot/approval bindings.
+    if file_id == [0; 16] {
+        return Err(WindowsRootError::InvalidFileIdentity);
+    }
+    Ok(file_id)
 }
 
 fn validate_component(component: &str) -> Result<(), WindowsRootError> {
@@ -1547,6 +1559,21 @@ mod tests {
         assert_eq!(first, first_again, "same file should retain the same handle-derived identity");
         assert_eq!(first.volume_serial, second.volume_serial);
         assert_ne!(first.file_id, second.file_id, "distinct files should have distinct IDs on the test filesystem");
+    }
+
+    #[test]
+    fn file_identity_rejects_unsupported_all_zero_file_id() {
+        assert_eq!(
+            validate_file_id([0; 16]),
+            Err(WindowsRootError::InvalidFileIdentity),
+            "an all-zero FILE_ID_128 is the documented unsupported-filesystem sentinel"
+        );
+    }
+
+    #[test]
+    fn file_identity_accepts_nonzero_128_bit_identifier() {
+        let file_id = [0x5a; 16];
+        assert_eq!(validate_file_id(file_id), Ok(file_id));
     }
 
     #[test]
