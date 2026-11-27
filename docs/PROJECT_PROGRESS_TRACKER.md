@@ -827,3 +827,22 @@ For every branch not explicitly listed as reviewed in a dated review entry, stat
 
 
 - Review document updated on PR #112 branch in commit `da6b484b908fc56364e43bbfa01aad0b3de85739` (`docs/security/NATIVE_FILESYSTEM_API_REVIEW.md`). The new commit records the completed nine-job matrix, the zero-ID rejection and the unresolved `OBJ_DONT_REPARSE` contract gate. This docs-only head's workflow state must be read from the linked PR after CI starts; the previous code head's nine-job result is not silently treated as CI for the new docs commit.
+
+## Next native code review — PR #110 macOS firmlink probe hardening — 2026-11-27
+
+### Prior exact-head validation reconciliation
+
+- PR #112 head `da6b484b908fc56364e43bbfa01aad0b3de85739` now has both exact-head workflows completed successfully: Rust Core Tests [#45949106596](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45949106596) and Contract Validation [#45949106692](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45949106692). Rust Core Tests completed all nine matrix jobs. PR #112 remains draft/open; its Windows `OBJ_DONT_REPARSE` contract uncertainty and independent native security review remain unresolved.
+
+### PR #110 review finding and remediation
+
+- Following the task order's native filesystem work (order 2), reviewed PR #110 (`test/macos-openat-resolve-beneath-firmlink`) next: complete changed-file patch, C probe, macOS adapter regression, workflow invocation, support matrix, and probe interpretation document.
+- Found a diagnostic false-attribution gap in `scripts/macos-openat-resolve-beneath-firmlink-probe.c`: each failed flagged `openat` was labeled `blocked` and returned success without first proving that the same mapping could be opened without `O_RESOLVE_BENEATH`. The separate `..` control proves lexical escape rejection, but does not exclude a per-entry permission error, missing target or fixture drift. Such a failure could be mistaken for firmlink-specific policy behavior.
+- Fixed in commit `545b566cd856e40637b2bbb2af309386b9c1319b`: every mapping now has an unflagged `openat` baseline; the probe fails if that baseline is unavailable, logs its no-firmlink descriptor path, and then performs the flagged open. Production adapter behavior is unchanged; this is test/diagnostic hardening.
+- Updated `docs/security/MACOS_RESOLVE_BENEATH_FIRMLINK_PROBE.md` in commit `a50177ea675db654fd7a2f625d5bd7910bb35665` with the finding, fix and validation caveat. Posted PR #110 review follow-up comment [#7216006797](https://github.com/Veeresh-11/Loco-Agent/pull/110#issuecomment-7216006797). This is primary self-review, not independent approval.
+- PR #110 current head is `a50177ea675db654fd7a2f625d5bd7910bb35665` (branch `test/macos-openat-resolve-beneath-firmlink`). Commit-associated workflow listings for the code and documentation commits returned [{"id":45982920256,"name":"Rust Core Tests","status":"in_progress","conclusion":null},{"id":45982920311,"name":"Contract Validation","status":"completed","conclusion":"cancelled"},{"id":45982960193,"name":"Rust Core Tests","status":"pending","conclusion":null},{"id":45982960286,"name":"Contract Validation","status":"in_progress","conclusion":null}]. No exact-head validation result is available yet; do not claim the probe change passed. Require macOS compile/native probe plus all required Rust and contract checks on the final PR head.
+- Disposition: scoped code review performed and test-quality defect corrected; exact-head CI pending; PR #110 remains draft/open. Existing observation that `O_RESOLVE_BENEATH` permits tested System/Data firmlinks remains bounded to the prior probe revision and macOS 26.7.2 arm64 until the hardened probe is rerun.
+
+### Branch inventory status reaffirmed
+
+- Live branch census remains **175 branches** (100 + 75 across two API pages). **All branches reviewed: NO.** The census is complete for branch names at the time checked, but the detailed line-by-line review remains selective. Every branch not explicitly reviewed by head SHA in the dated review register is still `not yet reviewed` and remains in the repository-wide secondary audit backlog (priority order 10). No branches or PRs were closed/deleted.
