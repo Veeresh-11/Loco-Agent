@@ -888,3 +888,10 @@ For every branch not explicitly listed as reviewed in a dated review entry, stat
 - Live branch inventory rechecked on this pass: 100 branch heads on page 1 and 75 on page 2, 175 total.
 - **All branches reviewed? NO.** This pass reviewed the selected PR #106 dependency branch only; it did not individually inspect all 175 branch heads or all open PRs. Every branch not explicitly reviewed by exact head SHA remains not yet reviewed in the existing repository-wide secondary audit / coding-review backlog (priority order 10). Keep the backlog repository-wide, not limited to branches with open PRs. Branch census and green CI do not constitute code review.
 - No PRs were merged or closed; no branches were deleted.
+
+
+### PR #106 CI correction update — 2026-11-27
+
+- Exact-head Rust Core Tests [#45984098897](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45984098897) ran against merge commit `16420ecf02933f13f4e05a0161dc7d1cb2812f14` and failed in the macOS native-probe compile step. The compiler identified out-of-scope `name_start` and `name_ref` references in the new name/path overlap check. Linux and Windows jobs were still running at inspection; the overall run must not be described as passed.
+- Corrected the code in `e4fa7d51a0ab56040d7caa3d13fd4afe3820d306`: keep name start/length in record scope, use the retained length for overlap validation, and require the returned no-firmlink path to begin with `/`. Updated `docs/security/MACOS_FIRMLINK_EVIDENCE.md` in `cc7758783760ca5c940fe5d438cae445322a585d`; updated PR #106 body and added a second self-review comment [#7216196685](https://github.com/Veeresh-11/Loco-Agent/pull/106#issuecomment-7216196685).
+- Current PR #106 head is `cc7758783760ca5c940fe5d438cae445322a585d`, draft/open. New Rust Core Tests [#45984257580](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45984257580) is pending at this head. No Contract Validation run has been observed at this head. **Current disposition: review finding fixed; CI validation pending; no claim of task validation or completion.** Continue polling exact-head CI and inspect any new failure before proceeding to #104.
