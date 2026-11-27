@@ -90,3 +90,10 @@ Review of the PR #110 probe found that ordinary controls could be reported block
 Commit `33549ebfddf06c4025f3b2a900eab161c7375c8c` hardens the probe: ordinary controls must open under the flag; only `ENOTCAPABLE` can count as a mapped-entry block; baseline and successful flagged descriptors must provide no-firmlink paths; and output records are properly line-delimited. This is diagnostic-only.
 
 Exact-head Rust Core Tests [#45999159794](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159794) and Contract Validation [#45999159812](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159812) were in progress at the last poll on head `33549ebfddf06c4025f3b2a900eab161c7375c8c`. Earlier green runs apply only to the prior probe revision and do not validate this correction.
+
+
+## macOS 15 errno compatibility — 2026-11-27
+
+The expanded support-matrix branch records that the verified `O_RESOLVE_BENEATH` lexical parent-escape control reports `EACCES` on macOS 15.8.2 arm64 and 15.7.9 Intel, while newer Darwin runners report `ENOTCAPABLE`. The probe now captures the exact errno from its verified parent-escape control (accepting either observed code) and requires a mapped-entry failure to match that same per-runner errno. Ordinary controls must still open successfully; any other mapped-entry error remains inconclusive/fail. This keeps the diagnostic strict across the recorded OS generations without treating arbitrary errors as policy blocks.
+
+Source commits: `bc9e6bdb083939a734363f823b95663cb7729e75` and `1f50a44edee7adc3dcb8cdec93f6666ced2d446b`. Exact-head CI pending.
