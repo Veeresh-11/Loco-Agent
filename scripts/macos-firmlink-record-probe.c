@@ -44,7 +44,14 @@ static void dump_record(const unsigned char *record, size_t record_len) {
         size_t name_ref_end = offset + sizeof(name_ref);
         name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
         name_length = name_ref.attr_length;
-        size_t minimum_name_start = name_ref_end + sizeof(uint32_t) + sizeof(attrreference_t);
+        size_t trailing_fixed_fields = 0;
+        if (returned.commonattr & ATTR_CMN_FLAGS) {
+            trailing_fixed_fields += sizeof(uint32_t);
+        }
+        if (returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH) {
+            trailing_fixed_fields += sizeof(attrreference_t);
+        }
+        size_t minimum_name_start = name_ref_end + trailing_fixed_fields;
         if (name_start < 0 || (uint64_t)name_start < minimum_name_start ||
             name_ref.attr_length < 2 ||
             (uint64_t)name_start + name_ref.attr_length > record_len ||
@@ -54,8 +61,9 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         const unsigned char *name_bytes = record + (size_t)name_start;
-        if (name_bytes[name_ref.attr_length - 1] != '\0') {
-            fprintf(stderr, "name is not NUL terminated\n");
+        if (name_bytes[name_ref.attr_length - 1] != '\0' ||
+            memchr(name_bytes, '\0', name_ref.attr_length - 1) != NULL) {
+            fprintf(stderr, "name is not exactly NUL terminated\n");
             exit(2);
         }
         memcpy(name, name_bytes, name_ref.attr_length);
