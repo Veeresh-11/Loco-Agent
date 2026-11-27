@@ -170,3 +170,23 @@ A refreshed branch-name census yielded 175 branches (100 + 75). **All branches r
 ### PR #106 exact-head validation refresh — 2026-11-27
 
 Rust Core Tests run [#45997726375](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45997726375) was created for head `ba088e03e610e5c835f6b131b90a22ac75334877`, which includes parser fix `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f`. The run was pending with no jobs published at the last poll. Earlier run #45984257580 applies only to the prior head. Keep the probe under review until this exact-head run completes on the supported OS matrix.
+
+
+## PR #104 parent parser review — 2026-11-27
+
+Reviewed the parent implementation at head `5b78582e99230302ee2936f87c60b5ff7a0d1988`, source `core/loco-core/src/macos_snapshot_adapter.rs`.
+
+Findings:
+- `MAX_ENTRY_NAME_BYTES` was declared as 766 (Darwin `NAME_MAX * 3 + 1`) but the call site still passed a 256-byte maximum, rejecting valid longer UTF-8 names.
+- `attr_reference_range` did not enforce 4-byte alignment for the attrreference location and payload start.
+- The name payload bound did not require the payload to begin after the flags/path-reference fixed fields and did not establish disjoint name/path payloads.
+- Absolute-path validation did not reject `.` or `..` components.
+
+The descendant PR #107 parser correction addresses these items with the 766-byte bound, alignment checks, fixed-field and payload non-overlap, absolute path/dot-component validation, exact NUL termination and malformed-record tests. A detailed PR #104 conversation review was posted (comment #7218166118). Parent PR #104 must remain stacked and unmerged until the corrected descendant implementation is reconciled and exact-head validated.
+
+## PR #106 / #107 dependency refresh — 2026-11-27
+
+- PR #106 updated head `ba088e03e610e5c835f6b131b90a22ac75334877` passed Rust Core Tests run [#45997726375](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45997726375) on Ubuntu, Windows and macOS.
+- PR #107 was reconciled onto that exact #106 head in merge commit `e013d8e0fa5be7e14e0a4ed38a50bfe5cdeda5bb`, with the parser file as the only #107 change relative to #106. Compare is 16 ahead / 0 behind.
+- Reconciled-head Contract Validation [#45998186236](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998186236) was in progress; Rust Core Tests [#45998186291](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998186291) was queued at the last poll. Previous green PR #107 runs do not validate the reconciled SHA.
+- No PR was merged. Issue #74 and independent native security review remain open.
