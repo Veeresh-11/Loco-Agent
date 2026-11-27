@@ -27,7 +27,7 @@ static int print_descriptor_path(int fd, char *buffer, size_t size) {
     return 0;
 }
 
-static int probe_openat_beneath(const char *source_path, int is_firmlink_mapping) {
+static int probe_openat_beneath(const char *source_path, int is_firmlink_mapping, int expected_beneath_errno) {
     char parent_path[PATH_MAX];
     char leaf[NAME_MAX + 1];
     char resolved[PATH_MAX];
@@ -89,7 +89,7 @@ static int probe_openat_beneath(const char *source_path, int is_firmlink_mapping
         O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW | O_RESOLVE_BENEATH);
     int open_error = errno;
     if (child_fd < 0) {
-        if (open_error != ENOTCAPABLE) {
+        if (open_error != expected_beneath_errno) {
             printf("resolve_beneath source=%s beneath=inconclusive errno=%d (%s)\n",
                    source_path, open_error, strerror(open_error));
             close(parent_fd);
@@ -120,7 +120,7 @@ static int probe_openat_beneath(const char *source_path, int is_firmlink_mapping
     close(parent_fd);
     return 0;
 }
-static int verify_flag_rejects_parent_escape(void) {
+static int verify_flag_rejects_parent_escape(int *observed_denial_errno) {
     char template[] = "/tmp/loco-resolve-beneath-XXXXXX";
     char *root = mkdtemp(template);
     if (root == NULL) {
@@ -161,20 +161,21 @@ static int verify_flag_rejects_parent_escape(void) {
 }
 
 int main(void) {
-    if (verify_flag_rejects_parent_escape() != 0) {
+    int expected_beneath_errno = 0;
+    if (verify_flag_rejects_parent_escape(&expected_beneath_errno) != 0) {
         return 1;
     }
 
     const char *controls[] = {"/System", "/usr"};
     for (size_t i = 0; i < sizeof(controls) / sizeof(controls[0]); ++i) {
-        if (probe_openat_beneath(controls[i], 0) != 0) {
+        if (probe_openat_beneath(controls[i], 0, expected_beneath_errno) != 0) {
             return 2;
         }
     }
 
     const char *root_mappings[] = {"/Users", "/Applications", "/Library", "/private"};
     for (size_t i = 0; i < sizeof(root_mappings) / sizeof(root_mappings[0]); ++i) {
-        if (probe_openat_beneath(root_mappings[i], 1) != 0) {
+        if (probe_openat_beneath(root_mappings[i], 1, expected_beneath_errno) != 0) {
             return 3;
         }
     }
@@ -196,7 +197,7 @@ int main(void) {
         if (strncmp(source, prefix, sizeof(prefix) - 1) != 0) {
             continue;
         }
-        if (probe_openat_beneath(source, 1) != 0) {
+        if (probe_openat_beneath(source, 1, expected_beneath_errno) != 0) {
             fclose(map);
             return 5;
         }
