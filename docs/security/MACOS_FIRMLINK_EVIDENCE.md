@@ -78,3 +78,8 @@ This changes only diagnostic record validation; it does not alter adapter author
 ### CI finding and correction
 
 The first exact-head run after the parser hardening exposed a compile error in the diagnostic C probe: the name-range variables were scoped inside the optional name-attribute block but referenced later during the path-overlap check. The macOS job failed at the clang compile step before running the native probe. Corrected in code commit `e4fa7d51a0ab56040d7caa3d13fd4afe3820d306` by retaining the name start/length in the enclosing record scope and applying the absolute-path check. The failed run is [#45984098897](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45984098897); its failure is a real compile regression in the review fix, not a runner issue. A new exact-head run is required.
+
+
+## Diagnostic parser follow-up — 2026-11-27
+
+A subsequent source review found that the name payload lower bound reserved the flags word and extended-path reference unconditionally, although the parser has branches for records where those attributes are omitted. It also accepted an embedded NUL before the final name terminator. Both conditions are now handled in commit `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f`: the fixed-field reservation follows the returned-attribute bitmap, and the name must be exactly NUL terminated. This is parser robustness only; it does not change the diagnostic meaning of flags or paths. Exact-head CI is pending.
