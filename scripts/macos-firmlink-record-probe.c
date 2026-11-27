@@ -39,8 +39,11 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         memcpy(&name_ref, record + offset, sizeof(name_ref));
+        size_t name_ref_end = offset + sizeof(name_ref);
         int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
-        if (name_start < 0 || name_ref.attr_length == 0 ||
+        size_t minimum_name_start = name_ref_end + sizeof(uint32_t) + sizeof(attrreference_t);
+        if (name_start < 0 || (uint64_t)name_start < minimum_name_start ||
+            name_ref.attr_length < 2 ||
             (uint64_t)name_start + name_ref.attr_length > record_len ||
             name_ref.attr_length > sizeof(name)) {
             fprintf(stderr, "invalid name reference: offset=%lld length=%u record=%zu\n",
@@ -79,8 +82,10 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         memcpy(&path_ref, record + offset, sizeof(path_ref));
+        size_t path_ref_end = offset + sizeof(path_ref);
         int64_t path_start = (int64_t)offset + (int64_t)path_ref.attr_dataoffset;
-        if (path_start < 0 || path_ref.attr_length < 2 ||
+        if (path_start < 0 || (uint64_t)path_start < path_ref_end ||
+            path_ref.attr_length < 2 ||
             path_ref.attr_length > sizeof(nofirmlink_path) ||
             (uint64_t)path_start + path_ref.attr_length > record_len) {
             fprintf(stderr, "invalid nofirmlink path reference: offset=%lld length=%u record=%zu\n",
@@ -91,6 +96,11 @@ static void dump_record(const unsigned char *record, size_t record_len) {
         if (path_bytes[path_ref.attr_length - 1] != '\0' ||
             memchr(path_bytes, '\0', path_ref.attr_length - 1) != NULL) {
             fprintf(stderr, "nofirmlink path is not exactly NUL terminated\n");
+            exit(2);
+        }
+        if ((returned.commonattr & ATTR_CMN_NAME) &&
+            (uint64_t)name_start + name_ref.attr_length > (uint64_t)path_start) {
+            fprintf(stderr, "name payload overlaps nofirmlink path payload\\n");
             exit(2);
         }
         memcpy(nofirmlink_path, path_bytes, path_ref.attr_length);
