@@ -32,6 +32,8 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 
     char name[NAME_MAX * 3 + 1];
     name[0] = '\0';
+    int64_t name_start = 0;
+    uint32_t name_length = 0;
     if (returned.commonattr & ATTR_CMN_NAME) {
         attrreference_t name_ref;
         if (offset + sizeof(name_ref) > record_len) {
@@ -40,7 +42,8 @@ static void dump_record(const unsigned char *record, size_t record_len) {
         }
         memcpy(&name_ref, record + offset, sizeof(name_ref));
         size_t name_ref_end = offset + sizeof(name_ref);
-        int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+        name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+        name_length = name_ref.attr_length;
         size_t minimum_name_start = name_ref_end + sizeof(uint32_t) + sizeof(attrreference_t);
         if (name_start < 0 || (uint64_t)name_start < minimum_name_start ||
             name_ref.attr_length < 2 ||
@@ -93,13 +96,13 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         const unsigned char *path_bytes = record + (size_t)path_start;
-        if (path_bytes[path_ref.attr_length - 1] != '\0' ||
+        if (path_bytes[0] != '/' || path_bytes[path_ref.attr_length - 1] != '\0' ||
             memchr(path_bytes, '\0', path_ref.attr_length - 1) != NULL) {
             fprintf(stderr, "nofirmlink path is not exactly NUL terminated\n");
             exit(2);
         }
         if ((returned.commonattr & ATTR_CMN_NAME) &&
-            (uint64_t)name_start + name_ref.attr_length > (uint64_t)path_start) {
+            (uint64_t)name_start + name_length > (uint64_t)path_start) {
             fprintf(stderr, "name payload overlaps nofirmlink path payload\\n");
             exit(2);
         }
