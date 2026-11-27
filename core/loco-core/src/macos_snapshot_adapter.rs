@@ -1157,7 +1157,7 @@ mod tests {
     .unwrap_or_else(|error| panic!("query nested mapping {source}: {error:?}"));
    assert_eq!(observed, expected, "wrong no-firmlink path for {source}");
    assert_eq!(
-    preflight_entry_path(&parent, name),
+    preflight_entry_path(&parent, name.to_str().expect("firmlink name is UTF-8")),
     Err(SnapshotPayloadError::FirmlinkBoundary),
     "nested System/Data mapping {source} must be rejected by preflight"
    );
