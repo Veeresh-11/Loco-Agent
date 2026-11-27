@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-26, macos-26-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -73,6 +73,7 @@ jobs:
             cat /usr/share/firmlinks
           fi
           sw_vers
+          uname -m
           clang -Wall -Wextra -Werror scripts/macos-firmlink-record-probe.c -o "$RUNNER_TEMP/loco-firmlink-record-probe"
           "$RUNNER_TEMP/loco-firmlink-record-probe"
           clang -Wall -Wextra -Werror scripts/macos-openat-resolve-beneath-firmlink-probe.c -o "$RUNNER_TEMP/loco-openat-resolve-beneath-firmlink-probe"
