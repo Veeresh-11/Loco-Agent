@@ -1515,7 +1515,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/macos-15-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-bulk-record-parser-hardening` | Scoped parser review completed; stale/superseded candidate; full branch-level review pending |
-| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled onto #106 (0 behind); exact-head CI pending; full branch-level review pending |
+| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled onto latest #106 head (0 behind); exact-head CI pending; full branch-level review pending |
 | `test/macos-firmlink-extended-bulk-evidence` | PR #106 scoped source review completed; full branch-level review pending |
 | `test/macos-firmlink-volume-boundary` | Pending — branch-level source review not yet completed |
 | `test/macos-intermediate-directory-swap-race` | Pending — branch-level source review not yet completed |
@@ -1574,3 +1574,12 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Branch inventory remains **175 active branch names** (100 + 75 across the two pages). **All branches reviewed: NO.** Branch-level register records scoped reviews separately from full review status.
 - PRs #104/#106/#107 remain draft/open. No PR merge, closure, or branch deletion occurred. Issue #74 and independent native security review remain acceptance gates.
 - Next task: complete both exact-head workflows for reconciled #107 commit `e013d8e...`; then continue Order 2 native review queue with the next unreviewed code-bearing branch in dependency order.
+
+
+### PR #107 final-head CI refresh — 2026-11-27
+
+- Latest #106 base head is `c3f35dae2c628ff795869f7c62f26fb38913de2f`. PR #107 was refreshed to include that base; current PR head is `2d2a153c8775f075f69bd79a162be550bea11472`.
+- Compare #107 against #106: **19 ahead / 0 behind**, merge base `c3f35dae2c628ff795869f7c62f26fb38913de2f`; only `core/loco-core/src/macos_snapshot_adapter.rs` differs.
+- Exact-head Rust Core Tests [#45998450842](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450842) was pending; Contract Validation [#45998450978](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450978) was in progress at the last poll. Earlier runs #45998186236/#45998186291 apply to the superseded merge SHA and must not be used as final validation (the Rust run was cancelled on Windows).
+- PR #107 is still draft/open and reports mergeable=true. Keep it draft until both exact-head workflows pass and independent native security review is recorded.
+- Next task: poll #45998450842 and #45998450978 to completion; if both pass, continue the Order 2 native review queue. If either fails, fix the failure and rerun on the resulting exact head.
