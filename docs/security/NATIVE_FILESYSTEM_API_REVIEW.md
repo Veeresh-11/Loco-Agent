@@ -283,3 +283,20 @@ Inspected the historical commit `fix(macos): use libc-supported bulk attributes`
 The active descendant has superseded that change: it defines the Darwin `ATTR_CMN_ERROR` bit, requests it, conditionally parses the returned field, and uses bounded `attr_reference_range` checks for the variable-length payloads. The stale branch therefore has no unique active implementation to fix. Do not revive the historical reduced-error path.
 
 **Disposition:** ancestry-only/stale branch review recorded; no code changed. The active `feat/macos-bulk-firmlink-preflight` branch and complete inherited history still require review. This does not count as a full branch review.
+
+
+## PR #104 active bulk-preflight parser review refresh — 2026-11-27
+
+Refreshed PR #104 at head `5b78582e99230302ee2936f87c60b5ff7a0d1988` against its declared base `15e9a8ce6d7d1a974fc04e369e8fffb899119916`: 13 commits ahead / 0 behind, two changed paths. PR remains draft/open.
+
+Exact-head Rust Core Tests [#45344512869](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45344512869) and Contract Validation [#45344512880](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45344512880) passed. The macOS job log #138275985709 reports 121 passed, 0 failed, 1 ignored; the nested APFS mount-boundary fixture passed, while the same-volume nested-firmlink fixture remains unavailable/ignored.
+
+The build log independently confirms `MAX_ENTRY_NAME_BYTES` is unused and the production bulk parser still calls `attr_reference_range(..., 1, 256)`. The declared 766-byte UTF-8 name limit is therefore not active. The same build reports the old `FSOPT_RESOLVE_BENEATH` constant unused after migration to `getattrlistbulk`.
+
+The inline `bulk_entry_path_no_firmlink` parser also does not enforce 4-byte alignment for attrreference locations/payload starts and does not prove name/path payload disjointness from later fixed fields. It assumes the serialized order of optional `ATTR_CMN_ERROR`, name, flags and extended path fields; there are no isolated synthetic bulk-record fixtures covering truncated headers/records, missing returned bits, optional error-field placement/nonzero errors, overlapping payloads, or maximum-length names. The helper tests cover range arithmetic but do not establish the full production record parser contract.
+
+PR #107 contains a separate hardened parser implementation and fixtures for the 766-byte bound, alignment, fixed-field/payload separation, dot-component rejection, exact NUL termination and malformed records. Those improvements are not yet wired into PR #104's live inline bulk parser. Integrate/reuse the tested parser in the production path and add focused synthetic bulk-record coverage before treating these gaps as resolved.
+
+The production parser advances over `ATTR_CMN_FLAGS` without decoding or recording the value. Keep the raw flag discrepancy (`SF_FIRMLINK` versus hosted-runner `SF_NOUNLINK`) unresolved and diagnostic only. Do not infer firmlink authorization from these flags, `st_dev`, path strings, or `O_RESOLVE_BENEATH`; retain descriptor-relative opens, post-open descriptor checks and opened-handle filesystem identity as the tested System/Data boundary.
+
+**Disposition:** scoped review of PR #104's complete unique diff refreshed; no code change made in this review task. CI green does not clear parser correctness gaps. Keep PR #104 draft/open and unmerged pending parser integration, same-volume nested-firmlink evidence, issue #74 authoritative semantics reconciliation, and independent native security review. This is not a full review of all inherited branch history and does not change **All branches reviewed: NO**.
