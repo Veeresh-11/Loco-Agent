@@ -165,3 +165,8 @@ A refreshed branch-name census yielded 175 branches (100 + 75). **All branches r
 - The exact-head workflow has not yet been returned for this new commit. PR #106 is still draft/open and reports mergeable=false pending branch state; do not treat prior run #45984257580 as validation of this new head.
 - PR #107 now compares against the updated #106 base at 5 commits behind / 15 ahead (merge base remains `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`). Reconcile #107 after #106's exact-head CI settles.
 - The firmlink flag discrepancy remains unresolved. Issue #74 and independent native security review remain mandatory gates; no production confinement claim is supported.
+
+
+### PR #106 exact-head validation refresh — 2026-11-27
+
+Rust Core Tests run [#45997726375](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45997726375) was created for head `ba088e03e610e5c835f6b131b90a22ac75334877`, which includes parser fix `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f`. The run was pending with no jobs published at the last poll. Earlier run #45984257580 applies only to the prior head. Keep the probe under review until this exact-head run completes on the supported OS matrix.
