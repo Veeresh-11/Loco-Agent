@@ -59,22 +59,45 @@ static int probe_openat_beneath(const char *source_path) {
         return 1;
     }
 
+    // Establish that this exact mapping is ordinarily traversable before
+    // attributing any failure to O_RESOLVE_BENEATH. Without this control, an
+    // unrelated EACCES/ENOENT/metadata failure could be mislabeled as a
+    // beneath-policy denial and make the diagnostic inconclusive.
+    errno = 0;
+    int baseline_fd = openat(parent_fd, leaf,
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    int baseline_error = errno;
+    if (baseline_fd < 0) {
+        printf("resolve_beneath source=%s baseline=unavailable errno=%d (%s)\\n",
+               source_path, baseline_error, strerror(baseline_error));
+        close(parent_fd);
+        return 1;
+    }
+    if (print_descriptor_path(baseline_fd, resolved, sizeof(resolved)) == 0) {
+        printf("resolve_beneath source=%s baseline=opened nofirmlink_path=%s\\n",
+               source_path, resolved);
+    } else {
+        printf("resolve_beneath source=%s baseline=opened nofirmlink_path_error=%d\\n",
+               source_path, errno);
+    }
+    close(baseline_fd);
+
     errno = 0;
     int child_fd = openat(parent_fd, leaf,
         O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW | O_RESOLVE_BENEATH);
     int open_error = errno;
     if (child_fd < 0) {
-        printf("resolve_beneath source=%s outcome=blocked errno=%d (%s)\n",
+        printf("resolve_beneath source=%s beneath=blocked errno=%d (%s)\\n",
                source_path, open_error, strerror(open_error));
         close(parent_fd);
         return 0;
     }
 
     if (print_descriptor_path(child_fd, resolved, sizeof(resolved)) == 0) {
-        printf("resolve_beneath source=%s outcome=opened nofirmlink_path=%s\n",
+        printf("resolve_beneath source=%s beneath=opened nofirmlink_path=%s\\n",
                source_path, resolved);
     } else {
-        printf("resolve_beneath source=%s outcome=opened nofirmlink_path_error=%d\n",
+        printf("resolve_beneath source=%s beneath=opened nofirmlink_path_error=%d\\n",
                source_path, errno);
     }
     close(child_fd);
