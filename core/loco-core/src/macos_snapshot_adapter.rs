@@ -129,6 +129,11 @@ fn attr_reference_range(
 }
 
 #[cfg(target_os="macos")]
+// XNU documents UTF-8 names up to NAME_MAX * 3 bytes plus the NUL terminator.
+// Darwin NAME_MAX is 255, so the maximum attribute payload is 766 bytes.
+const MAX_ENTRY_NAME_BYTES: usize = 3 * 255 + 1;
+
+#[cfg(target_os="macos")]
 const MAX_BULK_RECORD_BYTES: usize = 64 * 1024;
 
 #[cfg(target_os="macos")]
@@ -189,7 +194,7 @@ fn parse_bulk_entry_record(record: &[u8]) -> Result<BulkEntryRecord, MacOsSnapsh
  let name_ref = unsafe {
   std::ptr::read_unaligned(record.as_ptr().add(offset).cast::<libc::attrreference_t>())
  };
- let name_range = attr_reference_range(record_len, offset, name_ref, 2, 256)?;
+ let name_range = attr_reference_range(record_len, offset, name_ref, 2, MAX_ENTRY_NAME_BYTES)?;
  let minimum_name_start = name_ref_end
   .checked_add(4 + reference_size)
   .ok_or(MacOsSnapshotAdapterError::InvalidRoot)?;
@@ -594,6 +599,24 @@ mod tests {
   assert_eq!(parsed.name, b"Users");
   assert_eq!(parsed.flags, 0x0010_0000);
   assert_eq!(parsed.no_firmlink_path, PathBuf::from("/System/Volumes/Data/Users"));
+ }
+
+ #[test]
+ fn bulk_entry_record_parser_accepts_maximum_utf8_name_payload_and_rejects_larger() {
+  let mut maximum_name = vec![b'a'; MAX_ENTRY_NAME_BYTES - 1];
+  maximum_name.push(0);
+  let valid = synthetic_bulk_entry_record(
+   &maximum_name, b"/workspace/entry\\0", 0, 0, true,
+  );
+  let parsed = parse_bulk_entry_record(&valid).unwrap();
+  assert_eq!(parsed.name.len(), MAX_ENTRY_NAME_BYTES - 1);
+
+  let mut oversized_name = vec![b'a'; MAX_ENTRY_NAME_BYTES];
+  oversized_name.push(0);
+  let oversized = synthetic_bulk_entry_record(
+   &oversized_name, b"/workspace/entry\\0", 0, 0, true,
+  );
+  assert!(parse_bulk_entry_record(&oversized).is_err());
  }
 
  #[test]
