@@ -1521,7 +1521,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/macos-intermediate-directory-swap-race` | Ancestry/diff checked: 0 ahead / 210 behind current feature base, no unique changes; inherited source review pending |
 | `test/macos-nested-apfs-mount-boundary` | Ancestry/diff checked: 0 ahead / 159 behind current feature base, no unique changes; inherited source review pending |
 | `test/macos-nested-firmlink-preflight` | Scoped source/doc review completed; 25 ahead / 0 behind feature base, diverged 9 ahead / 15 behind #107; no PR; parser/doc findings recorded; full branch review pending |
-| `test/macos-openat-resolve-beneath-firmlink` | PR #110 scoped source review completed; probe hardened; current head 5f6aed9; exact-head CI pending; full branch review/independent security review pending |
+| `test/macos-openat-resolve-beneath-firmlink` | PR #110 scoped source review and probe hardening completed; head 5f6aed9 exact-head Rust matrix + Contract Validation passed; full branch review/independent security review pending |
 | `test/windows-final-file-mutation-race` | Pending — branch-level source review not yet completed |
 | `test/windows-intermediate-reparse-race` | Pending — branch-level source review not yet completed |
 | `test/windows-junction-race-retry` | Pending — branch-level source review not yet completed |
@@ -1626,3 +1626,11 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Current-head Rust Core Tests [#45999357228](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357228) and Contract Validation [#45999357627](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357627) are pending. The earlier Rust run #45999159794 on intermediate head `33549eb...` was cancelled after subsequent commits; Contract Validation #45999159812 passed only on that intermediate head.
 - An additional doc-only intermediate head had a cancelled Rust run; do not use it as final evidence. Only the two current-head runs above determine validation.
 - PR #110 remains draft/open. Do not merge until current-head workflows pass and the macOS job output confirms ordinary controls open, baseline paths are available, mapped failures are specifically `ENOTCAPABLE`, and firmlink path outcomes match the documented experiment.
+
+
+### PR #110 exact-head result — 2026-11-27
+
+- Current head `5f6aed9fea3ac37c88ca281fa16ea6850805db7d`: Rust Core Tests [#45999357228](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357228) passed on Ubuntu, Windows and macOS; Contract Validation [#45999357627](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357627) passed.
+- Inspected macOS job log #140506854666. The `..` control was blocked with errno 107; ordinary `/System` and `/usr` controls opened; all four root and seven nested mappings opened both baseline and with `O_RESOLVE_BENEATH`; no-firmlink paths for all mapped entries pointed under `/System/Volumes/Data`. The new strict baseline/control/path checks therefore executed as intended.
+- This confirms `O_RESOLVE_BENEATH` does not reject the tested firmlink transitions on this runner. It is not an authorization primitive. PR #110 remains draft pending independent native security review and supported-platform decision.
+- Next code-bearing branch to review: `test/macos-15-firmlink-matrix`. It is 62 ahead / 6 behind the PR #110 branch and currently has no associated PR; review must distinguish its own source changes from inherited work and identify whether its older probe/workflow state is superseded.
