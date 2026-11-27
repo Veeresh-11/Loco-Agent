@@ -152,3 +152,16 @@ A refreshed branch-name census yielded 175 branches (100 + 75). **All branches r
 - Contract Validation #45996920864 passed on `0af5c5f8eb231254f0d82ea2b01c00f75d497a90`.
 - Rust Core Tests #45996920804 was still running at last poll; Ubuntu, Windows and macOS jobs were in progress. Await all three before marking exact-head validation complete.
 - The PR branch remains 4 commits behind its declared base and requires reconciliation.
+
+
+## Review addendum — 2026-11-27: PR #106 diagnostic probe follow-up
+
+- Reviewed the complete PR #106 patch and the current native source `scripts/macos-firmlink-record-probe.c` at branch head `cc7758783760ca5c940fe5d438cae445322a585d`.
+- The prior hardening correctly added lower-bound checks for attrreference payloads, absolute/exactly terminated no-firmlink paths, and name/path non-overlap. The probe remains diagnostic and does not convert flags or paths into an authorization signal.
+- Found two additional parser robustness issues:
+  1. The name payload lower-bound calculation unconditionally reserved a flags word and no-firmlink-path reference even though the parser separately supports records where those attributes are not returned. This could reject a valid record with an omitted optional field.
+  2. The name parser checked only the final NUL and did not reject an embedded NUL, unlike the no-firmlink path parser. A truncated C-string interpretation could mislabel a record.
+- Corrected both in commit `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f`: compute trailing fixed-field space from the actual returned attribute bitmap, and require exact name termination with no embedded NUL.
+- The exact-head workflow has not yet been returned for this new commit. PR #106 is still draft/open and reports mergeable=false pending branch state; do not treat prior run #45984257580 as validation of this new head.
+- PR #107 now compares against the updated #106 base at 5 commits behind / 15 ahead (merge base remains `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`). Reconcile #107 after #106's exact-head CI settles.
+- The firmlink flag discrepancy remains unresolved. Issue #74 and independent native security review remain mandatory gates; no production confinement claim is supported.
