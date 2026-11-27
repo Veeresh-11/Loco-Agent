@@ -4,8 +4,8 @@
 **Repository:** https://github.com/Veeresh-11/Loco-Agent  
 **Pull requests:** https://github.com/Veeresh-11/Loco-Agent/pulls  
 **Actions:** https://github.com/Veeresh-11/Loco-Agent/actions  
-**Latest completed stack PR at snapshot:** #59 (CI passed; draft)  
-**Current follow-up branch:** `test/windows-volume-mountpoint-coverage` (stacked on #59)
+**Latest fully validated stack PR at snapshot:** #59 (CI passed; draft). PR #60 contract validation passed; Ubuntu/Windows Rust jobs passed and macOS was queued at the last check.  
+**Current follow-up branch:** `security/native-filesystem-api-review` (stacked on #60)
 
 This document consolidates the project history, current implementation state, security boundaries, validation evidence, and remaining work. It is a status record, not a production-readiness or security-certification claim. Re-check GitHub before relying on any status after the date above.
 
@@ -34,17 +34,17 @@ Migration policy:
 
 ## 2. Current repository and PR state
 
-At the snapshot date, the repository has 60 pull requests:
+At the snapshot date, the repository has 61 pull requests:
 
 | PR range | State | Summary |
 |---|---|---|
 | #1–#5 | Closed, not merged | Early baseline, CI, patch review, streaming, retrieval evaluation work |
 | #6–#8 | Open, not draft | Consolidation, retrieval metric correction, workspace path-boundary tests |
-| #9–#60 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
+| #9–#61 | Open drafts | Architecture/contracts and the incremental Rust security/snapshot work |
 
-There are **55 open PRs (#6–#60)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
+There are **56 open PRs (#6–#61)**. The stack is dependent: later PRs use earlier branches as their base. These are not 50 independent changes. No PR in this stack has been merged to `main`.
 
-The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #60, based on #59.
+The current `main` branch remains the original TypeScript VS Code extension baseline. It does not yet contain the polyglot security stack described below. The top of the current development stack is #61, based on #60.
 
 ### PR history and delivered scope
 
@@ -108,6 +108,18 @@ The current `main` branch remains the original TypeScript VS Code extension base
 - **#58 — Windows symlink reparse-point coverage:** adds snapshot-adapter tests for intermediate directory symlinks and final-file symlinks. The tests require symlink creation to succeed rather than silently skipping; the Windows test job passed with the tests executed.
 - **#59 — Windows final-file mutation race:** races complete-content writes against snapshot capture. Successful captures must match one of the complete known payloads and validate the shared digest; fail-closed acquisition errors are accepted. The full Ubuntu/macOS/Windows Rust matrix and contract validation passed.
 - **#60 — Windows mounted-folder root admission coverage:** verifies that a DOS path to a mounted folder is not accepted as the trusted volume root; only canonical volume-GUID roots are admitted. This is lexical/root-admission coverage, not a test that creates or traverses a real secondary-volume mount point.
+- **#61 — Native filesystem API review:** records source-level findings for Linux `openat2`, macOS `openat/O_NOFOLLOW`, and Windows `CreateFileW/NtCreateFile`. Identifies mount-policy inconsistency, Linux exact-read-length hardening, Windows FFI/identity/filesystem admission gates, and native macOS/Windows validation still required. Documentation only; no adapter behavior changed.
+
+
+### Review of older open PRs (#6–#8)
+
+These PRs are retained as historical feature work, not approved for merge based on branch cleanliness alone.
+
+- **#6 — Feature-stack consolidation:** useful feature baseline, but its current head's check-runs show only GitGuardian success; the PR body cites earlier Node 20/22 evidence for a different streaming feature head, not the current consolidated head. Manual VS Code Extension Development Host smoke testing is still recorded as pending. Static patch review also shows the extension's TypeScript layer still performs patch application and invokes shell operations. That is incompatible with the final authority invariant until the Rust gate is integrated; keep this legacy behavior preserved but do not merge it as the completed migration.
+- **#7 — Retrieval metric deduplication:** current head likewise has only GitGuardian check evidence, not a recorded Node/Jest/ESLint run. The deduplication correction is useful, but the path normalization behavior must be specified for case-sensitive versus case-insensitive filesystems. Leading `..` segments are collapsed by the current normalizer instead of being rejected; this is a metric/evaluation correctness concern, not a filesystem authorization primitive.
+- **#8 — Workspace path-boundary tests:** current head likewise has only GitGuardian check evidence. The helper uses lexical `path.resolve/path.relative` containment and its own comment says symlinks must be resolved by callers. It is a regression guard, not a secure filesystem boundary; the filesystem operation must use the Rust handle-relative authority and race-resistant checks.
+
+**Disposition:** keep #6–#8 open while the migration stack is completed. Before merge, rerun the current heads through Node 20/22 compile, Jest, ESLint and perform the VS Code smoke test. Reassess #6's direct TypeScript privileged paths and reconcile #7's platform-specific path identity semantics. Do not close these PRs as obsolete until their changes are either incorporated into the eventual reviewed stack or deliberately superseded with a documented replacement.
 
 ## 3. Current implementation maturity
 
@@ -174,18 +186,22 @@ Snapshot adapters are **read-only prototypes**. Their metadata comparisons are b
 - No path-based fallback may silently replace a failed secure handle-relative operation.
 - A successful CI matrix is necessary but not sufficient for security acceptance.
 
-## 5. Current follow-up task: Windows volume mount-point boundary
+## 5. Current follow-up task: cross-platform native filesystem API review
 
-Pull request: [#60 — test(windows): reject mounted-folder paths as trusted roots](https://github.com/Veeresh-11/Loco-Agent/pull/60) (open, draft)  
-Branch: `test/windows-volume-mountpoint-coverage`  
-Base: PR #59 branch `test/windows-final-file-mutation-race`  
-Base head at branch creation: `f2e5c0a27ec6cad8a1039a7e4477615d61720718`
+Pull request: [#61 — docs(security): review native filesystem snapshot APIs](https://github.com/Veeresh-11/Loco-Agent/pull/61) (open, draft)  
+Branch: `security/native-filesystem-api-review`  
+Base: PR #60 branch `test/windows-volume-mountpoint-coverage`  
+Base head at branch creation: `92d9d75f3cb886da4849f3213f8465292fbab6cf`  
+Review: [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md)
 
-PR #60 adds a Windows-only test that passes a DOS path to a temporary directory (the same path form used to address a directory mounted beneath a volume) to `WindowsWorkspaceRoot::open` and requires `InvalidVolumeGuidRoot`. It also rejects drive-letter extended-namespace and UNC paths in the canonical volume-root parser. This protects the trust boundary from treating a caller-supplied mounted-folder path as the volume authority; callers must resolve and supply the canonical volume-GUID root.
+The review is source-level and makes no claim of native VM validation. Key findings:
 
-**Important limitation:** this does not create a real volume mount point backed by a second volume, nor does it prove traversal across such a mount point is rejected on every Windows filesystem. The hosted Windows runner does not provide a dependable second writable volume plus the mount-manager privilege needed for a deterministic real mount-point fixture. Existing intermediate NTFS junction tests exercise the mount-point reparse tag used by junctions, but a junction is not equivalent to a mounted volume. A privileged native Windows test on a dedicated VM with two test volumes remains required before claiming real volume-mount-point traversal coverage.
+- **Linux:** descendant opens do not currently set `RESOLVE_NO_XDEV`, so mount and bind-mount traversal is allowed. This differs from the macOS device check and Windows volume-serial check. Choose a consistent explicit policy; do not add `NO_XDEV` without accounting for bind mounts. Linux also needs an explicit `bytes.len() == metadata.len()` check after bounded read. `openat2` requires Linux 5.6+; the no-fallback behavior should remain fail-closed.
+- **Windows:** manually declared native FFI needs ABI/layout assertions and an explicit supported-architecture matrix. Keep `OBJ_DONT_REPARSE` and post-open reparse-attribute checks together. Sharing modes intentionally block conflicting rename/write opens and can fail when pre-existing handles are incompatible. Legacy volume serial/file index values must not be treated as globally unique approval identities. `DRIVE_FIXED` is not a filesystem allowlist.
+- **macOS:** component-wise `openat` with `O_NOFOLLOW` is the intended defense; native APFS/HFS+ and mount behavior, including firmlink/network/removable-volume policy, still need explicit tests and support decisions.
+- **All platforms:** before/after metadata comparisons are best-effort mutation detection, not atomic snapshots. Approval enforcement must reacquire and revalidate the target at use time.
 
-Validation is pending for this PR's exact head. Keep the PR open/draft; no production adapter behavior is changed.
+PR #61 is documentation-only and does not change production adapter behavior. The detailed findings and authoritative API references are in the review document. Keep draft until the findings are addressed and native testing/independent review are complete.
 
 ## 6. Roadmap and remaining work
 
@@ -200,9 +216,10 @@ Recommended order; keep each item in a coherent, reviewable PR.
 
 ### B. Native API and filesystem review
 
-- Review Linux openat2 kernel requirements and rustix API assumptions.
-- Review Windows native FFI layout, calling convention, handle-relative semantics, reparse controls, share modes, and volume/filesystem admission.
-- Review macOS openat/O_NOFOLLOW behavior, root path semantics, mount handling, and filesystem-specific behavior.
+- Source-level review is recorded in [NATIVE_FILESYSTEM_API_REVIEW.md](../security/NATIVE_FILESYSTEM_API_REVIEW.md) via PR #61.
+- Resolve Linux mount/bind-mount policy and add privileged mount tests; add the exact Linux byte-count check.
+- Add Windows ABI/layout assertions and architecture gates; complete real mount-point, sharing, identity, and filesystem allowlist tests.
+- Validate macOS APFS/HFS+ and mount/firmlink behavior on native supported systems.
 - Publish a supported OS/filesystem matrix and list unsupported cases.
 
 ### C. Complete approval and authorization
