@@ -1335,3 +1335,204 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - The latest complete PR inventory remains the 2026-11-26 tracker snapshot of 164 PRs (145 open, 19 closed, 12 merged); a full PR pagination refresh has not been completed in this pass, so those counts are not asserted as a 2026-11-27 live count. The refreshed open PR search returned 100 entries, and no all-open-PR code review census is claimed.
 - **Code-review register:** add #104 and #106 as active native review units beyond the previous 21-PR identified set. Their first-pass scoped review evidence is now recorded here; neither has independent approval. The 21/21 historical coverage figure must not be interpreted as all active code PRs or all branches reviewed. Repository-wide branch and PR review remains incomplete, with final secondary audit/cleanup still scheduled after implementation completion.
 - **Disposition and next task:** do not merge/close #104/#106 or delete branches. Next engineering action is to factor the bulk record parser into a pure helper (or equivalent test seam), add synthetic adversarial fixtures for the residual record/mask/error/overlap cases, decode and retain the returned common flags for diagnostics without conflating any flag/path with authorization, and rerun exact-head Rust Core Tests plus Contract Validation. Keep issue #74 and independent native security review open. No production authority, workspace writes, patch application, or command execution enabled.
+
+
+## Execution update — 2026-11-27: PR #107 parser review, UTF-8 bound correction, and exhaustive branch queue
+
+### Next-task review and implementation
+- Re-read this tracker before selecting the next task. The previous #104 residual-parser task had already been implemented in stacked PR #107; duplicating it in #104 would have been incorrect. The next task was therefore a first-pass code review of PR #107.
+- PR #107: [test(macos): harden bulk record parser on current preflight base](https://github.com/Veeresh-11/Loco-Agent/pull/107), branch `test/macos-bulk-record-parser-hardening-v2`, reviewed initial head `677e9bf2859102df37141d3aca4e734ef51a62d1`.
+- Reviewed the full one-file patch. Positive findings: parser is extracted into a pure helper; validates exact record length and maximum record size; checks required returned attribute masks; handles `ATTR_CMN_ERROR` only when returned; rejects nonzero per-entry errors; checks 4-byte attrreference alignment, checked offsets, NUL termination, absolute path/no dot components, and name/path overlap; returns raw `ATTR_CMN_FLAGS` as diagnostic data without mapping `SF_NOUNLINK` to `SF_FIRMLINK`. Synthetic tests cover successful records with/without optional error field, malformed/truncated/oversized records, missing attributes, nonzero errors, unterminated strings, relative paths, negative/misaligned/overlapping references and fixed-field overlap.
+- **Finding fixed on branch:** the name attribute was still bounded to 256 bytes. Apple's XNU `getattrlist(2)` documentation states UTF-8 `ATTR_CMN_NAME` data may be `NAME_MAX * 3 + 1` bytes (766 bytes on Darwin), so the old limit rejected valid maximum-length UTF-8 names. See [XNU getattrlist(2), ATTR_CMN_NAME](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlist.2#L2939-L2958). Changed the bound to `3 * 255 + 1` and added exact-maximum and oversized regression fixtures.
+- Commits pushed to #107 branch: `242ca636a78ad51dbd3cc86db59c10299dd04dd5` (bound and tests), then `0af5c5f8eb231254f0d82ea2b01c00f75d497a90` (fix fixture NUL terminator). PR conversation comment [#7218001141](https://github.com/Veeresh-11/Loco-Agent/pull/107#issuecomment-7218001141) records the finding, fix and outstanding gates. GitHub rejected a formal REQUEST_CHANGES review because the PR is authored by the repository owner; the finding was therefore recorded as a PR conversation comment, not a submitted independent review.
+- Exact-head CI for `0af5c5f...` has **not** appeared in the refreshed workflow/status endpoints. Earlier green Rust Core Tests #45346723420 and Contract Validation #45346723355 apply to prior head `677e9bf...` only; do not transfer those results to the new head.
+- PR #107 is open/draft and branch ancestry is stale: comparison against declared base `test/macos-firmlink-extended-bulk-evidence` is 15 commits ahead / 4 behind (merge base `8c4a2d0...`; current base head `cc7758783760ca5c940fe5d438cae445322a585d`). Reconcile the branch with the current base and rerun exact-head Rust Core Tests plus Contract Validation before marking the task complete or considering integration.
+- The native `SF_FIRMLINK` discrepancy remains a separate acceptance blocker. Parser correctness is not proof of firmlink authorization; issue #74 and independent native security review remain open.
+
+### Repository-wide branch review register
+- Refreshed the branch listing again: page 1 = 100; page 2 = 75; total = **175 branches**. No third page was returned.
+- **Are all branches reviewed? NO.** This is a complete branch-name inventory, not a completed code review. The connector's branch search exposes names only; each branch still needs commit SHA/head inspection, comparison with its base and main, changed-file/source review, PR association and review-thread inspection, exact-head CI, and reachability/staleness classification. Do not delete branches from this inventory based on age or name alone.
+- To make the outstanding work explicit in the existing code-review section, all 175 branches are enumerated below as pending branch-level review. A branch may have had a PR-scoped first-pass review already; that does not mean its full unique commit delta and current head have been reviewed.
+
+| Branch | Branch-level code-review status |
+|---|---|
+| `architecture/action-contracts` | Pending — branch-level source review not yet completed |
+| `architecture/polyglot-foundation` | Pending — branch-level source review not yet completed |
+| `build/authority-native-artifact-matrix` | Pending — branch-level source review not yet completed |
+| `ci/automated-quality-gates` | Pending — branch-level source review not yet completed |
+| `ci/enforce-immutable-authority-action-pins` | Pending — branch-level source review not yet completed |
+| `ci/lock-authority-cargo-dependencies` | Pending — branch-level source review not yet completed |
+| `ci/native-filesystem-platform-matrix` | Pending — branch-level source review not yet completed |
+| `ci/pin-authority-workflow-actions` | Pending — branch-level source review not yet completed |
+| `ci/pin-rust-toolchain-version` | Pending — branch-level source review not yet completed |
+| `ci/rust-core-tests` | Pending — branch-level source review not yet completed |
+| `ci/ubuntu-version-matrix` | Pending — branch-level source review not yet completed |
+| `ci/vsix-package-boundary` | Pending — branch-level source review not yet completed |
+| `consolidation/validated-feature-stack` | Pending — branch-level source review not yet completed |
+| `contract/workspace-read-request-v1` | Pending — branch-level source review not yet completed |
+| `design/approval-snapshot-binding-v1` | Pending — branch-level source review not yet completed |
+| `design/authenticated-approval-boundary` | Pending — branch-level source review not yet completed |
+| `design/authority-approval-binding-v1` | Pending — branch-level source review not yet completed |
+| `design/authority-approval-issue-consume-contract` | Pending — branch-level source review not yet completed |
+| `design/authority-workspace-protocol-v1` | Pending — branch-level source review not yet completed |
+| `design/rust-authority-snapshot-integration` | Pending — branch-level source review not yet completed |
+| `design/rust-sidecar-stdio-protocol` | Pending — branch-level source review not yet completed |
+| `design/secure-workspace-read-acquisition` | Pending — branch-level source review not yet completed |
+| `docs/accurate-capabilities-and-limitations` | Pending — branch-level source review not yet completed |
+| `docs/authority-attestation-verification-readiness` | Pending — branch-level source review not yet completed |
+| `docs/authority-runtime-verification-contract` | Pending — branch-level source review not yet completed |
+| `docs/complete-typescript-operation-inventory` | Pending — branch-level source review not yet completed |
+| `docs/local-storage-ipc-security-boundary` | Pending — branch-level source review not yet completed |
+| `docs/macos-firmlink-xnu-security-audit` | Pending — branch-level source review not yet completed |
+| `docs/macos-volume-boundary-validation` | Pending — branch-level source review not yet completed |
+| `docs/native-filesystem-roadmap-status-2026-11-24` | Pending — branch-level source review not yet completed |
+| `docs/project-progress-tracker` | Pending — branch-level source review not yet completed |
+| `docs/protocol-v2-production-integration-gap` | Pending — branch-level source review not yet completed |
+| `docs/reconcile-project-roadmap-2026-11-24` | Pending — branch-level source review not yet completed |
+| `docs/release-status-readme-accuracy` | Pending — branch-level source review not yet completed |
+| `docs/roadmap-snapshot-approval-status-2026-11-24` | Pending — branch-level source review not yet completed |
+| `docs/tracker-mainline-reconciliation` | Pending — branch-level source review not yet completed |
+| `docs/typescript-privileged-operation-inventory` | Pending — branch-level source review not yet completed |
+| `docs/update-authority-roadmap-stages` | Pending — branch-level source review not yet completed |
+| `docs/windows-nt-ffi-sdk-audit` | Pending — branch-level source review not yet completed |
+| `feat/macos-bulk-firmlink-preflight` | Pending — branch-level source review not yet completed |
+| `feat/macos-bulk-firmlink-preflight-rebase` | Pending — branch-level source review not yet completed |
+| `feat/macos-firmlink-runtime-capability` | Pending — branch-level source review not yet completed |
+| `feat/real-streaming-provider-tests` | Pending — branch-level source review not yet completed |
+| `feat/retrieval-evaluation-baseline` | Pending — branch-level source review not yet completed |
+| `feat/rust-sidecar-stdio-server` | Pending — branch-level source review not yet completed |
+| `feat/safe-patch-preview-rollback` | Pending — branch-level source review not yet completed |
+| `feat/typescript-rust-sidecar-client` | Pending — branch-level source review not yet completed |
+| `fix/authority-action-pin-validation-checkout` | Pending — branch-level source review not yet completed |
+| `fix/linux-snapshot-exact-read-length` | Pending — branch-level source review not yet completed |
+| `fix/retrieval-evaluation-dedup` | Pending — branch-level source review not yet completed |
+| `fix/typescript-portable-path-c1-controls` | Pending — branch-level source review not yet completed |
+| `fix/typescript-sidecar-ci-scope` | Pending — branch-level source review not yet completed |
+| `hardening-path-boundary-tests` | Pending — branch-level source review not yet completed |
+| `impl/authority-approval-protocol-v21` | Pending — branch-level source review not yet completed |
+| `impl/authority-approval-protocol-v21-rebased` | Pending — branch-level source review not yet completed |
+| `impl/authority-approval-registration-binding` | Pending — branch-level source review not yet completed |
+| `impl/authority-protocol-v2-dtos` | Pending — branch-level source review not yet completed |
+| `impl/authority-protocol-v2-session-state` | Pending — branch-level source review not yet completed |
+| `impl/typescript-authority-protocol-v2-client` | Pending — branch-level source review not yet completed |
+| `integration/snapshot-approval-native-stack` | Pending — branch-level source review not yet completed |
+| `investigate/macos-apfs-volume-identity` | Pending — branch-level source review not yet completed |
+| `investigate/macos-fcntl-nofirmlink` | Pending — branch-level source review not yet completed |
+| `investigate/macos-firmlink-native-records` | Pending — branch-level source review not yet completed |
+| `investigate/macos-stat-firmlink-flags` | Pending — branch-level source review not yet completed |
+| `main` | Pending — branch-level source review not yet completed |
+| `security/action-approval-binding` | Pending — branch-level source review not yet completed |
+| `security/approval-monotonic-deadlines` | Pending — branch-level source review not yet completed |
+| `security/approval-snapshot-binding` | Pending — branch-level source review not yet completed |
+| `security/approval-store-concurrent-consumption` | Pending — branch-level source review not yet completed |
+| `security/approval-store-input-bounds` | Pending — branch-level source review not yet completed |
+| `security/audit-event-contract-validation` | Pending — branch-level source review not yet completed |
+| `security/authority-build-provenance-attestations` | Pending — branch-level source review not yet completed |
+| `security/azure-identity-4131-msal51-node20-candidate` | Pending — branch-level source review not yet completed |
+| `security/azure-identity-4141-msal71-candidate` | Pending — branch-level source review not yet completed |
+| `security/azure-msal-uuid-remediation` | Pending — branch-level source review not yet completed |
+| `security/azure-node20-compatible-candidate` | Pending — branch-level source review not yet completed |
+| `security/bound-approval-challenge-cache` | Pending — branch-level source review not yet completed |
+| `security/bounded-filesystem-ops` | Pending — branch-level source review not yet completed |
+| `security/brace-expansion-node20-candidate` | Pending — branch-level source review not yet completed |
+| `security/canonical-action-digest-v1` | Pending — branch-level source review not yet completed |
+| `security/controlled-write-design` | Pending — branch-level source review not yet completed |
+| `security/cross-language-contract-verification` | Pending — branch-level source review not yet completed |
+| `security/fifo-snapshot-rejection-test` | Pending — branch-level source review not yet completed |
+| `security/glob-minimatch-node20-candidate` | Pending — branch-level source review not yet completed |
+| `security/invalidate-approval-challenges-on-restart` | Pending — branch-level source review not yet completed |
+| `security/isolate-vsce-node22-toolchain` | Pending — branch-level source review not yet completed |
+| `security/linux-intermediate-directory-race-tests` | Pending — branch-level source review not yet completed |
+| `security/linux-no-mount-crossing` | Pending — branch-level source review not yet completed |
+| `security/linux-openat2-acquisition-design` | Pending — branch-level source review not yet completed |
+| `security/linux-openat2-snapshot-adapter` | Pending — branch-level source review not yet completed |
+| `security/linux-root-handle-acquisition` | Pending — branch-level source review not yet completed |
+| `security/linux-snapshot-adversarial-tests` | Pending — branch-level source review not yet completed |
+| `security/macos-apfs-filesystem-admission` | Pending — branch-level source review not yet completed |
+| `security/macos-firmlink-volume-identity` | Pending — branch-level source review not yet completed |
+| `security/macos-handle-snapshot-adapter` | Pending — branch-level source review not yet completed |
+| `security/msal-uuid-11-node20-candidate` | Pending — branch-level source review not yet completed |
+| `security/native-filesystem-api-review` | Pending — branch-level source review not yet completed |
+| `security/native-workspace-adapter-factory-v1` | Pending — branch-level source review not yet completed |
+| `security/nonblocking-snapshot-open` | Pending — branch-level source review not yet completed |
+| `security/npm-audit-report` | Pending — branch-level source review not yet completed |
+| `security/npm-lockfile-reconciliation` | Pending — branch-level source review not yet completed |
+| `security/npm-semver-remediation` | Pending — branch-level source review not yet completed |
+| `security/patch-proposal-validation` | Pending — branch-level source review not yet completed |
+| `security/persistent-approval-replay-store` | Pending — branch-level source review not yet completed |
+| `security/persistent-approval-retention` | Pending — branch-level source review not yet completed |
+| `security/platform-authenticator-review` | Pending — branch-level source review not yet completed |
+| `security/portable-invalid-character-tests` | Pending — branch-level source review not yet completed |
+| `security/portable-snapshot-path-hardening` | Pending — branch-level source review not yet completed |
+| `security/random-approval-challenge-nonce` | Pending — branch-level source review not yet completed |
+| `security/reject-hardlinked-snapshot-targets` | Pending — branch-level source review not yet completed |
+| `security/remove-unused-uuid` | Pending — branch-level source review not yet completed |
+| `security/rust-audit-event-dto` | Pending — branch-level source review not yet completed |
+| `security/rust-core-policy-prototype` | Pending — branch-level source review not yet completed |
+| `security/rust-owned-approval-clock` | Pending — branch-level source review not yet completed |
+| `security/rust-workspace-path-validation` | Pending — branch-level source review not yet completed |
+| `security/rust-workspace-registry-v1` | Pending — branch-level source review not yet completed |
+| `security/security-decision-contract-alignment` | Pending — branch-level source review not yet completed |
+| `security/semver-safe-audit-remediation` | Pending — branch-level source review not yet completed |
+| `security/semver-safe-transitive-audit-remediation` | Pending — branch-level source review not yet completed |
+| `security/shared-portable-path-validator` | Pending — branch-level source review not yet completed |
+| `security/snapshot-adapter-request-integration` | Pending — branch-level source review not yet completed |
+| `security/snapshot-bound-approval-store-v1` | Pending — branch-level source review not yet completed |
+| `security/snapshot-capture-request` | Pending — branch-level source review not yet completed |
+| `security/snapshot-capture-trust-boundary-audit` | Pending — branch-level source review not yet completed |
+| `security/snapshot-contract-builder` | Pending — branch-level source review not yet completed |
+| `security/snapshot-identity-captured-length` | Pending — branch-level source review not yet completed |
+| `security/snapshot-mutation-detection` | Pending — branch-level source review not yet completed |
+| `security/snapshot-mutation-detection-tests` | Pending — branch-level source review not yet completed |
+| `security/snapshot-payload-validation` | Pending — branch-level source review not yet completed |
+| `security/snapshot-rename-race-assert-success` | Pending — branch-level source review not yet completed |
+| `security/snapshot-rename-race-tests` | Pending — branch-level source review not yet completed |
+| `security/sqlite-storage-bounds` | Pending — branch-level source review not yet completed |
+| `security/strict-unified-diff-validation` | Pending — branch-level source review not yet completed |
+| `security/typescript-eslint-v7-remediation` | Pending — branch-level source review not yet completed |
+| `security/typescript-eslint-v8-remediation` | Pending — branch-level source review not yet completed |
+| `security/typescript-operation-regression-gate` | Pending — branch-level source review not yet completed |
+| `security/windows-bounded-file-snapshot` | Pending — branch-level source review not yet completed |
+| `security/windows-ffi-x64-abi` | Pending — branch-level source review not yet completed |
+| `security/windows-file-id-info` | Pending — branch-level source review not yet completed |
+| `security/windows-native-root-prototype` | Pending — branch-level source review not yet completed |
+| `security/windows-ntfs-allowlist` | Pending — branch-level source review not yet completed |
+| `security/windows-path-validation-cases` | Pending — branch-level source review not yet completed |
+| `security/windows-root-handle-acquisition-gate` | Pending — branch-level source review not yet completed |
+| `security/windows-root-handle-proof` | Pending — branch-level source review not yet completed |
+| `security/windows-snapshot-acquisition-design` | Pending — branch-level source review not yet completed |
+| `security/windows-superscript-device-names` | Pending — branch-level source review not yet completed |
+| `security/workspace-snapshot-adapter-contract` | Pending — branch-level source review not yet completed |
+| `security/workspace-snapshot-adapter-research` | Pending — branch-level source review not yet completed |
+| `security/workspace-snapshot-contract-v1` | Pending — branch-level source review not yet completed |
+| `test/authority-artifact-verification-contract` | Pending — branch-level source review not yet completed |
+| `test/authority-v2-adversarial-handler` | Pending — branch-level source review not yet completed |
+| `test/linux-bind-mounted-workspace-root` | Pending — branch-level source review not yet completed |
+| `test/linux-distinct-filesystem-mount-boundary` | Pending — branch-level source review not yet completed |
+| `test/linux-real-bind-mount-boundary` | Pending — branch-level source review not yet completed |
+| `test/linux-tmpfs-mount-boundary` | Pending — branch-level source review not yet completed |
+| `test/linux-tmpfs-workspace-root` | Pending — branch-level source review not yet completed |
+| `test/macos-15-firmlink-matrix` | Pending — branch-level source review not yet completed |
+| `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
+| `test/macos-bulk-record-parser-hardening` | Pending — branch-level source review not yet completed |
+| `test/macos-bulk-record-parser-hardening-v2` | Pending — branch-level source review not yet completed |
+| `test/macos-firmlink-extended-bulk-evidence` | Pending — branch-level source review not yet completed |
+| `test/macos-firmlink-volume-boundary` | Pending — branch-level source review not yet completed |
+| `test/macos-intermediate-directory-swap-race` | Pending — branch-level source review not yet completed |
+| `test/macos-nested-apfs-mount-boundary` | Pending — branch-level source review not yet completed |
+| `test/macos-nested-firmlink-preflight` | Pending — branch-level source review not yet completed |
+| `test/macos-openat-resolve-beneath-firmlink` | Pending — branch-level source review not yet completed |
+| `test/windows-final-file-mutation-race` | Pending — branch-level source review not yet completed |
+| `test/windows-intermediate-reparse-race` | Pending — branch-level source review not yet completed |
+| `test/windows-junction-race-retry` | Pending — branch-level source review not yet completed |
+| `test/windows-obj-dont-reparse-runtime-probe` | Pending — branch-level source review not yet completed |
+| `test/windows-preexisting-share-conflict` | Pending — branch-level source review not yet completed |
+| `test/windows-real-volume-mountpoint` | Pending — branch-level source review not yet completed |
+| `test/windows-sdk-abi-probe` | Pending — branch-level source review not yet completed |
+| `test/windows-symlink-reparse-coverage` | Pending — branch-level source review not yet completed |
+| `test/windows-volume-mountpoint-coverage` | Pending — branch-level source review not yet completed |
+
+### Current review status and next action
+- PR #107: first-pass review performed; one filename-bound defect corrected on branch; exact-head CI pending; base reconciliation pending; independent review unavailable from PR author context.
+- PRs #104/#106/#107 remain draft and must stay stacked; no merge or cleanup is authorized.
+- **Next task:** reconcile #107 onto current #106 head, verify the parser tests compile and pass on Linux/Windows/macOS, run Contract Validation on the exact final head, then update this entry with the actual run IDs. After that continue the branch queue above in dependency order, starting with the next code-bearing branch/PR not yet source-reviewed. The secondary repository-wide audit and unwanted branch/PR cleanup remain scheduled only after implementation completion.
