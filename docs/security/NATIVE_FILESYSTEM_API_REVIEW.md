@@ -212,3 +212,24 @@ Do not merge this stale, unsubmitted branch as-is. Any useful nested-firmlink te
 ## PR #107 current exact-head validation — 2026-11-27
 
 Current head `2d2a153c8775f075f69bd79a162be550bea11472` passed Rust Core Tests [#45998450842](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450842) on Ubuntu, Windows and macOS and Contract Validation [#45998450978](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450978). Compare to the current #106 base is 19 ahead / 0 behind, with the parser source as the only changed file. The branch is CI-green but remains draft pending independent review and issue #74 resolution.
+
+
+## PR #110 review — openat resolve-beneath diagnostic and descriptor identity — 2026-11-27
+
+Reviewed PR #110's adapter regression, native `O_RESOLVE_BENEATH` probe, workflow integration, XNU audit, and support-matrix claims.
+
+The opened-handle regression deliberately bypasses bulk preflight, opens OS-provided root and nested System/Data firmlinks relative to retained parent descriptors, and asserts that parent handles identify the System volume while opened target handles identify the Data volume via `f_fsid`. It also checks the runner's same-`st_dev` case. This supports the narrow tested System/Data boundary only; it does not establish other OS releases, architectures, or filesystems.
+
+Probe review findings:
+- Ordinary controls `/System` and `/usr` previously used the same permissive result handling as mapped entries, so they could be reported blocked while the probe still exited successfully.
+- Any failed flagged open was treated as a beneath-policy block, instead of requiring `ENOTCAPABLE`; other errors could be misattributed.
+- `F_GETPATH_NOFIRMLINK` failures were printed but did not fail the probe, despite path evidence being part of the experiment's stated evidence.
+- Some C output strings used escaped backslash-n rather than newline characters, reducing log readability and machine parsing.
+
+Corrected in commit `33549ebfddf06c4025f3b2a900eab161c7375c8c`:
+- ordinary controls must open successfully under `O_RESOLVE_BENEATH`;
+- mapped entries are classified as blocked only on `ENOTCAPABLE`; other errors are inconclusive/fail;
+- baseline and successful flagged opens must return `F_GETPATH_NOFIRMLINK` path evidence;
+- output records use actual newlines.
+
+The fix changes the diagnostic probe only, not production authorization. Exact-head Rust Core Tests [#45999159794](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159794) and Contract Validation [#45999159812](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159812) were in progress at the last poll. The earlier successful runs #45982960193/#45982960286 were for superseded head `a50177e...`; do not use them as validation for the new commit. Keep PR #110 draft until exact-head CI and independent review complete.
