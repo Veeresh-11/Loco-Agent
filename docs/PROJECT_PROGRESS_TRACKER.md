@@ -803,3 +803,24 @@ Keep scope bounded to existing TODOs and security fixes. New provider families, 
 - Recorded PR #148's main-vs-tracker divergence and the safe documentation-only rebase/recreate plan.
 - Refined task order, acceptance criteria, remaining effort estimate and the required two-stage review: per-task primary review, then independent secondary audit after all existing TODOs finish.
 - No PRs merged/closed, no branches deleted, no production dependency promotion and no privileged capabilities enabled during this update.
+
+## Branch inventory and coding-review coverage — 2026-11-27
+
+### Live branch census
+
+- Re-read the canonical tracker from `docs/project-progress-tracker` before work. Current tracker blob at start of this pass: `ca952c327ce7c7a360b3c093972185fca81ab2d9`.
+- Enumerated GitHub branches using both pages of the repository branch endpoint: **175 branches total** (100 on page 1, 75 on page 2). This is the complete branch-name/head inventory returned by the API at this time.
+- Enumerated open pull requests using both pages of the open-PR endpoint. The repository-wide audit baseline records 164 PRs total (145 open, 19 closed); this pass used the live open-PR listing for branch/PR cross-reference. Branch existence or a PR's existence is not evidence of a code review.
+- **All branches reviewed? NO.** The 175-branch census is an inventory, not a 175-branch line-by-line code review. Existing review coverage is selective and focused on active delivery chains (including PRs #112, #151, #154 and #171). The repository's final secondary branch/PR audit (order 10) remains outstanding. Do not mark unreviewed branches as reviewed and do not close/delete branches until each is classified by unique commits, ancestry, PR/review threads, exact-head CI, security findings and disposition.
+- Add all branches not individually inspected to the existing **Mandatory security, code-review and release checklist → Per-task / per-PR review** backlog. The review backlog is repository-wide, not limited to branches that currently have open PRs. Review in dependency order; start with the next native filesystem gate below.
+
+### Next native filesystem review — PR #112 Windows `OBJ_DONT_REPARSE`
+
+- Rechecked current PR #112 head `cc2dfd29cbfa9a4319285528d3a5888387dfe46e`, `windows_root_handle.rs`, the Windows SDK/FFI audit, the native filesystem API review, and current PR metadata. The latest Rust Core Tests run [#45943563516](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943563516) has completed successfully on all nine jobs: Ubuntu 22.04/24.04/26.04, Windows Server 2022/2025, macOS 15 arm64/Intel, and macOS 26 arm64/Intel. Contract Validation [#45943563474](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943563474) passed.
+- Source review confirms the adapter still supplies `OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE` to handle-relative `NtCreateFile`, maps `STATUS_REPARSE_POINT_ENCOUNTERED` to a fail-closed error, and independently rejects a returned handle with `FILE_ATTRIBUTE_REPARSE_POINT`. The all-zero `FILE_ID_128` sentinel is now rejected before identity construction (commit `8db3b9cc14b972f0010fa3d9c053ede7dfb082ba`, with documentation update commit `cc2dfd29cbfa9a4319285528d3a5888387dfe46e`).
+- The documented contract mismatch remains: the general Microsoft `OBJECT_ATTRIBUTES` page defines `OBJ_DONT_REPARSE`, but the user-mode `NtCreateFile` page's function-specific `Attributes` description remains narrower. SDK header checks and raw runtime probes on Windows Server 2022 build 20348 and Server 2025 build 26100 (x64/NTFS) are bounded empirical evidence, not a version-stable guarantee. No safe code change is justified from the evidence currently available; removing the flag or post-open checks would weaken the security boundary. Keep the implementation fail-closed and the Windows support claim bounded.
+- Disposition: **code review performed for this scoped path; contract gate unresolved; independent native security review still required.** No code change in this pass. PR #112 remains draft/open. Next evidence required: authoritative clarification for this exact user-mode call shape or a separately documented supported construction, followed by independent native security review.
+
+### Branch review backlog rule
+
+For every branch not explicitly listed as reviewed in a dated review entry, status remains **not yet reviewed**. The final audit must enumerate each branch by name and head SHA, link its PR(s) where present, inspect unique commits and full changed-file diffs, record review threads and exact-head CI, identify duplicate/stacked/superseded branches, and assign one disposition: integrate, transfer, superseded, rejected, or retain temporarily. A sampled review or green CI must never be reported as all-branch review completion.
