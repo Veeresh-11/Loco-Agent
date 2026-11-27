@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Keep ordinary controls strict: only ENOTCAPABLE may classify a mapped open as blocked.
+// Keep ordinary controls strict; mapped failures must match the runner's verified denial errno.
 
 #ifndef O_RESOLVE_BENEATH
 #error "This probe requires the SDK's O_RESOLVE_BENEATH definition"
