@@ -606,7 +606,7 @@ mod tests {
   let mut maximum_name = vec![b'a'; MAX_ENTRY_NAME_BYTES - 1];
   maximum_name.push(0);
   let valid = synthetic_bulk_entry_record(
-   &maximum_name, b"/workspace/entry\\0", 0, 0, true,
+   &maximum_name, b"/workspace/entry\0", 0, 0, true,
   );
   let parsed = parse_bulk_entry_record(&valid).unwrap();
   assert_eq!(parsed.name.len(), MAX_ENTRY_NAME_BYTES - 1);
@@ -614,7 +614,7 @@ mod tests {
   let mut oversized_name = vec![b'a'; MAX_ENTRY_NAME_BYTES];
   oversized_name.push(0);
   let oversized = synthetic_bulk_entry_record(
-   &oversized_name, b"/workspace/entry\\0", 0, 0, true,
+   &oversized_name, b"/workspace/entry\0", 0, 0, true,
   );
   assert!(parse_bulk_entry_record(&oversized).is_err());
  }
