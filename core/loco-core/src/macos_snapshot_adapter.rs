@@ -1131,4 +1131,42 @@ mod tests {
   assert_eq!(final_capture.bytes(),b"inside-workspace");
  }
 
+
+ #[test]
+ fn rejects_os_provided_nested_system_library_firmlinks_before_open() {
+  use std::os::unix::ffi::OsStrExt;
+
+  let map = std::fs::read_to_string("/usr/share/firmlinks")
+   .expect("macOS provides the installer firmlink map");
+  let prefix = "/System/Library/";
+  let mut tested = 0usize;
+
+  for line in map.lines() {
+   let mut fields = line.split_whitespace();
+   let Some(source) = fields.next() else { continue };
+   let Some(target) = fields.next() else { continue };
+   if !source.starts_with(prefix) { continue; }
+
+   let source_path = Path::new(source);
+   let name = source_path.file_name().expect("mapping has a final component");
+   let parent_path = source_path.parent().expect("mapping has a parent");
+   let parent = File::open(parent_path)
+    .unwrap_or_else(|error| panic!("open nested mapping parent {parent_path:?}: {error}"));
+
+   let target_relative = target.trim_start_matches('/');
+   let expected = Path::new("/System/Volumes/Data").join(target_relative);
+   let observed = bulk_entry_path_no_firmlink(&parent, name)
+    .unwrap_or_else(|error| panic!("query nested mapping {source}: {error:?}"));
+   assert_eq!(observed, expected, "wrong no-firmlink path for {source}");
+   assert_eq!(
+    preflight_entry_path(&parent, name),
+    Err(SnapshotPayloadError::FirmlinkBoundary),
+    "nested System/Data mapping {source} must be rejected by preflight"
+   );
+   tested += 1;
+  }
+
+  assert!(tested > 0, "hosted macOS firmlink map contained no /System/Library mappings");
+ }
+
 }
