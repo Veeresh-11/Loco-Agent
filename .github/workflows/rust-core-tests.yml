@@ -5,6 +5,7 @@ on:
     paths:
       - "core/loco-core/**"
       - "scripts/macos-*.c"
+      - "scripts/windows-*.c"
       - ".github/workflows/rust-core-tests.yml"
   push:
     branches:
@@ -27,13 +28,76 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-26, macos-26-intel]
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, windows-2022, windows-2025, macos-26, macos-26-intel, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Record native Linux runner and workspace filesystem
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Linux distribution ==="
+          cat /etc/os-release
+          echo "=== Kernel and architecture ==="
+          uname -a
+          printf 'kernel=%s\narchitecture=%s\n' "$(uname -r)" "$(uname -m)"
+          echo "=== Runner temporary filesystem ==="
+          findmnt --target "$RUNNER_TEMP" --output TARGET,SOURCE,FSTYPE,OPTIONS
+          stat -f -c 'statfs_family=%T block_size=%S' "$RUNNER_TEMP"
+          df -T "$RUNNER_TEMP"
+      - name: Record native Windows runner and workspace filesystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $os = Get-CimInstance Win32_OperatingSystem
+          $drive = ([System.IO.Path]::GetPathRoot($env:RUNNER_TEMP)).Substring(0, 1)
+          $volume = Get-Volume -DriveLetter $drive
+          Write-Output "=== Windows operating system ==="
+          [pscustomobject]@{
+            Product = $os.Caption
+            Version = $os.Version
+            Build = $os.BuildNumber
+            Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+            PowerShell = $PSVersionTable.PSVersion.ToString()
+          } | Format-List
+          Write-Output "=== Runner temporary filesystem ==="
+          [pscustomobject]@{
+            Drive = $drive
+            FileSystem = $volume.FileSystem
+            FileSystemLabel = $volume.FileSystemLabel
+            Size = $volume.Size
+            AllocationUnitSize = $volume.AllocationUnitSize
+          } | Format-List
+      - name: Verify Windows SDK native FFI ABI declarations
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe not found: $vswhere"
+          }
+          $vsPath = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) {
+            throw 'Visual Studio x64 C/C++ build tools were not found on the hosted runner'
+          }
+          $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) {
+            throw "vcvars64.bat not found: $vcvars"
+          }
+          $source = (Resolve-Path 'scripts/windows-ffi-abi-probe.c').Path
+          $object = Join-Path $env:RUNNER_TEMP 'windows-ffi-abi-probe.obj'
+          $command = 'call "' + $vcvars + '" >nul && echo WindowsSdkDir=!WindowsSdkDir! && echo WindowsSDKVersion=!WindowsSDKVersion! && cl.exe /Bv /nologo /W4 /WX /std:c11 /c "' + $source + '" /Fo"' + $object + '"'
+          Write-Output '=== Compile x64 Windows SDK ABI probe ==='
+          & cmd.exe /d /v:on /c $command
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows SDK ABI probe compilation failed with exit code $LASTEXITCODE"
+          }
       - name: Prepare real Linux bind mount fixture
         if: runner.os == 'Linux'
         shell: bash
@@ -63,6 +127,43 @@ jobs:
           sudo chmod 0644 "$mountpoint/secret.txt"
           mountpoint -q "$mountpoint"
           echo "LOCO_LINUX_LOOP_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare tmpfs mount fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-tmpfs-workspace"
+          mountpoint="$workspace/mounted"
+          mkdir -p "$mountpoint"
+          sudo mount -t tmpfs -o size=16m tmpfs "$mountpoint"
+          printf 'tmpfs-mount-sentinel' | sudo tee "$mountpoint/secret.txt" >/dev/null
+          sudo chmod 0644 "$mountpoint/secret.txt"
+          mountpoint -q "$mountpoint"
+          echo "LOCO_LINUX_TMPFS_MOUNT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare tmpfs workspace root fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-tmpfs-root-workspace"
+          mkdir -p "$workspace"
+          sudo mount -t tmpfs -o size=16m tmpfs "$workspace"
+          printf 'tmpfs-workspace-root-sentinel' | sudo tee "$workspace/root-sentinel.txt" >/dev/null
+          sudo chmod 0644 "$workspace/root-sentinel.txt"
+          mountpoint -q "$workspace"
+          echo "LOCO_LINUX_TMPFS_ROOT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+      - name: Prepare bind-mounted workspace root fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-bind-root-workspace"
+          source="$RUNNER_TEMP/loco-linux-bind-root-source"
+          mkdir -p "$workspace" "$source"
+          printf 'bind-workspace-root-sentinel' > "$source/root-sentinel.txt"
+          sudo mount --bind "$source" "$workspace"
+          mountpoint -q "$workspace"
+          echo "LOCO_LINUX_BIND_ROOT_WORKSPACE=$workspace" >> "$GITHUB_ENV"
       - name: Inspect native macOS firmlink metadata
         if: runner.os == 'macOS'
         shell: bash
@@ -125,6 +226,9 @@ jobs:
           "LOCO_WINDOWS_MOUNT_WORKSPACE=$workspace" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Run core unit tests
         run: cargo test --manifest-path core/loco-core/Cargo.toml
+      - name: Record raw Windows OBJ_DONT_REPARSE runtime statuses
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml obj_dont_reparse_runtime_status_for_final_and_intermediate_junctions -- --nocapture
       - name: Verify sandboxed Rust sidecar omits nofirmlink capability
         if: runner.os == 'macOS'
         shell: bash
@@ -209,6 +313,58 @@ jobs:
       - name: Verify distinct Linux filesystem mount boundary
         if: runner.os == 'Linux'
         run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_ci_prepared_distinct_filesystem_mount_crossing
+      - name: Verify tmpfs mount boundary
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored rejects_ci_prepared_tmpfs_mount_crossing
+      - name: Verify tmpfs workspace root capture
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored captures_file_from_ci_prepared_tmpfs_workspace_root
+      - name: Verify bind-mounted workspace root capture
+        if: runner.os == 'Linux'
+        run: cargo test --manifest-path core/loco-core/Cargo.toml -- --ignored captures_file_from_ci_prepared_bind_mounted_workspace_root
+      - name: Detach tmpfs mount fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-tmpfs-workspace"
+          mountpoint="$workspace/mounted"
+          if mountpoint -q "$mountpoint"; then
+            sudo umount "$mountpoint"
+          fi
+          if mountpoint -q "$mountpoint"; then
+            echo "tmpfs mount is still active; refusing to remove fixture" >&2
+            exit 1
+          fi
+          rm -rf "$workspace"
+      - name: Detach tmpfs workspace root fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-tmpfs-root-workspace"
+          if mountpoint -q "$workspace"; then
+            sudo umount "$workspace"
+          fi
+          if mountpoint -q "$workspace"; then
+            echo "tmpfs workspace root is still mounted; refusing to remove fixture" >&2
+            exit 1
+          fi
+          rm -rf "$workspace"
+      - name: Detach bind-mounted workspace root fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$RUNNER_TEMP/loco-linux-bind-root-workspace"
+          if mountpoint -q "$workspace"; then
+            sudo umount "$workspace"
+          fi
+          if mountpoint -q "$workspace"; then
+            echo "bind-mounted workspace root is still mounted; refusing to remove fixture" >&2
+            exit 1
+          fi
+          rm -rf "$workspace" "$RUNNER_TEMP/loco-linux-bind-root-source"
       - name: Detach distinct Linux filesystem mount fixture
         if: always() && runner.os == 'Linux'
         shell: bash

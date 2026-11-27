@@ -17,6 +17,11 @@
 #define F_GETPATH_NOFIRMLINK 102
 #endif
 
+/* Older macOS SDKs omit the public errno macro although Darwin uses ABI value 107. */
+#ifndef ENOTCAPABLE
+#define ENOTCAPABLE 107
+#endif
+
 static int print_descriptor_path(int fd, char *buffer, size_t size) {
     memset(buffer, 0, size);
     if (fcntl(fd, F_GETPATH_NOFIRMLINK, buffer) != 0) {
@@ -103,6 +108,16 @@ static int verify_flag_rejects_parent_escape(void) {
         rmdir(root);
         return 1;
     }
+    int unguarded = openat(root_fd, "..", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (unguarded < 0) {
+        printf("resolve_beneath control=parent_escape baseline_open_error=%d\n", errno);
+        close(root_fd);
+        rmdir(child);
+        rmdir(root);
+        return 1;
+    }
+    close(unguarded);
+
     errno = 0;
     int escaped = openat(root_fd, "..", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_RESOLVE_BENEATH);
     int error = errno;
@@ -119,7 +134,8 @@ static int verify_flag_rejects_parent_escape(void) {
     close(root_fd);
     rmdir(child);
     rmdir(root);
-    return error == ENOTCAPABLE ? 0 : 1;
+    /* Older Darwin releases report EACCES; newer releases report ENOTCAPABLE. */
+    return (error == ENOTCAPABLE || error == EACCES) ? 0 : 1;
 }
 
 int main(void) {
