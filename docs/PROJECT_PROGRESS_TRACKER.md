@@ -775,6 +775,15 @@ Keep scope bounded to existing TODOs and security fixes. New provider families, 
 - Added PR comment [#7210266920](https://github.com/Veeresh-11/Loco-Agent/pull/171#issuecomment-7210266920) and updated PR description. The earlier review finding is documented in the review thread. The connected account authored this PR, so GitHub rejected a `REQUEST_CHANGES` submission; the review was submitted as a `COMMENT`, not an independent approval.
 - Commit workflow lookup returned no PR-triggered run yet for `a57073ec581cd15ff022c63429f7c760fe1ef709`; do not claim exact-head validation. PR #171 remains draft/open and cannot be merged/promoted until the updated workflow is validated and the independent dependency/API, upstream VSCE, Azure provider-flow, Node 22 policy and SBOM/license gates are completed.
 
+### PR #171 remediation exact-head validation — 2026-11-27
+
+- Security-remediation commit `a57073ec581cd15ff022c63429f7c760fe1ef709` is now associated with fresh PR-triggered workflows. The isolated VSCE candidate run [#45943142803](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142803) is in progress; at the latest job-step poll it had reached Node 22 setup. Do not claim the archive fixture/audit job passed on this remediation head yet.
+- Standard TypeScript CI [#45943142807](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142807): Node 22 job passed; Node 20 job still in progress.
+- Azure/MSAL root applicability [#45943142796](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142796): Node 20 and Node 22 jobs passed.
+- npm dependency audit [#45943142833](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142833) passed; lockfile reconciliation [#45943142868](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142868) passed.
+- UUID-removal candidate [#45943142799](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142799), TypeScript-ESLint v8 candidate [#45943142889](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142889), and semver-safe candidate [#45943142760](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45943142760) remain in progress at the latest poll.
+- The source-level privilege remediation is verified: PR workflow now has only `contents: read` at workflow/job scope, and no write-back job, explicit token, push or dispatch. Acceptance remains pending exact-head isolated packaging/archive validation and independent review of the remaining dependency/API and release gates.
+
 ## Change log — 2026-11-26 final audit refresh
 
 - Reconfirmed canonical tracker branch/file and latest blob SHA.
