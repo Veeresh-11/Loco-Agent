@@ -355,7 +355,7 @@ Reviewed `scripts/macos-firmlink-record-probe.c` on PR #104's base branch. The p
 
 - The name attrreference path checks nonnegative offset, record bounds and a maximum buffer size, but does not enforce 4-byte alignment for the attrreference location or payload start.
 - It checks the final NUL byte but does not reject an embedded NUL before it; a crafted/invalid record could be truncated for `strcmp` and selected as a different entry.
-- The name buffer is `NAME_MAX * 3 + 1`, not the explicit 766-byte maximum used by the hardened production Rust parser; the diagnostic parser's bound should match the documented serialized UTF-8 payload limit.
+- The name buffer expression `NAME_MAX * 3 + 1` evaluates to 766 bytes when Darwin `NAME_MAX` is 255, matching the production parser's current serialized UTF-8 payload bound. This is not a demonstrated undersized-buffer defect; make the assumption explicit or use a named constant so the relationship remains auditable.
 - It does not assert that the complete requested attribute set was returned before interpreting the name/flags fields. It should fail closed or report a malformed/incomplete record rather than treating partial data as an ordinary diagnostic result.
 
 These findings are scoped to probe input validation. They do not invalidate the production Rust parser integration and do not provide evidence about the `SF_FIRMLINK`/`SF_NOUNLINK` discrepancy. No C source change was made in this pass. Next review/remediation task: harden this C diagnostic parser with the same record bounds, 766-byte name cap, 4-byte alignment, exact NUL and returned-attribute checks, then add malformed-record tests or a standalone parser fixture where practical. Keep the C probe diagnostic-only.
