@@ -81,3 +81,12 @@ Commit `545b566cd856e40637b2bbb2af309386b9c1319b` adds an unflagged `openat` bas
 
 Exact-head CI has not yet appeared in the commit-associated workflow listing at the time of this update. Do not claim this probe hardening is validated until the PR #110 head's macOS compile/probe and full required workflows pass. The previously recorded macOS 26.7.2 observations remain evidence for the earlier probe revision.
 
+
+
+## Follow-up review and exact-head status — 2026-11-27
+
+Review of the PR #110 probe found that ordinary controls could be reported blocked without failing, non-`ENOTCAPABLE` errors could be misclassified as beneath-policy denials, and missing `F_GETPATH_NOFIRMLINK` evidence did not fail the run. The output strings also escaped newline characters twice.
+
+Commit `33549ebfddf06c4025f3b2a900eab161c7375c8c` hardens the probe: ordinary controls must open under the flag; only `ENOTCAPABLE` can count as a mapped-entry block; baseline and successful flagged descriptors must provide no-firmlink paths; and output records are properly line-delimited. This is diagnostic-only.
+
+Exact-head Rust Core Tests [#45999159794](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159794) and Contract Validation [#45999159812](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159812) were in progress at the last poll on head `33549ebfddf06c4025f3b2a900eab161c7375c8c`. Earlier green runs apply only to the prior probe revision and do not validate this correction.
