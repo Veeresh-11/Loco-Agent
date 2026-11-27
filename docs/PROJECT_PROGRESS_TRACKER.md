@@ -870,3 +870,21 @@ For every branch not explicitly listed as reviewed in a dated review entry, stat
 
 - Live paginated branch census on this pass: 100 branches on page 1 and 75 on page 2 (175 total).
 - **All branches reviewed? NO.** This pass reviewed selected native-filesystem PR diffs only. It did not inspect every branch head or every open PR. Every branch not individually reviewed by exact head SHA remains not yet reviewed in the existing repository-wide secondary audit backlog (priority order 10). Branch census is not review coverage. No PRs were merged/closed and no branches were deleted.
+
+
+## Next native filesystem review — PR #106 extended firmlink evidence probe — 2026-11-27
+
+- Re-read the canonical tracker before work. Continued the order-2 native filesystem chain from PR #106, the next review target after #109/#108/#107.
+- Reviewed PR #106's complete three-file diff and full native C probe, evidence note, and workflow path filters. The probe correctly keeps `SF_NOUNLINK`, `sunlnk`, and path differences diagnostic-only and records the flags/path from the same bulk record. The CI path filter now schedules Rust Core Tests for `scripts/macos-*.c` changes on PR and main pushes.
+- Found a diagnostic parser-hardening gap: the C probe validated that the no-firmlink path range fit within the record and was NUL-terminated, but did not require the payload to begin after its `attrreference_t`, require an absolute path, or prevent name/path payload overlap. A malformed reference could therefore be rendered as plausible diagnostic evidence.
+- Fixed in code commit `fbf79969c4a2ad73eef9fbc371e6602d70534d4e`: enforce name payload placement after the name reference and later fixed fields; enforce path payload placement after its own reference; require an absolute path with exactly one trailing NUL; and reject name/path payload overlap. Production adapter and authorization behavior are unchanged.
+- Updated `docs/security/MACOS_FIRMLINK_EVIDENCE.md` in commit `c195e0006d3e2c3ffbb438f1b361e749e18059bc` with the finding, exact checks and validation caveat. Updated PR #106 description and posted self-review comment [#7216174092](https://github.com/Veeresh-11/Loco-Agent/pull/106#issuecomment-7216174092).
+- PR #106 remains draft/open at final head `c195e0006d3e2c3ffbb438f1b361e749e18059bc`. Rust Core Tests [#45984098897](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45984098897) is queued at the final documentation head. No Contract Validation run was returned for that final head at this check. Previous Rust run #45344892209 passed the earlier head only and is not evidence for this change. **Status: scoped review/fix complete; exact-head CI pending; independent security review outstanding.**
+- The source-level evidence discrepancy remains unresolved: public XNU documentation specifies `SF_FIRMLINK`, while the hosted macOS 26.7.2 arm64 observations recorded `SF_NOUNLINK` values and Data-volume no-firmlink paths. No authorization inference was added. Issue #74 remains open; general firmlink confinement remains unverified and the stack remains draft.
+- **Next review target:** PR #104 (`feat/macos-bulk-firmlink-preflight`), inspect the complete adapter diff and tests against the native record evidence and its documented fail-closed boundary. Do not merge the stack before authoritative semantics/support-boundary resolution and independent native security review.
+
+### Branch review coverage reaffirmed
+
+- Live branch inventory rechecked on this pass: 100 branch heads on page 1 and 75 on page 2, 175 total.
+- **All branches reviewed? NO.** This pass reviewed the selected PR #106 dependency branch only; it did not individually inspect all 175 branch heads or all open PRs. Every branch not explicitly reviewed by exact head SHA remains not yet reviewed in the existing repository-wide secondary audit / coding-review backlog (priority order 10). Keep the backlog repository-wide, not limited to branches with open PRs. Branch census and green CI do not constitute code review.
+- No PRs were merged or closed; no branches were deleted.
