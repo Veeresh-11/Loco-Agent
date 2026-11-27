@@ -1515,12 +1515,12 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/macos-15-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-bulk-record-parser-hardening` | Scoped parser review completed; stale/superseded candidate; full branch-level review pending |
-| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled onto latest #106 head (0 behind); exact-head CI pending; full branch-level review pending |
+| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled 19 ahead / 0 behind latest #106 head; exact-head Rust matrix and Contract Validation passed; independent review/full branch review pending |
 | `test/macos-firmlink-extended-bulk-evidence` | PR #106 scoped source review completed; full branch-level review pending |
-| `test/macos-firmlink-volume-boundary` | Pending — branch-level source review not yet completed |
-| `test/macos-intermediate-directory-swap-race` | Pending — branch-level source review not yet completed |
-| `test/macos-nested-apfs-mount-boundary` | Pending — branch-level source review not yet completed |
-| `test/macos-nested-firmlink-preflight` | Pending — branch-level source review not yet completed |
+| `test/macos-firmlink-volume-boundary` | Ancestry/diff checked: 0 ahead / 127 behind current feature base, no unique changes; inherited source review pending |
+| `test/macos-intermediate-directory-swap-race` | Ancestry/diff checked: 0 ahead / 210 behind current feature base, no unique changes; inherited source review pending |
+| `test/macos-nested-apfs-mount-boundary` | Ancestry/diff checked: 0 ahead / 159 behind current feature base, no unique changes; inherited source review pending |
+| `test/macos-nested-firmlink-preflight` | Scoped source/doc review completed; 25 ahead / 0 behind feature base, diverged 9 ahead / 15 behind #107; no PR; parser/doc findings recorded; full branch review pending |
 | `test/macos-openat-resolve-beneath-firmlink` | Pending — branch-level source review not yet completed |
 | `test/windows-final-file-mutation-race` | Pending — branch-level source review not yet completed |
 | `test/windows-intermediate-reparse-race` | Pending — branch-level source review not yet completed |
@@ -1583,3 +1583,15 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Exact-head Rust Core Tests [#45998450842](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450842) was pending; Contract Validation [#45998450978](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450978) was in progress at the last poll. Earlier runs #45998186236/#45998186291 apply to the superseded merge SHA and must not be used as final validation (the Rust run was cancelled on Windows).
 - PR #107 is still draft/open and reports mergeable=true. Keep it draft until both exact-head workflows pass and independent native security review is recorded.
 - Next task: poll #45998450842 and #45998450978 to completion; if both pass, continue the Order 2 native review queue. If either fails, fix the failure and rerun on the resulting exact head.
+
+
+## Execution update — 2026-11-27: PR #107 exact-head CI and nested-firmlink branch review
+
+- PR #107 current head `2d2a153c8775f075f69bd79a162be550bea11472`: Rust Core Tests [#45998450842](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450842) passed on Ubuntu, Windows and macOS; Contract Validation [#45998450978](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450978) passed.
+- PR #107 compare against latest PR #106 base: **19 ahead / 0 behind**, merge base `c3f35dae2c628ff795869f7c62f26fb38913de2f`; only `core/loco-core/src/macos_snapshot_adapter.rs` differs. This closes exact-head CI and ancestry reconciliation. PR remains draft/open pending independent native security review and issue #74.
+- Next branch source review: `test/macos-nested-firmlink-preflight` (no associated PR found). It is 25 ahead / 0 behind `feat/macos-bulk-firmlink-preflight`, but diverges from parser PR #107 at 9 ahead / 15 behind; changed files are the macOS adapter, nested-firmlink C probe and adapter documentation.
+- Findings on that branch: Rust bulk parser still caps UTF-8 names at 256 bytes and omits 4-byte attrreference alignment checks; the nested C probe uses `NAME_MAX + 1` for UTF-8 names and omits explicit attrreference alignment checks; top-level `dump_record` does not reject embedded NUL bytes in names. The adapter document describes a `getattrlistat` preflight while the current branch implementation uses `getattrlistbulk`; it also says the top-level probe asserts exact controls although that function prints observations rather than asserting all six expected entries. Do not merge this branch as-is; port only after review and reconcile against current parser implementation.
+- Ancestry/diff-only checks: `test/macos-firmlink-volume-boundary` is 0 ahead / 127 behind, `test/macos-intermediate-directory-swap-race` is 0 ahead / 210 behind, and `test/macos-nested-apfs-mount-boundary` is 0 ahead / 159 behind `feat/macos-bulk-firmlink-preflight`; each has no unique diff against that base. They are stale with no unique commits relative to that base, not independently source-reviewed inherited histories.
+- Branch inventory remains 175. The rows distinguish scoped review and ancestry-only checks from full review. **All branches reviewed: NO.**
+- No PRs merged/closed and no branches deleted. Issue #74 and independent native security review remain open gates.
+- Next task: review `test/macos-openat-resolve-beneath-firmlink` as the next code-bearing native branch, comparing its API evidence, native probe, parser, and support-matrix claims against the current #106/#107 stack.
