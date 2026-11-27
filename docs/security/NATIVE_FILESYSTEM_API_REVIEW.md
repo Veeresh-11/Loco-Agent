@@ -195,3 +195,20 @@ The descendant PR #107 parser correction addresses these items with the 766-byte
 ### PR #107 final-head validation — 2026-11-27
 
 PR #107 is reconciled onto the latest PR #106 branch head `c3f35dae2c628ff795869f7c62f26fb38913de2f`. Current PR #107 head: `2d2a153c8775f075f69bd79a162be550bea11472`; compare is 19 ahead / 0 behind and only the parser source file differs. Exact-head Rust Core Tests [#45998450842](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450842) was pending and Contract Validation [#45998450978](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450978) was in progress at the last poll. Runs against superseded merge commit `e013d8e...` are not current-head evidence. Keep the PR draft until both current-head runs pass and independent review is obtained.
+
+## Review addendum — nested-firmlink branch — 2026-11-27
+
+Reviewed branch `test/macos-nested-firmlink-preflight` (no associated PR found) against its feature base and the current parser-hardening branch. It is 25 commits ahead / 0 behind `feat/macos-bulk-firmlink-preflight`, but diverges from PR #107 by 9 ahead / 15 behind. Its unique diff spans the macOS snapshot adapter, `scripts/macos-firmlink-record-probe.c`, and `docs/security/MACOS_SNAPSHOT_ADAPTER.md`.
+
+Findings:
+- The Rust bulk-record parser in this branch still calls `attr_reference_range(..., 2, 256)`, rejecting valid longer UTF-8 names despite XNU's documented `NAME_MAX * 3 + 1` payload bound.
+- Its `attr_reference_range` helper does not enforce 4-byte alignment for reference and payload offsets. The nested C probe similarly omits explicit alignment checks and caps the name to `NAME_MAX + 1` bytes rather than the UTF-8 payload maximum.
+- The top-level C `dump_record` parser checks only the final name NUL, not embedded NUL bytes, so diagnostic output can truncate/mislabel malformed names.
+- The adapter document describes a `getattrlistat` preflight, while this branch's adapter uses `getattrlistbulk`. It also claims the probe asserts all six top-level mapped/ordinary controls; the top-level record dump prints those observations, while the explicit expected-path assertion is in the separate nested-mapping probe.
+- The branch does contain nested `/System/Library` mapping checks, but these are not sufficient to establish the unresolved general firmlink security contract or replace independent review.
+
+Do not merge this stale, unsubmitted branch as-is. Any useful nested-firmlink tests/evidence should be transferred selectively onto the current #106/#107 stack, with parser fixes retained and documentation claims matched to actual assertions. The branch's raw flags/path output remains diagnostic only.
+
+## PR #107 current exact-head validation — 2026-11-27
+
+Current head `2d2a153c8775f075f69bd79a162be550bea11472` passed Rust Core Tests [#45998450842](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450842) on Ubuntu, Windows and macOS and Contract Validation [#45998450978](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998450978). Compare to the current #106 base is 19 ahead / 0 behind, with the parser source as the only changed file. The branch is CI-green but remains draft pending independent review and issue #74 resolution.
