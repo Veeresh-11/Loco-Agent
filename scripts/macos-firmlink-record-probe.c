@@ -32,6 +32,8 @@ static void dump_record(const unsigned char *record, size_t record_len) {
 
     char name[NAME_MAX * 3 + 1];
     name[0] = '\0';
+    int64_t name_start = 0;
+    uint32_t name_length = 0;
     if (returned.commonattr & ATTR_CMN_NAME) {
         attrreference_t name_ref;
         if (offset + sizeof(name_ref) > record_len) {
@@ -39,8 +41,19 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         memcpy(&name_ref, record + offset, sizeof(name_ref));
-        int64_t name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
-        if (name_start < 0 || name_ref.attr_length == 0 ||
+        size_t name_ref_end = offset + sizeof(name_ref);
+        name_start = (int64_t)offset + (int64_t)name_ref.attr_dataoffset;
+        name_length = name_ref.attr_length;
+        size_t trailing_fixed_fields = 0;
+        if (returned.commonattr & ATTR_CMN_FLAGS) {
+            trailing_fixed_fields += sizeof(uint32_t);
+        }
+        if (returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH) {
+            trailing_fixed_fields += sizeof(attrreference_t);
+        }
+        size_t minimum_name_start = name_ref_end + trailing_fixed_fields;
+        if (name_start < 0 || (uint64_t)name_start < minimum_name_start ||
+            name_ref.attr_length < 2 ||
             (uint64_t)name_start + name_ref.attr_length > record_len ||
             name_ref.attr_length > sizeof(name)) {
             fprintf(stderr, "invalid name reference: offset=%lld length=%u record=%zu\n",
@@ -48,8 +61,9 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         const unsigned char *name_bytes = record + (size_t)name_start;
-        if (name_bytes[name_ref.attr_length - 1] != '\0') {
-            fprintf(stderr, "name is not NUL terminated\n");
+        if (name_bytes[name_ref.attr_length - 1] != '\0' ||
+            memchr(name_bytes, '\0', name_ref.attr_length - 1) != NULL) {
+            fprintf(stderr, "name is not exactly NUL terminated\n");
             exit(2);
         }
         memcpy(name, name_bytes, name_ref.attr_length);
@@ -65,16 +79,58 @@ static void dump_record(const unsigned char *record, size_t record_len) {
             exit(2);
         }
         memcpy(&flags, record + offset, sizeof(flags));
+        offset += sizeof(flags);
+    }
+
+    char nofirmlink_path[PATH_MAX + 1];
+    nofirmlink_path[0] = '\0';
+    int has_nofirmlink_path =
+        (returned.forkattr & ATTR_CMNEXT_NOFIRMLINKPATH) != 0;
+    if (has_nofirmlink_path) {
+        attrreference_t path_ref;
+        if (offset + sizeof(path_ref) > record_len) {
+            fprintf(stderr, "truncated ATTR_CMNEXT_NOFIRMLINKPATH reference\n");
+            exit(2);
+        }
+        memcpy(&path_ref, record + offset, sizeof(path_ref));
+        size_t path_ref_end = offset + sizeof(path_ref);
+        int64_t path_start = (int64_t)offset + (int64_t)path_ref.attr_dataoffset;
+        if (path_start < 0 || (uint64_t)path_start < path_ref_end ||
+            path_ref.attr_length < 2 ||
+            path_ref.attr_length > sizeof(nofirmlink_path) ||
+            (uint64_t)path_start + path_ref.attr_length > record_len) {
+            fprintf(stderr, "invalid nofirmlink path reference: offset=%lld length=%u record=%zu\n",
+                    (long long)path_start, path_ref.attr_length, record_len);
+            exit(2);
+        }
+        const unsigned char *path_bytes = record + (size_t)path_start;
+        if (path_bytes[0] != '/' || path_bytes[path_ref.attr_length - 1] != '\0' ||
+            memchr(path_bytes, '\0', path_ref.attr_length - 1) != NULL) {
+            fprintf(stderr, "nofirmlink path is not exactly NUL terminated\n");
+            exit(2);
+        }
+        if ((returned.commonattr & ATTR_CMN_NAME) &&
+            (uint64_t)name_start + name_length > (uint64_t)path_start) {
+            fprintf(stderr, "name payload overlaps nofirmlink path payload\\n");
+            exit(2);
+        }
+        memcpy(nofirmlink_path, path_bytes, path_ref.attr_length);
     }
 
     if (strcmp(name, "Users") == 0 || strcmp(name, "Applications") == 0 ||
-        strcmp(name, "Library") == 0 || strcmp(name, "System") == 0) {
+        strcmp(name, "Library") == 0 || strcmp(name, "private") == 0 ||
+        strcmp(name, "System") == 0 || strcmp(name, "usr") == 0) {
         printf("entry=%s record_len=%u returned_common=0x%08x error=%u ",
                name, declared_len, returned.commonattr, entry_error);
         if (has_flags) {
             printf("flags=0x%08x flags_offset=%zu ", flags, flags_offset);
         } else {
             printf("flags=NOT_RETURNED ");
+        }
+        if (has_nofirmlink_path) {
+            printf("nofirmlink_path=%s ", nofirmlink_path);
+        } else {
+            printf("nofirmlink_path=NOT_RETURNED ");
         }
         printf("raw=");
         size_t dump_len = record_len < 64 ? record_len : 64;
@@ -154,6 +210,7 @@ int main(void) {
     attrs.bitmapcount = ATTR_BIT_MAP_COUNT;
     attrs.commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME |
                        ATTR_CMN_FLAGS | ATTR_CMN_ERROR;
+    attrs.forkattr = ATTR_CMNEXT_NOFIRMLINKPATH;
 
     int dirfd = open("/", O_RDONLY | O_CLOEXEC);
     if (dirfd < 0) {
@@ -163,7 +220,7 @@ int main(void) {
 
     unsigned char buffer[64 * 1024] __attribute__((aligned(8)));
     for (;;) {
-        int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer), 0);
+        int count = getattrlistbulk(dirfd, &attrs, buffer, sizeof(buffer), FSOPT_ATTR_CMN_EXTENDED);
         if (count < 0) {
             perror("getattrlistbulk(/)");
             close(dirfd);
@@ -197,6 +254,7 @@ int main(void) {
     print_path_api_flags(dirfd, "Users");
     print_path_api_flags(dirfd, "Applications");
     print_path_api_flags(dirfd, "Library");
+    print_path_api_flags(dirfd, "private");
 
     close(dirfd);
     return 0;
