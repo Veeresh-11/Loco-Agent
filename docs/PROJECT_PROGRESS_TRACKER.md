@@ -1515,8 +1515,8 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/macos-15-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-bulk-record-parser-hardening` | Pending — branch-level source review not yet completed |
-| `test/macos-bulk-record-parser-hardening-v2` | Pending — branch-level source review not yet completed |
-| `test/macos-firmlink-extended-bulk-evidence` | Pending — branch-level source review not yet completed |
+| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped source review completed; full branch-level review pending |
+| `test/macos-firmlink-extended-bulk-evidence` | PR #106 scoped source review completed; full branch-level review pending |
 | `test/macos-firmlink-volume-boundary` | Pending — branch-level source review not yet completed |
 | `test/macos-intermediate-directory-swap-race` | Pending — branch-level source review not yet completed |
 | `test/macos-nested-apfs-mount-boundary` | Pending — branch-level source review not yet completed |
@@ -1554,3 +1554,10 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Branch-level review census remains **175 inventoried / all 175 not yet fully reviewed**. The PR #106 review is a scoped source review, not a completion of the repository-wide branch queue. **All branches reviewed: NO.**
 - PRs #104/#106/#107 remain draft/open. Issue #74, authoritative firmlink semantics reconciliation, independent native security review, and mainline governance remain open acceptance gates. No merge, PR closure, or branch deletion was performed.
 - Next task: obtain and verify exact-head Rust Core Tests for the updated PR #106 code, then continue the branch queue with the next code-bearing branch/PR in dependency order.
+
+
+### PR #106 exact-head CI status — 2026-11-27
+- Rust Core Tests run [#45997726375](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45997726375) was created for the updated PR #106 head `ba088e03e610e5c835f6b131b90a22ac75334877`; status was **pending** at the last poll (no jobs published yet).
+- The run includes the corrected C parser source commit `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f` and the subsequent evidence-document commit. Do not mark PR #106 CI green until the run completes and the Ubuntu/Windows/macOS jobs are checked.
+- PR #106 remains draft/open. PR #107 comparison against the updated #106 branch is now 15 ahead / 6 behind, merge base unchanged at `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`.
+- Branch queue annotations: PR #106 and #107 have scoped source reviews; their full branch-level reviews remain pending. Total inventoried branches remains 175. **All branches reviewed: NO.**
