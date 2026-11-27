@@ -72,3 +72,12 @@ Head: `7a86ae80a2b0147fc4c058792abd44c5751219b3`.
 - macOS Rust tests: 130 passed, 0 failed, 1 ignored.
 - The new opened-handle firmlink identity test passed. It bypasses the bulk preflight and confirms each tested firmlink's parent descriptor has the System `f_fsid`, while the `openat` result has the Data `f_fsid`.
 - The native `O_RESOLVE_BENEATH` probe repeated successfully: the lexical `..` escape was denied, but root and nested firmlink entries opened and resolved to Data-volume paths.
+
+## Follow-up review — per-mapping unflagged baseline (2026-11-27)
+
+Code review found that the original diagnostic treated any failed flagged `openat` as `outcome=blocked` and returned success, without first proving that the same mapping was traversable without `O_RESOLVE_BENEATH`. The separate `..` control proves the flag is active for lexical escape, but it does not exclude per-entry failures such as permissions, missing targets, or fixture drift. Such failures could be mistaken for firmlink-specific blocking.
+
+Commit `545b566cd856e40637b2bbb2af309386b9c1319b` adds an unflagged `openat` baseline for every root and nested mapping. The probe now fails when that exact baseline cannot open, logs its `F_GETPATH_NOFIRMLINK` path, and only then compares the flagged open. This makes a blocked result attributable to the addition of `O_RESOLVE_BENEATH` for that mapping, rather than an unrelated baseline failure. The change is diagnostic-only and does not alter production adapter behavior.
+
+Exact-head CI has not yet appeared in the commit-associated workflow listing at the time of this update. Do not claim this probe hardening is validated until the PR #110 head's macOS compile/probe and full required workflows pass. The previously recorded macOS 26.7.2 observations remain evidence for the earlier probe revision.
+
