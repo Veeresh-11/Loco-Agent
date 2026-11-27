@@ -73,3 +73,8 @@ The probe is hardened in commit `fbf79969c4a2ad73eef9fbc371e6602d70534d4e`:
 - reject overlap between the name and no-firmlink path payloads.
 
 This changes only diagnostic record validation; it does not alter adapter authorization or reinterpret any filesystem flag. Exact-head CI for the new commit must complete before the probe change is considered validated. The previous run #45344892209 applies to the earlier head only.
+
+
+### CI finding and correction
+
+The first exact-head run after the parser hardening exposed a compile error in the diagnostic C probe: the name-range variables were scoped inside the optional name-attribute block but referenced later during the path-overlap check. The macOS job failed at the clang compile step before running the native probe. Corrected in code commit `e4fa7d51a0ab56040d7caa3d13fd4afe3820d306` by retaining the name start/length in the enclosing record scope and applying the absolute-path check. The failed run is [#45984098897](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45984098897); its failure is a real compile regression in the review fix, not a runner issue. A new exact-head run is required.
