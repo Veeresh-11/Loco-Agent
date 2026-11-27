@@ -135,3 +135,14 @@ This addendum records a focused follow-up against the current branch files, not 
 
 ### Repository branch review status
 A refreshed branch-name census yielded 175 branches (100 + 75). **All branches reviewed: NO.** A branch listing only enumerates names; each branch still requires a comparison against its base/main, unique commit/file inspection, associated PR and review-thread checks, and CI/reachability classification. The previous 21/21 first-pass metric applied only to its enumerated PR scope and is not a repository-wide review-completion figure.
+
+
+## Review addendum — 2026-11-27: PR #107 bulk parser follow-up
+
+- Reviewed PR #107's one-file implementation and synthetic fixtures at initial head `677e9bf2859102df37141d3aca4e734ef51a62d1`. The extracted helper and tests cover the previously missing optional `ATTR_CMN_ERROR` handling, returned attribute masks, malformed lengths, offset/alignment checks, NUL termination, path validation, and name/path/fixed-field overlap. Raw `ATTR_CMN_FLAGS` is preserved as diagnostic data only; no authorization inference is made from it.
+- Found and corrected the remaining filename bound: `ATTR_CMN_NAME` had a 256-byte cap, while XNU documents UTF-8 name payloads up to `NAME_MAX * 3 + 1` bytes. The branch now uses 766 bytes (Darwin NAME_MAX 255) and includes maximum-bound and over-bound fixtures. Reference: https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlist.2#L2939-L2958.
+- Fix commits: `242ca636a78ad51dbd3cc86db59c10299dd04dd5` and `0af5c5f8eb231254f0d82ea2b01c00f75d497a90`.
+- Current exact head: `0af5c5f8eb231254f0d82ea2b01c00f75d497a90`. No Actions runs or combined status checks were returned for this head at the time of this addendum. Prior green runs #45346723420/#45346723355 belong to `677e9bf...` only.
+- Branch comparison against its declared base: 15 ahead / 4 behind; merge base `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`. The declared base is now at `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`; the feature branch must be reconciled before integration.
+- PR #107 remains draft/open. The connector refused a formal REQUEST_CHANGES review because the repository owner authored the PR; a detailed PR conversation comment was posted instead: https://github.com/Veeresh-11/Loco-Agent/pull/107#issuecomment-7218001141.
+- Parser correctness does not resolve the separate native firmlink flag discrepancy. Keep issue #74 and independent native security review open; no production confinement/authorization claim is made.
