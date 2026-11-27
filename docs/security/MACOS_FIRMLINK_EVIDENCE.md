@@ -59,3 +59,17 @@ The Rust Core Tests workflow now triggers when `scripts/macos-*.c` changes. Prev
 - Keep issue #74 open until the documented flag discrepancy is explained by authoritative Apple guidance or a supported OS-provided fixture is available.
 - Keep the workspace-read capability unsupported/unverified for the unresolved property. Preserve existing fail-closed behavior and the separately tested distinct-volume boundary.
 - Require independent security review before merging the workspace-read stack.
+
+
+## Review follow-up — 2026-11-27
+
+A scoped review of the complete PR #106 patch found that the diagnostic C record parser checked that the no-firmlink path payload was inside the record and NUL-terminated, but did not require its start to follow the attrreference_t itself. It also did not require an absolute path or prevent the name payload from overlapping the path payload. These checks matter even in a diagnostic probe: malformed offsets could otherwise be interpreted as plausible path evidence.
+
+The probe is hardened in commit `fbf79969c4a2ad73eef9fbc371e6602d70534d4e`:
+
+- require the name payload to start after the name reference and the subsequent fixed fields;
+- require the no-firmlink path payload to start after its own reference;
+- require an absolute, exactly NUL-terminated path with no embedded NUL;
+- reject overlap between the name and no-firmlink path payloads.
+
+This changes only diagnostic record validation; it does not alter adapter authorization or reinterpret any filesystem flag. Exact-head CI for the new commit must complete before the probe change is considered validated. The previous run #45344892209 applies to the earlier head only.
