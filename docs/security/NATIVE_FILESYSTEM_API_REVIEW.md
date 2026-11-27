@@ -238,3 +238,8 @@ The fix changes the diagnostic probe only, not production authorization. Exact-h
 ### PR #110 current-head validation status — 2026-11-27
 
 Current PR #110 head is `5f6aed9fea3ac37c88ca281fa16ea6850805db7d`, 16 ahead / 0 behind PR #109 base. Exact-head Rust Core Tests [#45999357228](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357228) and Contract Validation [#45999357627](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357627) are pending. The Rust run on intermediate code head `33549eb...` was cancelled after subsequent commits; its Contract Validation success is not current-head evidence. Keep PR #110 draft until current-head workflows pass and the macOS probe logs are inspected.
+
+
+### PR #110 exact-head result — 2026-11-27
+
+Current head `5f6aed9fea3ac37c88ca281fa16ea6850805db7d` passed Rust Core Tests [#45999357228](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357228) on Ubuntu, Windows and macOS and Contract Validation [#45999357627](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357627). Inspected macOS job #140506854666: the lexical parent-escape control was blocked with errno 107; ordinary `/System` and `/usr` opened; all four root and seven nested mappings opened with both baseline and `O_RESOLVE_BENEATH`; mapped no-firmlink paths pointed into `/System/Volumes/Data`. The probe hardening therefore passed on the exact head and confirmed that `O_RESOLVE_BENEATH` does not reject these firmlinks. PR #110 remains draft pending independent review and support-matrix decision.
