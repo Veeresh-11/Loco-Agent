@@ -233,3 +233,8 @@ Corrected in commit `33549ebfddf06c4025f3b2a900eab161c7375c8c`:
 - output records use actual newlines.
 
 The fix changes the diagnostic probe only, not production authorization. Exact-head Rust Core Tests [#45999159794](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159794) and Contract Validation [#45999159812](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999159812) were in progress at the last poll. The earlier successful runs #45982960193/#45982960286 were for superseded head `a50177e...`; do not use them as validation for the new commit. Keep PR #110 draft until exact-head CI and independent review complete.
+
+
+### PR #110 current-head validation status — 2026-11-27
+
+Current PR #110 head is `5f6aed9fea3ac37c88ca281fa16ea6850805db7d`, 16 ahead / 0 behind PR #109 base. Exact-head Rust Core Tests [#45999357228](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357228) and Contract Validation [#45999357627](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357627) are pending. The Rust run on intermediate code head `33549eb...` was cancelled after subsequent commits; its Contract Validation success is not current-head evidence. Keep PR #110 draft until current-head workflows pass and the macOS probe logs are inspected.
