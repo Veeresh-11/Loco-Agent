@@ -1395,7 +1395,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `docs/typescript-privileged-operation-inventory` | Pending — branch-level source review not yet completed |
 | `docs/update-authority-roadmap-stages` | Pending — branch-level source review not yet completed |
 | `docs/windows-nt-ffi-sdk-audit` | Pending — branch-level source review not yet completed |
-| `feat/macos-bulk-firmlink-preflight` | Pending — branch-level source review not yet completed |
+| `feat/macos-bulk-firmlink-preflight` | PR #104 parent parser scoped review completed; full branch-level review pending |
 | `feat/macos-bulk-firmlink-preflight-rebase` | Pending — branch-level source review not yet completed |
 | `feat/macos-firmlink-runtime-capability` | Pending — branch-level source review not yet completed |
 | `feat/real-streaming-provider-tests` | Pending — branch-level source review not yet completed |
@@ -1514,8 +1514,8 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/linux-tmpfs-workspace-root` | Pending — branch-level source review not yet completed |
 | `test/macos-15-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
-| `test/macos-bulk-record-parser-hardening` | Pending — branch-level source review not yet completed |
-| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped source review completed; full branch-level review pending |
+| `test/macos-bulk-record-parser-hardening` | Scoped parser review completed; stale/superseded candidate; full branch-level review pending |
+| `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled onto #106 (0 behind); exact-head CI pending; full branch-level review pending |
 | `test/macos-firmlink-extended-bulk-evidence` | PR #106 scoped source review completed; full branch-level review pending |
 | `test/macos-firmlink-volume-boundary` | Pending — branch-level source review not yet completed |
 | `test/macos-intermediate-directory-swap-race` | Pending — branch-level source review not yet completed |
@@ -1561,3 +1561,16 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - The run includes the corrected C parser source commit `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f` and the subsequent evidence-document commit. Do not mark PR #106 CI green until the run completes and the Ubuntu/Windows/macOS jobs are checked.
 - PR #106 remains draft/open. PR #107 comparison against the updated #106 branch is now 15 ahead / 6 behind, merge base unchanged at `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`.
 - Branch queue annotations: PR #106 and #107 have scoped source reviews; their full branch-level reviews remain pending. Total inventoried branches remains 175. **All branches reviewed: NO.**
+
+
+## Execution update — 2026-11-27: PR #106 validation, PR #104 parent review, and #107 reconciliation
+
+- PR #106 updated head `ba088e03e610e5c835f6b131b90a22ac75334877` passed Rust Core Tests [#45997726375](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45997726375) on Ubuntu, Windows and macOS. This is exact-head validation of the updated native C diagnostic probe and documentation state; it does not resolve issue #74 or substitute for independent review.
+- Next parent implementation review completed on PR #104 head `5b78582e99230302ee2936f87c60b5ff7a0d1988`, source `core/loco-core/src/macos_snapshot_adapter.rs`. Findings: the declared 766-byte UTF-8 name limit was not used (the call still passed 256); attrreference/payload 4-byte alignment was not enforced; name payload bounds did not prove separation from later fixed fields/path; and path validation omitted dot-component rejection.
+- These findings are mitigated in descendant PR #107's parser hardening (766-byte bound, alignment, fixed-field and payload non-overlap, absolute path and dot-component checks, exact NUL termination, malformed-record fixtures). A detailed review comment was posted to PR #104 (#7218166118). Do not integrate the parent parser without its descendant correction.
+- Reconciled PR #107 after #106 CI passed. New merge commit `e013d8e0fa5be7e14e0a4ed38a50bfe5cdeda5bb` has #106 head `ba088e03e610e5c835f6b131b90a22ac75334877` as first parent and prior #107 head `0af5c5f8eb231254f0d82ea2b01c00f75d497a90` as second parent. Its tree retains #106's branch state and overlays the reviewed parser file from #107. Compare against #106 now reports **16 ahead / 0 behind**, merge base at #106 head, with only `core/loco-core/src/macos_snapshot_adapter.rs` changed.
+- Exact-head CI for reconciled #107 commit: Contract Validation [#45998186236](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998186236) in progress; Rust Core Tests [#45998186291](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998186291) queued at last poll. The earlier #107 green runs apply only to old head `0af5c5f...`; they do not validate the new merge commit.
+- Branch queue scoped review updates: `feat/macos-bulk-firmlink-preflight` / PR #104 parent parser reviewed; `test/macos-bulk-record-parser-hardening` reviewed as stale/superseded parser candidate; `test/macos-firmlink-extended-bulk-evidence` / PR #106 reviewed with exact Rust matrix green; `test/macos-bulk-record-parser-hardening-v2` / PR #107 reviewed and ancestry reconciled. Full branch-level ancestry/source review remains pending for each.
+- Branch inventory remains **175 active branch names** (100 + 75 across the two pages). **All branches reviewed: NO.** Branch-level register records scoped reviews separately from full review status.
+- PRs #104/#106/#107 remain draft/open. No PR merge, closure, or branch deletion occurred. Issue #74 and independent native security review remain acceptance gates.
+- Next task: complete both exact-head workflows for reconciled #107 commit `e013d8e...`; then continue Order 2 native review queue with the next unreviewed code-bearing branch in dependency order.
