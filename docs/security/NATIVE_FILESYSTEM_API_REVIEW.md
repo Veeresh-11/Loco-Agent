@@ -361,3 +361,12 @@ Reviewed `scripts/macos-firmlink-record-probe.c` on PR #104's base branch. The p
 These findings are scoped to probe input validation. They do not invalidate the production Rust parser integration and do not provide evidence about the `SF_FIRMLINK`/`SF_NOUNLINK` discrepancy. No C source change was made in this pass. Next review/remediation task: harden this C diagnostic parser with the same record bounds, 766-byte name cap, 4-byte alignment, exact NUL and returned-attribute checks, then add malformed-record tests or a standalone parser fixture where practical. Keep the C probe diagnostic-only.
 
 **Disposition:** PR #173 implementation submitted; exact-head CI pending. Native C probe review completed with scoped hardening findings. Issue #74 remains unresolved; no production authorization behavior changed. **All branches reviewed: NO.**
+
+
+### PR #173 compile failure and correction — 2026-11-27
+
+The first exact-head Rust Core Tests run #46003028684 failed on macOS because the test passed `&OsStr` to `preflight_entry_path`, whose API accepts `&str` (E0308). Windows and Ubuntu jobs passed; Contract Validation #46003028674 passed. Corrected the test to convert the map filename to UTF-8 with an explicit checked `to_str()` before calling preflight, commit `262194542fba081285a1b2ffbdde209c14d2fd65`. This is a test compile fix; it does not change production code. Fresh exact-head Contract Validation #46003225480 and Rust Core Tests #46003225466 have started on the corrected head and were still in progress at this update. PR #173 remains draft/open. Do not count the first run as green; await macOS execution of the nested map assertions.
+
+### Review precision correction — native C probe name buffer
+
+Corrected the previous note about the C probe's `NAME_MAX * 3 + 1` name buffer: on Darwin with `NAME_MAX == 255`, this expression is 766 bytes, matching the production parser's explicit limit. It is therefore not a demonstrated undersized-buffer issue. The review now records only that the expression should be made explicit/auditable, alongside the substantive missing alignment, embedded-NUL and returned-attribute validation checks.
