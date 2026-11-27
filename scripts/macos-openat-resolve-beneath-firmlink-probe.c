@@ -157,7 +157,12 @@ static int verify_flag_rejects_parent_escape(int *observed_denial_errno) {
     close(root_fd);
     rmdir(child);
     rmdir(root);
-    return error == ENOTCAPABLE ? 0 : 1;
+    /* macOS 15 reports EACCES; newer Darwin runners report ENOTCAPABLE. */
+    if (error != ENOTCAPABLE && error != EACCES) {
+        return 1;
+    }
+    *observed_denial_errno = error;
+    return 0;
 }
 
 int main(void) {
