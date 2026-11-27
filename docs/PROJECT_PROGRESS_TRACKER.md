@@ -1521,7 +1521,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/macos-intermediate-directory-swap-race` | Ancestry/diff checked: 0 ahead / 210 behind current feature base, no unique changes; inherited source review pending |
 | `test/macos-nested-apfs-mount-boundary` | Ancestry/diff checked: 0 ahead / 159 behind current feature base, no unique changes; inherited source review pending |
 | `test/macos-nested-firmlink-preflight` | Scoped source/doc review completed; 25 ahead / 0 behind feature base, diverged 9 ahead / 15 behind #107; no PR; parser/doc findings recorded; full branch review pending |
-| `test/macos-openat-resolve-beneath-firmlink` | PR #110 scoped source review completed; probe hardened at 33549eb; exact-head CI pending; full branch review/independent security review pending |
+| `test/macos-openat-resolve-beneath-firmlink` | PR #110 scoped source review completed; probe hardened; current head 5f6aed9; exact-head CI pending; full branch review/independent security review pending |
 | `test/windows-final-file-mutation-race` | Pending — branch-level source review not yet completed |
 | `test/windows-intermediate-reparse-race` | Pending — branch-level source review not yet completed |
 | `test/windows-junction-race-retry` | Pending — branch-level source review not yet completed |
@@ -1618,3 +1618,11 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - PR #110 remains draft/open. Do not merge until both exact-head workflows pass, the current macOS probe output is inspected, and independent native security review is complete.
 - Branch inventory remains 175; **All branches reviewed: NO.** PR #110 is a scoped source review only; full branch history review and the remainder of the branch queue remain outstanding. No PRs were merged/closed and no branches deleted.
 - Next task: poll exact-head PR #110 CI and inspect the macOS job log for the new baseline/control assertions. Then continue with the next unreviewed branch in the native dependency order.
+
+
+### PR #110 final review head and CI refresh — 2026-11-27
+
+- After the probe correction and review-doc update, the current PR #110 head is `5f6aed9fea3ac37c88ca281fa16ea6850805db7d`; it is 16 commits ahead / 0 behind PR #109 base `903f736a9f60b7cfef411b3c3d1a36b136e249e7`.
+- Current-head Rust Core Tests [#45999357228](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357228) and Contract Validation [#45999357627](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45999357627) are pending. The earlier Rust run #45999159794 on intermediate head `33549eb...` was cancelled after subsequent commits; Contract Validation #45999159812 passed only on that intermediate head.
+- An additional doc-only intermediate head had a cancelled Rust run; do not use it as final evidence. Only the two current-head runs above determine validation.
+- PR #110 remains draft/open. Do not merge until current-head workflows pass and the macOS job output confirms ordinary controls open, baseline paths are available, mapped failures are specifically `ENOTCAPABLE`, and firmlink path outcomes match the documented experiment.
