@@ -1542,3 +1542,15 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Contract Validation run [#45996920864](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45996920864): **passed** on the corrected head.
 - Rust Core Tests run [#45996920804](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45996920804): running at last poll; Ubuntu, Windows and macOS jobs were all in progress. Do not mark the matrix green until all three jobs complete successfully.
 - Therefore the filename-bound fix is committed and Contract Validation is green, but the task remains **in progress** pending all-platform Rust CI and branch-base reconciliation.
+
+
+### Execution update — 2026-11-27: exact-head CI closure and next code review
+
+- PR #107 corrected parser head `0af5c5f8eb231254f0d82ea2b01c00f75d497a90`: Rust Core Tests [#45996920804](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45996920804) completed **successfully** on Ubuntu, Windows, and macOS. Contract Validation [#45996920864](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45996920864) also passed on that exact head. This closes the previously pending CI item for that SHA only.
+- Next code-review item completed: PR #106 native C diagnostic parser, source `scripts/macos-firmlink-record-probe.c`. Review found (a) an unconditional fixed-field reservation that could reject records when optional returned attributes are absent, and (b) missing rejection of embedded NUL bytes in names.
+- Corrected on PR #106 branch in code commit `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f`: derive trailing fixed-field reservation from the returned attribute bitmap and require exact name NUL termination. The native review document and `docs/security/MACOS_FIRMLINK_EVIDENCE.md` were updated with the findings and remediation.
+- PR #106's new code head does **not** yet have exact-head CI evidence. The prior #45984257580 run applies to the earlier `cc775878...` head only. Keep #106 submitted/in progress until a new Rust Core Tests run for the updated source head is verified.
+- PR #107 must be reconciled again after #106 settles: latest comparison before the documentation-only follow-up showed 15 commits ahead / 5 behind, merge base `8c4a2d0bced52c76fa528a3aab2ecc13328a3cde`. Do not merge or force-update either stacked branch without a safe owner-approved reconciliation.
+- Branch-level review census remains **175 inventoried / all 175 not yet fully reviewed**. The PR #106 review is a scoped source review, not a completion of the repository-wide branch queue. **All branches reviewed: NO.**
+- PRs #104/#106/#107 remain draft/open. Issue #74, authoritative firmlink semantics reconciliation, independent native security review, and mainline governance remain open acceptance gates. No merge, PR closure, or branch deletion was performed.
+- Next task: obtain and verify exact-head Rust Core Tests for the updated PR #106 code, then continue the branch queue with the next code-bearing branch/PR in dependency order.
