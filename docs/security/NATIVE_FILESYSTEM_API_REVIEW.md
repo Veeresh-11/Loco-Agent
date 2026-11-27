@@ -339,3 +339,25 @@ Reviewed the nested-firmlink branch's Rust adapter, native C probe and adapter d
 Current branch 'test/macos-nested-firmlink-preflight' is 25 commits ahead / 1 behind 'feat/macos-bulk-firmlink-preflight'; merge base remains '5b78582e99230302ee2936f87c60b5ff7a0d1988'. Its diff against the current PR #104 head includes workflow, adapter, evidence docs and C probe changes. The branch's Rust parser still calls 'attr_reference_range(..., 2, 256)' and does not enforce 4-byte alignment. The C probe caps names at 'NAME_MAX * 3 + 1' but does not explicitly validate attrreference/payload alignment; its 'dump_record' checks final NUL but does not reject embedded NUL in names. The branch's '/System/Library' nested mapping assertions are useful test candidates, but must be transferred only after rebasing onto the hardened PR #104 parser integration and reviewing the full diff. Its adapter documentation's stale 'getattrlistat' description must also be reconciled with the implementation's 'getattrlistbulk' path before transfer.
 
 **Disposition:** acceptance-contract discrepancy resolved at the documentation/research level; same-volume nested-firmlink fixture requirement is replaced as described above. No runtime code or test was changed in this pass. Do not merge the nested branch as-is. Next code task is to selectively port the OS-provided nested System/Data mapping assertions onto the current #104 head, preserving the hardened 766-byte/alignment/overlap parser, then run exact-head macOS CI and inspect its native logs. Issue #74 remains open because the hosted 'SF_NOUNLINK'/documented 'SF_FIRMLINK' discrepancy and a supported native signal/independent review are still unresolved. **All branches reviewed: NO.**
+
+
+## Nested System/Data mapping regression PR #173 and native C probe review — 2026-11-27
+
+### Selective test transfer
+
+Created draft PR #173, stacked directly on PR #104's parser-integrated head `a52d5b64929c10c3596b45db38ca902ac8f88ecc`. Its only changed file is `core/loco-core/src/macos_snapshot_adapter.rs` (+36 lines). The new macOS-only test reads `/usr/share/firmlinks`, selects mappings below `/System/Library/`, opens only each mapping's parent directory, queries the no-firmlink path through the production hardened `bulk_entry_path_no_firmlink` parser, checks the exact `/System/Volumes/Data/<target>` mapping, and requires `preflight_entry_path` to return `FirmlinkBoundary`. It does not open the mapped target or read its content. It fails if the OS map has no matching nested entries, rather than silently passing without coverage.
+
+The test reuses PR #104's parser and does not import the nested branch's 256-byte/no-alignment parser or its C parser. PR #173 is open/draft at head `33e60738d7f2745fd57b0777f27019e5c34a487f`, base `feat/macos-bulk-firmlink-preflight`; its diff is exactly one file, 36 additions, 0 deletions. Exact-head Contract Validation #46003028674 and Rust Core Tests #46003028684 have started and were still in progress at this review update. No CI result is claimed yet; macOS job completion is required to exercise the host firmlink map.
+
+### Next component review: active PR #104 native C diagnostic probe
+
+Reviewed `scripts/macos-firmlink-record-probe.c` on PR #104's base branch. The probe is diagnostic-only and does not authorize access, but its `dump_record` parser has robustness gaps that should be addressed before it is extended to parse nested mapping records:
+
+- The name attrreference path checks nonnegative offset, record bounds and a maximum buffer size, but does not enforce 4-byte alignment for the attrreference location or payload start.
+- It checks the final NUL byte but does not reject an embedded NUL before it; a crafted/invalid record could be truncated for `strcmp` and selected as a different entry.
+- The name buffer is `NAME_MAX * 3 + 1`, not the explicit 766-byte maximum used by the hardened production Rust parser; the diagnostic parser's bound should match the documented serialized UTF-8 payload limit.
+- It does not assert that the complete requested attribute set was returned before interpreting the name/flags fields. It should fail closed or report a malformed/incomplete record rather than treating partial data as an ordinary diagnostic result.
+
+These findings are scoped to probe input validation. They do not invalidate the production Rust parser integration and do not provide evidence about the `SF_FIRMLINK`/`SF_NOUNLINK` discrepancy. No C source change was made in this pass. Next review/remediation task: harden this C diagnostic parser with the same record bounds, 766-byte name cap, 4-byte alignment, exact NUL and returned-attribute checks, then add malformed-record tests or a standalone parser fixture where practical. Keep the C probe diagnostic-only.
+
+**Disposition:** PR #173 implementation submitted; exact-head CI pending. Native C probe review completed with scoped hardening findings. Issue #74 remains unresolved; no production authorization behavior changed. **All branches reviewed: NO.**
