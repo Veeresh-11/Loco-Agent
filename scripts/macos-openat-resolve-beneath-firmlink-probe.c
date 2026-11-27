@@ -25,7 +25,7 @@ static int print_descriptor_path(int fd, char *buffer, size_t size) {
     return 0;
 }
 
-static int probe_openat_beneath(const char *source_path) {
+static int probe_openat_beneath(const char *source_path, int is_firmlink_mapping) {
     char parent_path[PATH_MAX];
     char leaf[NAME_MAX + 1];
     char resolved[PATH_MAX];
@@ -60,26 +60,26 @@ static int probe_openat_beneath(const char *source_path) {
     }
 
     // Establish that this exact mapping is ordinarily traversable before
-    // attributing any failure to O_RESOLVE_BENEATH. Without this control, an
-    // unrelated EACCES/ENOENT/metadata failure could be mislabeled as a
-    // beneath-policy denial and make the diagnostic inconclusive.
+    // attributing any failure to O_RESOLVE_BENEATH.
     errno = 0;
     int baseline_fd = openat(parent_fd, leaf,
         O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     int baseline_error = errno;
     if (baseline_fd < 0) {
-        printf("resolve_beneath source=%s baseline=unavailable errno=%d (%s)\\n",
+        printf("resolve_beneath source=%s baseline=unavailable errno=%d (%s)\n",
                source_path, baseline_error, strerror(baseline_error));
         close(parent_fd);
         return 1;
     }
-    if (print_descriptor_path(baseline_fd, resolved, sizeof(resolved)) == 0) {
-        printf("resolve_beneath source=%s baseline=opened nofirmlink_path=%s\\n",
-               source_path, resolved);
-    } else {
-        printf("resolve_beneath source=%s baseline=opened nofirmlink_path_error=%d\\n",
+    if (print_descriptor_path(baseline_fd, resolved, sizeof(resolved)) != 0) {
+        printf("resolve_beneath source=%s baseline=path_unavailable errno=%d\n",
                source_path, errno);
+        close(baseline_fd);
+        close(parent_fd);
+        return 1;
     }
+    printf("resolve_beneath source=%s baseline=opened nofirmlink_path=%s\n",
+           source_path, resolved);
     close(baseline_fd);
 
     errno = 0;
@@ -87,24 +87,37 @@ static int probe_openat_beneath(const char *source_path) {
         O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW | O_RESOLVE_BENEATH);
     int open_error = errno;
     if (child_fd < 0) {
-        printf("resolve_beneath source=%s beneath=blocked errno=%d (%s)\\n",
+        if (open_error != ENOTCAPABLE) {
+            printf("resolve_beneath source=%s beneath=inconclusive errno=%d (%s)\n",
+                   source_path, open_error, strerror(open_error));
+            close(parent_fd);
+            return 1;
+        }
+        if (!is_firmlink_mapping) {
+            printf("resolve_beneath source=%s control=unexpectedly_blocked errno=%d (%s)\n",
+                   source_path, open_error, strerror(open_error));
+            close(parent_fd);
+            return 1;
+        }
+        printf("resolve_beneath source=%s beneath=blocked errno=%d (%s)\n",
                source_path, open_error, strerror(open_error));
         close(parent_fd);
         return 0;
     }
 
-    if (print_descriptor_path(child_fd, resolved, sizeof(resolved)) == 0) {
-        printf("resolve_beneath source=%s beneath=opened nofirmlink_path=%s\\n",
-               source_path, resolved);
-    } else {
-        printf("resolve_beneath source=%s beneath=opened nofirmlink_path_error=%d\\n",
+    if (print_descriptor_path(child_fd, resolved, sizeof(resolved)) != 0) {
+        printf("resolve_beneath source=%s beneath=path_unavailable errno=%d\n",
                source_path, errno);
+        close(child_fd);
+        close(parent_fd);
+        return 1;
     }
+    printf("resolve_beneath source=%s beneath=opened nofirmlink_path=%s\n",
+           source_path, resolved);
     close(child_fd);
     close(parent_fd);
     return 0;
 }
-
 static int verify_flag_rejects_parent_escape(void) {
     char template[] = "/tmp/loco-resolve-beneath-XXXXXX";
     char *root = mkdtemp(template);
@@ -152,14 +165,14 @@ int main(void) {
 
     const char *controls[] = {"/System", "/usr"};
     for (size_t i = 0; i < sizeof(controls) / sizeof(controls[0]); ++i) {
-        if (probe_openat_beneath(controls[i]) != 0) {
+        if (probe_openat_beneath(controls[i], 0) != 0) {
             return 2;
         }
     }
 
     const char *root_mappings[] = {"/Users", "/Applications", "/Library", "/private"};
     for (size_t i = 0; i < sizeof(root_mappings) / sizeof(root_mappings[0]); ++i) {
-        if (probe_openat_beneath(root_mappings[i]) != 0) {
+        if (probe_openat_beneath(root_mappings[i], 1) != 0) {
             return 3;
         }
     }
@@ -181,7 +194,7 @@ int main(void) {
         if (strncmp(source, prefix, sizeof(prefix) - 1) != 0) {
             continue;
         }
-        if (probe_openat_beneath(source) != 0) {
+        if (probe_openat_beneath(source, 1) != 0) {
             fclose(map);
             return 5;
         }
