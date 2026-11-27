@@ -1512,7 +1512,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/linux-real-bind-mount-boundary` | Pending — branch-level source review not yet completed |
 | `test/linux-tmpfs-mount-boundary` | Pending — branch-level source review not yet completed |
 | `test/linux-tmpfs-workspace-root` | Pending — branch-level source review not yet completed |
-| `test/macos-15-firmlink-matrix` | Pending — branch-level source review not yet completed |
+| `test/macos-15-firmlink-matrix` | PR #112 scoped source review completed; exact-head Rust matrix + Contract Validation passed; full branch/history review and independent security review pending |
 | `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
 | `test/macos-bulk-record-parser-hardening` | Scoped parser review completed; stale/superseded candidate; full branch-level review pending |
 | `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled 19 ahead / 0 behind latest #106 head; exact-head Rust matrix and Contract Validation passed; independent review/full branch review pending |
