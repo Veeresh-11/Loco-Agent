@@ -113,3 +113,25 @@ Continue to treat the digest as binding the returned bytes to the returned snaps
 ## Review disposition
 
 **Do not approve the snapshot stack for merge yet.** The review found actionable hardening work and policy decisions, but no claim is made here that the adapters are exploitable or that the native APIs fail. Resolve the findings, add the native tests, and obtain an independent review of the Windows FFI and cross-platform mount policy before changing PR readiness.
+
+
+## Review addendum — 2026-11-27: PR #104 bulk-record residuals and PR #106 evidence
+
+This addendum records a focused follow-up against the current branch files, not a recertification.
+
+### PR #106 — native evidence probe
+- Current reviewed head: `cc7758783760ca5c940fe5d438cae445322a585d`.
+- Rust Core Tests #45984257580 passed on Ubuntu, Windows and macOS. The macOS job executed the firmlink metadata probe and nested APFS checks.
+- No Contract Validation run was associated with this exact head during this refresh.
+- No submitted GitHub review or inline review thread was returned. Review is first-pass only; independent native security review remains outstanding.
+
+### PR #104 — bulk parser follow-up
+- Current PR head at review: `5b78582e99230302ee2936f87c60b5ff7a0d1988`.
+- The implementation now checks each attrreference's own structure boundary, checked payload bounds, nonnegative offsets, NUL termination and absolute path. These are accepted as partial remediation of earlier offset findings.
+- Residual test gap: no synthetic fixture seam exercises the full bulk record parser across malformed header/record lengths, required and omitted returned-attribute bits, optional `ATTR_CMN_ERROR` placement and nonzero per-entry errors, and cross-payload overlap between name and no-firmlink path. The older `parse_nofirmlink_path_record` malformed fixture does not exercise the bulk layout.
+- Residual evidence gap: the parser confirms `ATTR_CMN_FLAGS` was requested/returned, then skips its four-byte value. Decode and preserve the value in diagnostics/probe output. This does not itself settle the security contract: observed hosted-runner values continue to conflict with documented `SF_FIRMLINK` semantics; no path/flag heuristic may be promoted into an authorization grant without authoritative reconciliation.
+- Historical exact-head CI for #104 SHA `5b78582...`: Rust Core Tests #45344512869 and Contract Validation #45344512880 both passed. No later #104 source change is asserted by this addendum.
+- Keep the adapter fail-closed and preserve descriptor-relative opens, no-follow behavior, post-open path validation and filesystem identity checks.
+
+### Repository branch review status
+A refreshed branch-name census yielded 175 branches (100 + 75). **All branches reviewed: NO.** A branch listing only enumerates names; each branch still requires a comparison against its base/main, unique commit/file inspection, associated PR and review-thread checks, and CI/reachability classification. The previous 21/21 first-pass metric applied only to its enumerated PR scope and is not a repository-wide review-completion figure.
