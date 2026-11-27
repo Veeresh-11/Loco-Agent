@@ -207,6 +207,15 @@ The extension exposes several `locoAgent.*` settings. Key options:
 
 ## Packaging & Publishing
 
+**Packaging requires Node.js 22 or newer.** The extension application checks support Node.js 20 and 22, but the isolated `@vscode/vsce@4.1.0` packaging toolchain requires Node.js >=22. The `npm run package` script checks the runtime and exits with an actionable message on older Node.js versions. Install the isolated packaging dependencies with:
+
+```bash
+npm ci
+npm ci --prefix tools/vsce
+npm run compile
+npm run package
+```
+
 To build and package the extension locally:
 
 ```powershell
@@ -232,7 +241,7 @@ vsce login <publisher-name>
 vsce publish
 ```
 
-(You can also use `npx vsce package` to create a local package without publishing.)
+Use `npm run package` from the repository root so the pinned, isolated Node 22 toolchain is used.
 
 ---
 

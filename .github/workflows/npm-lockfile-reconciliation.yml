@@ -27,7 +27,9 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-      - name: Regenerate lockfile from manifest
+      - name: Apply semver-compatible audit fixes to the lockfile
+        run: npm audit fix --package-lock-only --ignore-scripts --no-fund
+      - name: Regenerate lockfile from manifest and persisted overrides
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Validate manifest-lock consistency
         run: npm ci --ignore-scripts --no-audit --no-fund

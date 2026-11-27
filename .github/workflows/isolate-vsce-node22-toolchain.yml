@@ -1,0 +1,130 @@
+name: Isolated VSCE Node 22 Toolchain Candidate
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "tools/vsce/**"
+      - ".github/workflows/isolate-vsce-node22-toolchain.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: isolated-vsce-toolchain-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Generate semver-safe root candidate and apply reviewed tooling overrides
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --package-lock-only --ignore-scripts --no-fund
+          audit_fix_status=$?
+          set -e
+          echo "Semver-safe root audit fix exit code: $audit_fix_status"
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+          p.overrides={
+            ...(p.overrides??{}),
+            'brace-expansion':'1.1.21',
+            '@isaacs/brace-expansion':'5.0.1',
+            'glob@^11':'14.0.6',
+            'glob@^13':'14.0.6',
+            'minimatch@^9':'11.0.9',
+            'minimatch@^10':'11.0.9'
+          };
+          fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');
+          NODE
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));
+          const packages=lock.packages??{};
+          const forbidden=['node_modules/@vscode/vsce','node_modules/@azure/identity','node_modules/@azure/msal-node'];
+          const found=forbidden.filter(path=>packages[path]);
+          if(found.length) throw new Error('Packaging-only dependencies leaked into root app graph: '+found.join(', '));
+          console.log('Root application lockfile is isolated from VSCE/Azure/MSAL tooling');
+          NODE
+      - name: Node 20 application validation
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Node 22 application validation
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run compile
+          npm test -- --runInBand
+          npm run lint
+      - name: Generate isolated VSCE lockfile and validate engine/dependency contract
+        run: |
+          npm install --prefix tools/vsce --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --prefix tools/vsce --ignore-scripts --no-audit --no-fund
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const lock=JSON.parse(fs.readFileSync('tools/vsce/package-lock.json','utf8'));
+          const packages=lock.packages??{};
+          const vsce=packages['node_modules/@vscode/vsce'];
+          const identities=Object.entries(packages).filter(([p])=>p==='node_modules/@azure/identity'||p.endsWith('/node_modules/@azure/identity')).map(([path,p])=>({path,version:p.version,engines:p.engines}));
+          const msal=Object.entries(packages).filter(([p])=>p==='node_modules/@azure/msal-node'||p.endsWith('/node_modules/@azure/msal-node')).map(([path,p])=>({path,version:p.version,engines:p.engines,dependencies:p.dependencies??{}}));
+          if(vsce?.version!=='4.1.0'||!vsce.engines?.node?.includes('22')) throw new Error('Expected VSCE 4.1.0 Node 22 toolchain: '+JSON.stringify(vsce));
+          if(!identities.length||identities.some(p=>!p.engines?.node?.includes('22'))) throw new Error('Expected Node 22-only Azure Identity toolchain: '+JSON.stringify(identities));
+          if(!msal.length||msal.some(p=>{const [a,b,c]=p.version.split('.').map(Number);return a<7||(a===7&&b<1)||Boolean(p.dependencies.uuid)})) throw new Error('Expected patched MSAL >=7.1 without UUID: '+JSON.stringify(msal));
+          console.log(JSON.stringify({vsce:vsce.version,identities,msal},null,2));
+          NODE
+      - name: Package VSIX using isolated Node 22 toolchain
+        run: npm run package
+      - name: Verify minimatch ignore/include behavior in the VSIX archive
+        run: node tools/vsce/test-ignore-patterns.js
+      - name: Generate separate root and packaging-tool audit reports
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/loco-audits"
+          set +e
+          npm audit --json > "$RUNNER_TEMP/loco-audits/root-audit.json"
+          root_status=$?
+          npm --prefix tools/vsce audit --json > "$RUNNER_TEMP/loco-audits/vsce-audit.json"
+          vsce_status=$?
+          set -e
+          node - "$RUNNER_TEMP/loco-audits/root-audit.json" "$RUNNER_TEMP/loco-audits/vsce-audit.json" "$root_status" "$vsce_status" "$GITHUB_STEP_SUMMARY" <<'NODE'
+          const fs=require('node:fs');
+          const [rootFile,vsceFile,rootStatus,vsceStatus,summary]=process.argv.slice(2);
+          const root=JSON.parse(fs.readFileSync(rootFile,'utf8'));
+          const vsce=JSON.parse(fs.readFileSync(vsceFile,'utf8'));
+          const counts=x=>x.metadata?.vulnerabilities??{};
+          const lines=['## Isolated dependency audit','', '| Dependency graph | Critical | High | Moderate | Low | Audit exit |','|---|---:|---:|---:|---:|---:|',
+          ...[['Root application',counts(root),rootStatus],['VSCE packaging tool',counts(vsce),vsceStatus]].map(([n,c,s])=>`| ${n} | ${c.critical??0} | ${c.high??0} | ${c.moderate??0} | ${c.low??0} | ${s} |`)];
+          fs.appendFileSync(summary,lines.join('\n')+'\n');
+          console.log(JSON.stringify({root:counts(root),vsce:counts(vsce),rootAuditExit:Number(rootStatus),vsceAuditExit:Number(vsceStatus)},null,2));
+          NODE
+      - name: Upload isolated lockfiles and audit reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: isolated-vsce-node22-toolchain-candidate
+          path: |
+            package-lock.json
+            tools/vsce/package-lock.json
+            ${{ runner.temp }}/loco-audits/*.json
+          if-no-files-found: error
+          retention-days: 14
+

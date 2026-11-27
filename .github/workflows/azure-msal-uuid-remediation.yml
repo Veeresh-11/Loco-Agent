@@ -29,11 +29,23 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Check whether the root graph contains the Azure tooling candidate
+        id: scope
+        run: |
+          if node -e "process.exit(require('./package-lock.json').packages?.['node_modules/@azure/identity'] ? 0 : 1)"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Root graph has no Azure Identity; the VSCE packaging dependencies are isolated in tools/vsce, so this root-graph candidate is not applicable."
+          fi
       - name: Update only the Azure identity lockfile entry
+        if: steps.scope.outputs.run == 'true'
         run: npm update @azure/identity --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Install candidate lockfile
+        if: steps.scope.outputs.run == 'true'
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Assert patched MSAL dependency and UUID removal
+        if: steps.scope.outputs.run == 'true'
         run: |
           node <<'NODE'
           const lock=require('./package-lock.json');
@@ -47,13 +59,14 @@ jobs:
           console.log(JSON.stringify({identity:identity.version,msal:msal.version,msalDependencies:msal.dependencies,uuidPackages:uuidPaths},null,2));
           NODE
       - name: Compile, test, lint and package
+        if: steps.scope.outputs.run == 'true'
         run: |
           npm run compile
           npm test -- --runInBand
           npm run lint
           npm run package
       - name: Generate audit report
-        if: matrix.node == 20
+        if: matrix.node == 20 && steps.scope.outputs.run == 'true'
         shell: bash
         run: |
           set +e
@@ -65,7 +78,7 @@ jobs:
           const lines=['## Audit after Azure MSAL update','', '| Severity | Count |','|---|---:|', ...['critical','high','moderate','low','info'].map(s=>`| ${s} | ${c[s]??0} |`),'',`Audit exit code: ${exitCode}`,'','| Package | Severity | Range | Fix |','|---|---|---|---|',...rows.sort((a,b)=>rank[a.severity]-rank[b.severity]||a.name.localeCompare(b.name)).map(v=>`| ${v.name} | ${v.severity} | ${v.range??''} | ${JSON.stringify(v.fixAvailable)} |`)];fs.appendFileSync(summaryPath,lines.join('\n')+'\n');console.log(JSON.stringify({counts:c,packages:rows.length},null,2));
           NODE
       - name: Upload candidate lockfile and audit
-        if: matrix.node == 20
+        if: matrix.node == 20 && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: azure-msal-uuid-candidate

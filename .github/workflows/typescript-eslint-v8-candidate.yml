@@ -42,12 +42,11 @@ jobs:
           NODE
       - name: Validate candidate lockfile on Node 20
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Compile, test, lint and package on Node 20
+      - name: Compile, test and lint on Node 20
         run: |
           npm run compile
           npm test -- --runInBand
           npm run lint
-          npm run package
       - name: Set up Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
