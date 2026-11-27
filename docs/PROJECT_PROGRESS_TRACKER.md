@@ -1396,7 +1396,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `docs/update-authority-roadmap-stages` | Pending — branch-level source review not yet completed |
 | `docs/windows-nt-ffi-sdk-audit` | Pending — branch-level source review not yet completed |
 | `feat/macos-bulk-firmlink-preflight` | PR #104 parent parser scoped review completed; full branch-level review pending |
-| `feat/macos-bulk-firmlink-preflight-rebase` | Pending — branch-level source review not yet completed |
+| `feat/macos-bulk-firmlink-preflight-rebase` | Stale ancestor of `feat/macos-bulk-firmlink-preflight`; 0 ahead / 10 behind, no unique diff; historical libc-attribute change inspected and superseded; full review follows active branch |
 | `feat/macos-firmlink-runtime-capability` | Pending — branch-level source review not yet completed |
 | `feat/real-streaming-provider-tests` | Pending — branch-level source review not yet completed |
 | `feat/retrieval-evaluation-baseline` | Pending — branch-level source review not yet completed |
@@ -1654,3 +1654,11 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - Exact-head Rust Core Tests [#45351453924](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45351453924) passed all four jobs: Ubuntu, Windows, macOS 26 arm64 and macOS 26 Intel. Inspected both macOS job logs: arm64 reported macOS 26.7.2 / build 25G332 / `arm64`; Intel reported macOS 26.6.1 / build 25G76 / `x86_64`. Both compiled and ran the native firmlink-record and `O_RESOLVE_BENEATH` probes; both reported System/Data mapping observations and nested firmlink entries; both passed 130 tests, 0 failed, 1 ignored, including `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`.
 - Found stale support-matrix statements that still called Intel unvalidated after this exact-head run had passed. Corrected `docs/security/MACOS_SNAPSHOT_SUPPORT_MATRIX.md` on the feature branch to record both exact builds and architectures, link the exact CI run, and retain the caveat that evidence is limited to these runner configurations. Commit `6f0979aa9a78030d8cc29d44c799a37bb3a6b5d1`.
 - No production code changed. PR #111 remains draft/open; no merge/closure/deletion. This is a scoped review of the two-file unique diff, not a full review of all inherited branch history. Independent native security review remains required; do not infer universal macOS 26 or APFS support from two hosted runner observations.
+
+
+## Stale branch ancestry review — feat/macos-bulk-firmlink-preflight-rebase — 2026-11-27
+
+- Checked branch head `bf2d918a761f8b2ef5f93316674f293a63046e80` against active `feat/macos-bulk-firmlink-preflight` head `5b78582e99230302ee2936f87c60b5ff7a0d1988`: 0 commits ahead / 10 behind; merge base is the stale branch head; no unique changed files. No associated PR exists for the rebase branch.
+- Inspected the historical head commit `fix(macos): use libc-supported bulk attributes`. It removes `ATTR_CMN_ERROR` from the requested getattrlistbulk common attributes and correspondingly removes parsing of the per-entry error field. This was a compile-compatibility change in that historical branch, not a unique active diff.
+- Compared the active feature head's `macos_snapshot_adapter.rs`: the current active code defines and requests the Darwin `ATTR_CMN_ERROR` bit explicitly, conditionally parses the returned error field, and retains bounded attribute-reference range validation. Thus the historical removal is superseded in the active descendant; do not carry the old branch's reduced error reporting forward.
+- Disposition: stale ancestry only; no active code change made. Full review of the active feature branch and all inherited history remains pending. This check is not counted as a completed full branch-level review; **All branches reviewed: NO.**
