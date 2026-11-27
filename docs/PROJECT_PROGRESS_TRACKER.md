@@ -1513,7 +1513,7 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 | `test/linux-tmpfs-mount-boundary` | Pending — branch-level source review not yet completed |
 | `test/linux-tmpfs-workspace-root` | Pending — branch-level source review not yet completed |
 | `test/macos-15-firmlink-matrix` | PR #112 scoped source review completed; exact-head Rust matrix + Contract Validation passed; full branch/history review and independent security review pending |
-| `test/macos-26-intel-firmlink-matrix` | Pending — branch-level source review not yet completed |
+| `test/macos-26-intel-firmlink-matrix` | PR #111 scoped CI/workflow + support-matrix review completed; exact-head macOS 26 arm64/Intel and native probes passed; full branch/history review pending |
 | `test/macos-bulk-record-parser-hardening` | Scoped parser review completed; stale/superseded candidate; full branch-level review pending |
 | `test/macos-bulk-record-parser-hardening-v2` | PR #107 scoped review completed; reconciled 19 ahead / 0 behind latest #106 head; exact-head Rust matrix and Contract Validation passed; independent review/full branch review pending |
 | `test/macos-firmlink-extended-bulk-evidence` | PR #106 scoped source review completed; full branch-level review pending |
@@ -1645,3 +1645,12 @@ A review unit is one code-bearing PR, including changed source, tests, fixtures,
 - The PR's own description cites earlier run #45352149826 for macOS 15 and combined matrix runs #45354964372/#45359453083; current-head CI #45949106596 and #45949106692 is green. This is a broad stacked PR; do not mistake the scoped review of its current source diff for a full review of all 62 commits or inherited branch history.
 - PR #112 remains draft/open. No code changes were made in this review; no PRs merged/closed and no branches deleted. Branch inventory remains 175; **All branches reviewed: NO.** Issue #74 and independent native security review remain open gates.
 - Next task: review the next code-bearing branch in the tracker queue after PR #112, first checking its exact ancestry and unique diff to avoid re-reviewing inherited commits.
+
+
+## PR #111 / macOS 26 Intel architecture validation — 2026-11-27
+
+- Reviewed PR #111 current head `1e143c564937b59c7b5cac301de1f840c43a911b`, base `c3ddc2d10c50e10520ca8d454fd8a40aa42f88cf`. The unique diff is 2 commits ahead / 0 behind and changes only `.github/workflows/rust-core-tests.yml` and `docs/security/MACOS_SNAPSHOT_SUPPORT_MATRIX.md`; it is not a source-code adapter change.
+- Workflow review confirms the moving `macos-latest` entry was replaced with explicit `macos-26` and `macos-26-intel` labels, with `sw_vers` and `uname -m` captured before compiling/running the native C probes. The other Ubuntu/Windows matrix entries remain unchanged in this PR's own diff. No unsafe production behavior or source-code regression was identified in this scoped change.
+- Exact-head Rust Core Tests [#45351453924](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45351453924) passed all four jobs: Ubuntu, Windows, macOS 26 arm64 and macOS 26 Intel. Inspected both macOS job logs: arm64 reported macOS 26.7.2 / build 25G332 / `arm64`; Intel reported macOS 26.6.1 / build 25G76 / `x86_64`. Both compiled and ran the native firmlink-record and `O_RESOLVE_BENEATH` probes; both reported System/Data mapping observations and nested firmlink entries; both passed 130 tests, 0 failed, 1 ignored, including `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`.
+- Found stale support-matrix statements that still called Intel unvalidated after this exact-head run had passed. Corrected `docs/security/MACOS_SNAPSHOT_SUPPORT_MATRIX.md` on the feature branch to record both exact builds and architectures, link the exact CI run, and retain the caveat that evidence is limited to these runner configurations. Commit `6f0979aa9a78030d8cc29d44c799a37bb3a6b5d1`.
+- No production code changed. PR #111 remains draft/open; no merge/closure/deletion. This is a scoped review of the two-file unique diff, not a full review of all inherited branch history. Independent native security review remains required; do not infer universal macOS 26 or APFS support from two hosted runner observations.
