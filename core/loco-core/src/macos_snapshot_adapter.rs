@@ -1134,8 +1134,6 @@ mod tests {
 
  #[test]
  fn rejects_os_provided_nested_system_library_firmlinks_before_open() {
-  use std::os::unix::ffi::OsStrExt;
-
   let map = std::fs::read_to_string("/usr/share/firmlinks")
    .expect("macOS provides the installer firmlink map");
   let prefix = "/System/Library/";
