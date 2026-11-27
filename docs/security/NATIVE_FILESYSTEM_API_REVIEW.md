@@ -300,3 +300,22 @@ PR #107 contains a separate hardened parser implementation and fixtures for the 
 The production parser advances over `ATTR_CMN_FLAGS` without decoding or recording the value. Keep the raw flag discrepancy (`SF_FIRMLINK` versus hosted-runner `SF_NOUNLINK`) unresolved and diagnostic only. Do not infer firmlink authorization from these flags, `st_dev`, path strings, or `O_RESOLVE_BENEATH`; retain descriptor-relative opens, post-open descriptor checks and opened-handle filesystem identity as the tested System/Data boundary.
 
 **Disposition:** scoped review of PR #104's complete unique diff refreshed; no code change made in this review task. CI green does not clear parser correctness gaps. Keep PR #104 draft/open and unmerged pending parser integration, same-volume nested-firmlink evidence, issue #74 authoritative semantics reconciliation, and independent native security review. This is not a full review of all inherited branch history and does not change **All branches reviewed: NO**.
+
+
+## PR #104 parser integration and nested-firmlink branch review — 2026-11-27
+
+### Parser integration on PR #104
+Commit `a52d5b64929c10c3596b45db38ca902ac8f88ecc` ports PR #107's pure `parse_bulk_entry_record` helper and synthetic fixtures into the active `feat/macos-bulk-firmlink-preflight` production path. The bulk enumerator now delegates each length-delimited record to the helper rather than parsing inline. The helper applies exact record-length validation, a 64 KiB cap, required attribute checks, optional `ATTR_CMN_ERROR` handling, the 766-byte UTF-8 name bound, 4-byte reference/payload alignment, fixed-field and name/path overlap checks, exact NUL termination, absolute-path and dot-component checks. Raw flags remain diagnostic only.
+
+The branch file was fetched after the commit and verified to contain the helper, active 766-byte bound, alignment checks and synthetic malformed-record fixtures. GitHub returned no PR-triggered workflow runs and no combined status checks for this new SHA at the time of review. Exact-head CI is pending/unverified; previous green runs do not apply. Keep PR #104 draft/open.
+
+### `test/macos-nested-firmlink-preflight` — scoped review
+Compared against updated PR #104: 25 ahead / 1 behind; merge base remains old PR #104 head `5b78582e99230302ee2936f87c60b5ff7a0d1988`. The branch has not inherited parser integration commit `a52d5b6...` and has no associated PR.
+
+Findings:
+- Its Rust bulk parser still calls `attr_reference_range(..., 2, 256)` and its helper has no 4-byte alignment enforcement. Do not transfer that parser as-is.
+- The nested C probe caps names at `NAME_MAX + 1`, rather than the UTF-8 attribute payload maximum, and does not enforce 4-byte alignment of attrreference locations or payload starts. It does include record-bound checks, exact final-NUL/embedded-NUL checks, and name/path separation from later fixed fields.
+- The native probe enumerates OS-provided mappings under `/System/Library` and checks expected no-firmlink paths. This is useful bounded diagnostic evidence for those enumerated mappings, not a general authorization proof. Raw flags remain diagnostic only.
+- The branch's adapter documentation says a same-volume nested-firmlink fixture is not the right criterion because Apple firmlinks are volume-group mappings. PR #104's description and current tracker acceptance notes still request a same-volume nested-firmlink fixture. This is an acceptance-contract inconsistency that must be resolved against authoritative Apple/XNU semantics and the threat model; do not silently remove the fixture requirement or claim these nested mappings prove same-volume behavior.
+
+**Disposition:** scoped source/documentation review only; no branch changes made. Do not merge or transfer the nested branch as-is. First obtain exact-head CI for PR #104 commit `a52d5b6...`; then resolve the fixture-contract discrepancy and selectively port any valid nested mapping assertions with hardened Rust and C parsing. This is not a full inherited-history review and does not change **All branches reviewed: NO**.
