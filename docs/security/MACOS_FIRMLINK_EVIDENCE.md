@@ -83,3 +83,10 @@ The first exact-head run after the parser hardening exposed a compile error in t
 ## Diagnostic parser follow-up — 2026-11-27
 
 A subsequent source review found that the name payload lower bound reserved the flags word and extended-path reference unconditionally, although the parser has branches for records where those attributes are omitted. It also accepted an embedded NUL before the final name terminator. Both conditions are now handled in commit `b9361b2e1c4303e6b9f8bf9edfac98e4dca0776f`: the fixed-field reservation follows the returned-attribute bitmap, and the name must be exactly NUL terminated. This is parser robustness only; it does not change the diagnostic meaning of flags or paths. Exact-head CI is pending.
+
+
+## Exact-head CI and dependency refresh — 2026-11-27
+
+PR #106 updated head `ba088e03e610e5c835f6b131b90a22ac75334877` passed Rust Core Tests run [#45997726375](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45997726375) on Ubuntu, Windows and macOS. The parser robustness fixes are validated by that matrix; the flag semantics discrepancy remains unresolved.
+
+PR #107 has been reconciled onto the validated #106 head in merge commit `e013d8e0fa5be7e14e0a4ed38a50bfe5cdeda5bb`. Exact-head Contract Validation [#45998186236](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998186236) was in progress and Rust Core Tests [#45998186291](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45998186291) queued at the last poll. These workflows must complete on the reconciled commit before #107 is considered CI-green.
