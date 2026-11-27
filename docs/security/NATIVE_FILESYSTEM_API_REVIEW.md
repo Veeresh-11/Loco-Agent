@@ -272,3 +272,14 @@ The workflow replaces the moving `macos-latest` label with explicit `macos-26` a
 **Review finding:** the support matrix had stale statements claiming Intel was still unvalidated despite the exact-head Intel job passing. Corrected the feature-branch support matrix to record the exact macOS build, architecture, test run, and bounded scope. The update does not claim support for other macOS releases, APFS layouts, or filesystems.
 
 **Disposition:** no code defect found in this two-file CI/documentation diff. PR #111 remains draft/open pending independent security review and the wider firmlink acceptance gate. This is a scoped review of the unique diff, not a full branch-history review.
+
+
+## Stale ancestor branch review — feat/macos-bulk-firmlink-preflight-rebase — 2026-11-27
+
+Compared stale branch head `bf2d918a761f8b2ef5f93316674f293a63046e80` with active feature branch head `5b78582e99230302ee2936f87c60b5ff7a0d1988`: 0 ahead / 10 behind, no unique diff; the stale head is the merge base. No PR is associated with the stale rebase branch.
+
+Inspected the historical commit `fix(macos): use libc-supported bulk attributes`. It removes `ATTR_CMN_ERROR` from the requested common attributes and removes parsing of the per-entry error value. That historical branch would no longer explicitly reject a target record with a nonzero per-entry attribute error if the other requested fields were present.
+
+The active descendant has superseded that change: it defines the Darwin `ATTR_CMN_ERROR` bit, requests it, conditionally parses the returned field, and uses bounded `attr_reference_range` checks for the variable-length payloads. The stale branch therefore has no unique active implementation to fix. Do not revive the historical reduced-error path.
+
+**Disposition:** ancestry-only/stale branch review recorded; no code changed. The active `feat/macos-bulk-firmlink-preflight` branch and complete inherited history still require review. This does not count as a full branch review.
