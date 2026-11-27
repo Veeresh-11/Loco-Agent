@@ -258,3 +258,17 @@ Reviewed PR #112 current head `da6b484b908fc56364e43bbfa01aad0b3de85739`, includ
 **Disposition:** no new source defect was confirmed in this scoped review. The Windows user-mode `NtCreateFile` + `OBJ_DONT_REPARSE` contract remains unresolved because the function-specific Microsoft documentation is narrower than the general `OBJECT_ATTRIBUTES` flag documentation. SDK header acceptance and empirical Server 2022/2025 NTFS tests are useful but do not settle version-stable documented semantics. Do not remove the flag or claim universal Windows support; retain fail-closed behavior and the explicit blocker.
 
 Exact current-head validation: Rust Core Tests [#45949106596](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45949106596) and Contract Validation [#45949106692](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45949106692) both passed. This is a scoped current-diff review, not a complete review of all inherited commits/branch history. PR #112 remains draft pending independent native security review and contract resolution.
+
+
+## PR #111 / macOS 26 Intel architecture matrix — scoped review — 2026-11-27
+
+Reviewed PR #111 head `1e143c564937b59c7b5cac301de1f840c43a911b` against base `c3ddc2d10c50e10520ca8d454fd8a40aa42f88cf`. The unique diff is two commits and two paths: the Rust Core Tests workflow matrix and macOS support matrix documentation. No adapter implementation or production authorization code changes are included.
+
+The workflow replaces the moving `macos-latest` label with explicit `macos-26` and `macos-26-intel` legs, and captures both `sw_vers` and `uname -m` before building/running the native probes. Exact-head Rust Core Tests [#45351453924](https://github.com/Veeresh-11/Loco-Agent/actions/runs/45351453924) passed all four jobs. Inspected macOS job logs confirm:
+- arm64: macOS 26.7.2, build 25G332, architecture `arm64`; 130 passed, 0 failed, 1 ignored.
+- Intel: macOS 26.6.1, build 25G76, architecture `x86_64`; 130 passed, 0 failed, 1 ignored.
+- Both ran the native firmlink metadata and `O_RESOLVE_BENEATH` probes, logged root/nested mapping observations, and passed `opened_system_data_firmlinks_are_rejected_by_handle_volume_identity`.
+
+**Review finding:** the support matrix had stale statements claiming Intel was still unvalidated despite the exact-head Intel job passing. Corrected the feature-branch support matrix to record the exact macOS build, architecture, test run, and bounded scope. The update does not claim support for other macOS releases, APFS layouts, or filesystems.
+
+**Disposition:** no code defect found in this two-file CI/documentation diff. PR #111 remains draft/open pending independent security review and the wider firmlink acceptance gate. This is a scoped review of the unique diff, not a full branch-history review.
